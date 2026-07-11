@@ -2,35 +2,125 @@
 <html lang="th">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Takhun Trip | เที่ยวตาขุน ครบในทริปเดียว</title>
-  <meta name="description" content="Takhun Trip เว็บแอปแนะนำการท่องเที่ยวบ้านตาขุน">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Takhun Trip | เที่ยวบ้านตาขุน ครบในทริปเดียว</title>
+  <meta name="description" content="ออกเดินทางสู่บ้านตาขุน ค้นพบทะเลสาบเชี่ยวหลาน ภูเขารูปหัวใจ ชุมชน และเส้นทางท่องเที่ยวที่วางแผนได้ในที่เดียว">
+  <meta name="theme-color" content="#064e3b">
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/components.css">
   <link rel="stylesheet" href="css/mobile.css">
 </head>
-<body>
-  <header class="site-header">
-    <a class="brand" href="index.html">Takhun Trip</a>
-    <nav class="site-nav" aria-label="เมนูหลัก">
-      <a href="index.html">หน้าแรก</a>
-      <a href="map.html">แผนที่</a>
-      <a href="routes.html">เส้นทาง</a>
-      <a href="places.html">สถานที่</a>
-      <a href="trip-planner.html">วางแผนทริป</a>
-    </nav>
+<body class="home-page">
+  <a class="skip-link" href="#main-content">ข้ามไปยังเนื้อหาหลัก</a>
+  <header class="site-header" data-site-header>
+    <div class="site-header__inner">
+      <a class="brand" href="index.html" aria-label="Takhun Trip หน้าแรก">
+        <span class="brand__mark" aria-hidden="true">
+          <svg viewBox="0 0 48 48"><path d="M7 31 18 15l7 10 5-7 11 13H7Z"/><path d="M7 34c7-4 13 4 20 0s10-1 14 1"/></svg>
+        </span>
+        <span class="brand__text"><strong>Takhun Trip</strong><small>บ้านตาขุน · สุราษฎร์ธานี</small></span>
+      </a>
+      <nav class="site-nav" aria-label="เมนูหลัก">
+        <a class="is-active" href="index.html" aria-current="page">หน้าแรก</a>
+        <a href="places.html">สถานที่</a>
+        <a href="routes.html">เส้นทาง</a>
+        <a href="map.html">แผนที่</a>
+        <a href="trip-planner.html">วางแผนทริป</a>
+      </nav>
+      <a class="button button--compact site-header__cta" href="trip-planner.html">สร้างทริปของคุณ</a>
+      <button class="menu-toggle" type="button" aria-label="เปิดเมนูเพิ่มเติม" aria-controls="mobile-menu" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
   </header>
-  <main class="page-shell">
-    <section class="placeholder" aria-labelledby="page-title">
-      <p class="eyebrow">Takhun Trip</p>
-      <h1 id="page-title">เที่ยวตาขุน ครบในทริปเดียว</h1>
-      <p>หน้านี้อยู่ระหว่างการจัดเตรียม</p>
-      <a class="button" href="index.html">กลับหน้าแรก</a>
+
+  <div class="drawer-backdrop" data-menu-backdrop hidden></div>
+  <aside class="mobile-drawer" id="mobile-menu" aria-label="เมนูเพิ่มเติม" aria-hidden="true" hidden>
+    <div class="mobile-drawer__header">
+      <span class="mobile-drawer__title">ออกสำรวจบ้านตาขุน</span>
+      <button class="icon-button" type="button" data-menu-close aria-label="ปิดเมนู">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <nav class="mobile-drawer__nav" aria-label="เมนูรอง">
+      <a href="map.html"><span class="drawer-link__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18-6 3V6l6-3 6 3 6-3v15l-6 3-6-3Z"/><path d="M9 3v15m6-12v15"/></svg></span><span>แผนที่ท่องเที่ยว<small>ดูจุดน่าสนใจรอบบ้านตาขุน</small></span></a>
+      <a href="events.html"><span class="drawer-link__icon drawer-link__icon--orange"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3v3m14-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z"/></svg></span><span>กิจกรรม<small>เทศกาลและกิจกรรมชุมชน</small></span></a>
+      <a href="events.html#news"><span class="drawer-link__icon drawer-link__icon--gold"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM8 9h8M8 13h5"/></svg></span><span>ข่าวสาร<small>อัปเดตเรื่องน่ารู้ก่อนเดินทาง</small></span></a>
+      <a href="about.html"><span class="drawer-link__icon drawer-link__icon--blue"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10h.01"/></svg></span><span>เกี่ยวกับโครงการ<small>รู้จัก Takhun Trip</small></span></a>
+      <a href="#contact"><span class="drawer-link__icon drawer-link__icon--rose"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"/><path d="m4 7 8 6 8-6"/></svg></span><span>ติดต่อ<small>ช่องทางสอบถามข้อมูล</small></span></a>
+    </nav>
+    <button class="language-preview" type="button" aria-label="เปลี่ยนภาษา ฟังก์ชันนี้จะเปิดให้ใช้ในอนาคต" disabled><span>TH</span> ภาษาไทย <small>EN เร็ว ๆ นี้</small></button>
+  </aside>
+
+  <main id="main-content">
+    <section class="hero-section" aria-labelledby="hero-title">
+      <div class="hero-section__landscape" role="img" aria-label="ภาพจำลองทะเลสาบเชี่ยวหลาน เขื่อนรัชชประภา และแนวภูเขาบ้านตาขุน">
+        <span class="hero-sun" aria-hidden="true"></span><span class="hero-mountain hero-mountain--back" aria-hidden="true"></span><span class="hero-mountain hero-mountain--front" aria-hidden="true"></span><span class="hero-water" aria-hidden="true"></span>
+      </div>
+      <div class="hero-section__overlay" aria-hidden="true"></div>
+      <div class="hero-section__content page-container">
+        <p class="hero-section__eyebrow"><span></span>ประตูสู่เขาสกและทะเลสาบเชี่ยวหลาน</p>
+        <h1 id="hero-title">เที่ยวบ้านตาขุน<br><em>ให้ธรรมชาติพาไป</em></h1>
+        <p class="hero-section__description">ค้นพบทะเลสาบสีมรกต ภูเขารูปหัวใจ และเสน่ห์ชุมชน วางแผนทุกจุดหมายได้ง่ายในทริปเดียว</p>
+        <div class="hero-section__actions">
+          <a class="button button--accent" href="trip-planner.html">เริ่มวางแผนทริป <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></a>
+          <a class="button button--glass" href="places.html">ดูสถานที่ทั้งหมด</a>
+        </div>
+        <div class="hero-section__note"><span class="hero-section__avatars" aria-hidden="true"><i></i><i></i><i></i></span><span><strong>จุดหมายที่คนรักธรรมชาติเลือก</strong><small>เริ่มต้นเรื่องราวดี ๆ ที่บ้านตาขุน</small></span></div>
+      </div>
+      <a class="hero-scroll" href="#quick-actions" aria-label="เลื่อนไปดูทางลัด"><span></span></a>
+    </section>
+
+    <section class="quick-actions section" id="quick-actions" aria-labelledby="quick-title">
+      <div class="page-container">
+        <div class="section-heading section-heading--center"><p class="eyebrow">เริ่มต้นง่าย ๆ</p><h2 id="quick-title">วันนี้อยากเที่ยวแบบไหน?</h2><p>เลือกสิ่งที่สนใจ แล้วออกแบบวันดี ๆ ในแบบของคุณ</p></div>
+        <div class="quick-actions__grid">
+          <a class="quick-action quick-action--emerald" href="places.html"><span class="quick-action__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg></span><span><strong>สถานที่ท่องเที่ยว</strong><small>ธรรมชาติและชุมชน</small></span><svg class="quick-action__arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></a>
+          <a class="quick-action quick-action--orange" href="routes.html"><span class="quick-action__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M8 18h3a3 3 0 0 0 3-3V9a3 3 0 0 1 3-3"/></svg></span><span><strong>เส้นทางแนะนำ</strong><small>ทริปพร้อมออกเดินทาง</small></span><svg class="quick-action__arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></a>
+          <a class="quick-action quick-action--blue" href="map.html"><span class="quick-action__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18-6 3V6l6-3 6 3 6-3v15l-6 3-6-3Z"/><path d="M9 3v15m6-12v15"/></svg></span><span><strong>แผนที่ท่องเที่ยว</strong><small>ดูทุกจุดในภาพเดียว</small></span><svg class="quick-action__arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></a>
+          <a class="quick-action quick-action--gold" href="trip-planner.html"><span class="quick-action__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3v3m14-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z"/><path d="m9 14 2 2 4-4"/></svg></span><span><strong>วางแผนทริป</strong><small>จัดวันเที่ยวให้ลงตัว</small></span><svg class="quick-action__arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></a>
+        </div>
+      </div>
+    </section>
+
+    <section class="featured section section--soft" aria-labelledby="featured-title">
+      <div class="page-container">
+        <div class="section-heading-row"><div class="section-heading"><p class="eyebrow">ห้ามพลาดเมื่อมาถึง</p><h2 id="featured-title">สถานที่เด่นบ้านตาขุน</h2><p>ธรรมชาติยิ่งใหญ่และเรื่องราวท้องถิ่นที่รอให้คุณสัมผัส</p></div><a class="text-link" href="places.html">ดูสถานที่ทั้งหมด <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></a></div>
+        <div class="place-grid" id="featured-places" aria-live="polite"><p class="empty-state">กำลังเตรียมสถานที่น่าเที่ยวให้คุณ…</p></div>
+      </div>
+    </section>
+
+    <section class="routes-section section" aria-labelledby="routes-title">
+      <div class="page-container">
+        <div class="section-heading-row"><div class="section-heading"><p class="eyebrow">ทริปที่คิดมาให้แล้ว</p><h2 id="routes-title">เส้นทางแนะนำ</h2><p>จัดเวลาให้คุ้ม เก็บครบทุกบรรยากาศที่อยากเจอ</p></div><a class="text-link" href="routes.html">ดูทุกเส้นทาง <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></a></div>
+        <div class="route-grid" id="recommended-routes" aria-live="polite"><p class="empty-state">กำลังจัดเส้นทางแนะนำ…</p></div>
+      </div>
+    </section>
+
+    <section class="inspiration section" aria-labelledby="inspiration-title">
+      <div class="page-container inspiration__panel">
+        <div class="section-heading section-heading--center"><p class="eyebrow">เลือกตามสไตล์คุณ</p><h2 id="inspiration-title">แรงบันดาลใจสำหรับทริปถัดไป</h2><p>ไม่ว่าจะชอบความสงบ ความอร่อย หรือเวลาคุณภาพกับครอบครัว บ้านตาขุนมีคำตอบ</p></div>
+        <div class="inspiration-grid" id="trip-inspiration" aria-live="polite"><p class="empty-state">กำลังรวบรวมไอเดียการเดินทาง…</p></div>
+      </div>
     </section>
   </main>
-  <script src="js/config.js"></script>
-  <script src="js/i18n.js"></script>
-  <script src="js/api.js"></script>
-  <script src="js/app.js"></script>
+
+  <footer class="site-footer" id="contact">
+    <div class="page-container site-footer__grid">
+      <div class="site-footer__brand"><a class="brand brand--footer" href="index.html"><span class="brand__mark" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M7 31 18 15l7 10 5-7 11 13H7Z"/><path d="M7 34c7-4 13 4 20 0s10-1 14 1"/></svg></span><span class="brand__text"><strong>Takhun Trip</strong><small>เที่ยวตาขุน ครบในทริปเดียว</small></span></a><p>เพื่อนคู่คิดสำหรับทุกการเดินทาง เชื่อมคุณกับธรรมชาติ ชุมชน และเรื่องราวของบ้านตาขุน</p></div>
+      <div><h2>สำรวจ</h2><ul><li><a href="places.html">สถานที่ท่องเที่ยว</a></li><li><a href="routes.html">เส้นทางแนะนำ</a></li><li><a href="map.html">แผนที่</a></li><li><a href="trip-planner.html">วางแผนทริป</a></li></ul></div>
+      <div><h2>ข้อมูล</h2><ul><li><a href="events.html">กิจกรรม</a></li><li><a href="gallery.html">แกลเลอรี</a></li><li><a href="about.html">เกี่ยวกับโครงการ</a></li><li><a href="favorites.html">รายการโปรด</a></li></ul></div>
+      <div><h2>ติดต่อเรา</h2><address><span>อำเภอบ้านตาขุน จังหวัดสุราษฎร์ธานี</span><a href="tel:+66000000000">โทร. 0X-XXX-XXXX</a><a href="mailto:contact@example.com">contact@example.com</a></address><small class="editable-note">ข้อมูลตัวอย่าง — แก้ไขได้ใน index.html</small></div>
+    </div>
+    <div class="page-container site-footer__bottom"><span>© 2026 Takhun Trip</span><span>สร้างด้วยใจ เพื่อการท่องเที่ยวบ้านตาขุน</span></div>
+  </footer>
+
+  <nav class="bottom-nav" aria-label="เมนูหลักบนมือถือ">
+    <a class="bottom-nav__item is-active" href="index.html" aria-current="page" aria-label="หน้าแรก"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 9-8 9 8v9h-6v-6H9v6H3Z"/></svg><span>หน้าแรก</span></a>
+    <a class="bottom-nav__item" href="places.html" aria-label="สถานที่"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg><span>สถานที่</span></a>
+    <a class="bottom-nav__item" href="routes.html" aria-label="เส้นทาง"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M8 18h3a3 3 0 0 0 3-3V9a3 3 0 0 1 3-3"/></svg><span>เส้นทาง</span></a>
+    <a class="bottom-nav__item" href="trip-planner.html" aria-label="วางแผนทริป"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3v3m14-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z"/><path d="m9 14 2 2 4-4"/></svg><span>วางแผน</span></a>
+  </nav>
+  <script src="js/config.js"></script><script src="js/i18n.js"></script><script src="js/api.js"></script><script src="js/app.js"></script>
 </body>
 </html>
