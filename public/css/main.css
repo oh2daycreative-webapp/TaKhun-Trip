@@ -1,0 +1,24 @@
+:root {
+  --color-primary: #00796b;
+  --color-primary-dark: #064e3b;
+  --color-accent: #fdba2d;
+  --color-bg: #f8faf8;
+  --color-surface: #ffffff;
+  --color-text: #1f2937;
+  --color-muted: #6b7280;
+  --radius-lg: 24px;
+  --shadow-card: 0 16px 40px rgba(15, 23, 42, 0.12);
+  font-family: "Prompt", "Noto Sans Thai", system-ui, sans-serif;
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; background: var(--color-bg); }
+a { color: var(--color-primary-dark); }
+.site-header, .admin-header { display: flex; align-items: center; gap: 1.5rem; padding: 1rem clamp(1rem, 4vw, 3rem); background: var(--color-surface); border-bottom: 1px solid #e5e7eb; }
+.brand { font-weight: 700; text-decoration: none; }
+.site-nav, .admin-nav { display: flex; flex-wrap: wrap; gap: 1rem; }
+.site-nav a, .admin-nav a { text-decoration: none; }
+.page-shell { width: min(100% - 2rem, 72rem); margin-inline: auto; padding-block: clamp(2rem, 8vw, 6rem); }
+h1 { line-height: 1.2; }
+.eyebrow { color: var(--color-primary); font-weight: 700; }

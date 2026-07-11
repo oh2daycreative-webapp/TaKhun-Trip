@@ -1,0 +1,10 @@
+@media (max-width: 767px) {
+  .site-header { align-items: flex-start; flex-direction: column; }
+  .site-nav { gap: 0.75rem; font-size: 0.95rem; }
+}
+@media (min-width: 768px) {
+  .page-shell { padding-block: 5rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; }
+}
