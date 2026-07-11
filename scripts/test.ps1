@@ -1,0 +1,81 @@
+$ErrorActionPreference = "Stop"
+
+$root = Split-Path -Parent $PSScriptRoot
+$public = Join-Path $root "public"
+
+$required = @(
+  "public/index.html",
+  "public/map.html",
+  "public/routes.html",
+  "public/route-detail.html",
+  "public/places.html",
+  "public/place-detail.html",
+  "public/trip-planner.html",
+  "public/products.html",
+  "public/product-detail.html",
+  "public/events.html",
+  "public/event-detail.html",
+  "public/gallery.html",
+  "public/favorites.html",
+  "public/about.html",
+  "public/404.html",
+  "public/admin/login.html",
+  "public/admin/dashboard.html",
+  "public/admin/places.html",
+  "public/admin/routes.html",
+  "public/admin/products.html",
+  "public/admin/events.html",
+  "public/admin/reviews.html",
+  "public/admin/gallery.html",
+  "public/admin/settings.html",
+  "public/admin/404.html",
+  "public/css/main.css",
+  "public/css/components.css",
+  "public/css/mobile.css",
+  "public/css/admin.css",
+  "public/css/map.css",
+  "public/js/config.js",
+  "public/js/api.js",
+  "public/js/i18n.js",
+  "public/js/app.js",
+  "apps-script/Code.gs",
+  "apps-script/Config.gs",
+  "apps-script/Router.gs",
+  "apps-script/ApiResponse.gs",
+  "apps-script/SheetService.gs"
+)
+
+$missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root $_)) })
+if ($missing.Count -gt 0) {
+  throw "Missing required files: $($missing -join ', ')"
+}
+
+$htmlFiles = Get-ChildItem -LiteralPath $public -Filter "*.html" -File -Recurse
+$allowedHtml = @($required | Where-Object { $_ -like "*.html" } | ForEach-Object {
+  [IO.Path]::GetFullPath((Join-Path $root $_))
+})
+$unexpected = @($htmlFiles.FullName | Where-Object { $_ -notin $allowedHtml })
+if ($unexpected.Count -gt 0) {
+  throw "Unexpected HTML routes: $($unexpected -join ', ')"
+}
+
+foreach ($html in $htmlFiles) {
+  $content = Get-Content -Raw -Encoding utf8 -LiteralPath $html.FullName
+  foreach ($pattern in @('<meta charset="UTF-8">', 'name="viewport"', '<title>', '<main')) {
+    if ($content -notlike "*$pattern*") {
+      throw "$($html.FullName) is missing $pattern"
+    }
+  }
+
+  $matches = [regex]::Matches($content, '(?:href|src)="([^"#?]+)"')
+  foreach ($match in $matches) {
+    $reference = $match.Groups[1].Value
+    if ($reference -match '^(?:https?:|mailto:|tel:)') { continue }
+    $target = [IO.Path]::GetFullPath((Join-Path $html.DirectoryName $reference))
+    if (-not (Test-Path -LiteralPath $target)) {
+      throw "$($html.FullName) has a broken local reference: $reference"
+    }
+  }
+}
+
+Write-Host "Skeleton verification passed: $($required.Count) required files, $($htmlFiles.Count) HTML pages."

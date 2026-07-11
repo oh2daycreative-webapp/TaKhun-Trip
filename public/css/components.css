@@ -1,0 +1,21 @@
+.placeholder {
+  padding: clamp(1.5rem, 5vw, 3rem);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+.button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: 0.7rem 1rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: #fff;
+  font: inherit;
+  text-decoration: none;
+}
+.button:disabled { cursor: not-allowed; opacity: 0.65; }
+input { min-height: 44px; padding: 0.65rem 0.8rem; border: 1px solid #cbd5e1; border-radius: 12px; font: inherit; }
