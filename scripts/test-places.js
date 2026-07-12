@@ -6,6 +6,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const root = path.resolve(__dirname, "..");
+const dataSource = fs.readFileSync(path.join(root, "public/js/place-data.js"), "utf8");
 const source = fs.readFileSync(path.join(root, "public/js/places.js"), "utf8");
 
 function loadModule(storageSeed = null, storageThrows = false) {
@@ -25,6 +26,7 @@ function loadModule(storageSeed = null, storageThrows = false) {
     window: null
   };
   context.window = context;
+  vm.runInNewContext(dataSource, context, { filename: "place-data.js" });
   vm.runInNewContext(source, context, { filename: "places.js" });
   return { api: context.TakhunPlaces, values };
 }
