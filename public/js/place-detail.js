@@ -1,0 +1,302 @@
+"use strict";
+
+(function createPlaceDetailPage(global) {
+  const FAVORITES_KEY = "TAKHUN_FAVORITES";
+  let memoryFavorites = null;
+
+  function parsePlaceId(search) {
+    return String(new URLSearchParams(search || "").get("id") || "").trim();
+  }
+
+  function validatePlaceId(id) {
+    const value = String(id || "").trim();
+    return value.length > 0 && value.length <= 64 && /^[A-Za-z0-9_-]+$/.test(value);
+  }
+
+  function findPublishedPlace(id) {
+    if (!validatePlaceId(id)) return null;
+    const place = global.TakhunPlaceData?.getPlaceById?.(String(id).trim());
+    return place?.status === "published" ? place : null;
+  }
+
+  const PAGE_STATES = Object.freeze(["loading", "ready", "not-found", "error"]);
+  function setPageState(mounts, nextState, root = null) {
+    for (const mount of Object.values(mounts || {})) if (mount) mount.hidden = true;
+    if (!PAGE_STATES.includes(nextState)) throw new Error(`Unknown page state: ${nextState}`);
+    const target = mounts?.[nextState];
+    if (!target) throw new Error(`Missing page state mount: ${nextState}`);
+    target.hidden = false;
+    if (root?.setAttribute) root.setAttribute("data-page-state", nextState);
+    return nextState;
+  }
+
+  function resolvePage(search) {
+    try {
+      const place = findPublishedPlace(parsePlaceId(search));
+      return place ? { state: "ready", place } : { state: "not-found", place: null };
+    } catch (_error) {
+      return { state: "error", place: null };
+    }
+  }
+
+  function validHttpsUrl(value) {
+    const url = String(value || "").trim();
+    return /^https:\/\//i.test(url) ? url : "";
+  }
+
+  function hasCoordinates(place) {
+    return place?.latitude !== null && place?.longitude !== null && Number.isFinite(Number(place?.latitude)) && Number.isFinite(Number(place?.longitude));
+  }
+
+  function getActionModel(place) {
+    const id = String(place?.place_id || "").trim();
+    const encodedId = encodeURIComponent(id);
+    const phone = String(place?.phone || "").trim();
+    return {
+      detailMapUrl: hasCoordinates(place) ? `map.html?focus=${encodedId}` : "",
+      googleMapsUrl: validHttpsUrl(place?.google_maps_url),
+      phoneUrl: phone ? `tel:${phone.replace(/[^+\d]/g, "")}` : "",
+      tripPlannerUrl: id ? `trip-planner.html?add=${encodedId}` : ""
+    };
+  }
+
+  function normalizeFavorites(value) {
+    return Array.isArray(value) ? [...new Set(value.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim()))] : [];
+  }
+
+  function readFavorites() {
+    if (memoryFavorites) return [...memoryFavorites];
+    try { memoryFavorites = normalizeFavorites(JSON.parse(global.localStorage?.getItem(FAVORITES_KEY) || "[]")); }
+    catch (_error) { memoryFavorites = []; }
+    return [...memoryFavorites];
+  }
+
+  function writeFavorites(value) {
+    memoryFavorites = normalizeFavorites(value);
+    try { global.localStorage?.setItem(FAVORITES_KEY, JSON.stringify(memoryFavorites)); } catch (_error) { /* Memory state remains usable. */ }
+    return [...memoryFavorites];
+  }
+
+  function toggleFavorite(placeId) {
+    const id = String(placeId || "").trim();
+    const current = readFavorites();
+    if (!id) return current;
+    return writeFavorites(current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  }
+
+  function getApprovedReviews(reviews) {
+    return (Array.isArray(reviews) ? reviews : []).filter((review) => review?.status === "approved" && Number(review?.rating) >= 1 && Number(review?.rating) <= 5 && String(review?.comment || review?.comment_th || "").trim());
+  }
+
+  async function sharePlace(payload) {
+    try {
+      if (typeof global.navigator?.share === "function") {
+        await global.navigator.share(payload);
+        return "shared";
+      }
+      if (typeof global.navigator?.clipboard?.writeText === "function") {
+        await global.navigator.clipboard.writeText(payload.url);
+        return "copied";
+      }
+      return "copy_failed";
+    } catch (error) {
+      if (error?.name === "AbortError") return "cancelled";
+      return "copy_failed";
+    }
+  }
+
+  function t(key) { return global.TakhunI18n?.t?.(key) || key; }
+  function format(key, values) { return String(t(key)).replace(/\{(\w+)\}/g, (_match, name) => String(values?.[name] ?? "")); }
+  function localized(item, field, lang) { return global.TakhunI18n?.pickLangValue?.(item, field, lang) || String(item?.[`${field}_${lang}`] || item?.[`${field}_th`] || ""); }
+  function make(tag, className, text) {
+    const element = global.document.createElement(tag);
+    if (className) element.className = className;
+    if (text !== undefined) element.textContent = text;
+    return element;
+  }
+  function heading(id, text) { const title = make("h2", "detail-section__title", text); title.id = id; return title; }
+  function labelFor(group, value) {
+    const namespace = group === "district" ? "districts" : group === "category" ? "categories" : "route_groups";
+    const translated = t(`places.${namespace}.${value}`);
+    return translated.startsWith("places.") ? String(value || "").replaceAll("_", " ") : translated;
+  }
+  function showToast(message, type = "success") {
+    let container = global.document.querySelector(".toast-container");
+    if (!container) { container = make("div", "toast-container"); container.setAttribute("aria-live", "polite"); global.document.body.append(container); }
+    const toast = make("div", `toast-message toast-message--${type}`, message);
+    container.replaceChildren(toast);
+    global.setTimeout(() => toast.remove(), 2600);
+  }
+  function fallbackMedia(name, hero = false) {
+    const fallback = make("div", hero ? "detail-hero__fallback" : "detail-gallery__fallback", t("place_detail.image_fallback"));
+    fallback.setAttribute("role", "img");
+    fallback.setAttribute("aria-label", format("place_detail.image_alt", { name }));
+    return fallback;
+  }
+  function appendImage(mount, source, name, options = {}) {
+    if (!source) { mount.append(fallbackMedia(name, options.hero)); return null; }
+    const image = global.document.createElement("img");
+    image.className = options.className || "";
+    image.src = source;
+    image.alt = format("place_detail.image_alt", { name });
+    if (options.lazy) image.loading = "lazy";
+    image.addEventListener("error", () => mount.replaceChildren(fallbackMedia(name, options.hero)), { once: true });
+    mount.append(image);
+    return image;
+  }
+
+  function renderSummary(place, lang, mount) {
+    const name = localized(place, "name", lang);
+    const badges = make("div", "detail-badges");
+    for (const [group, value] of [["category", place.category], ["district", place.district], ["route_group", place.route_group]]) {
+      if (value) badges.append(make("span", `badge ${group === "route_group" ? "badge--muted" : ""}`, labelFor(group, value)));
+    }
+    const title = make("h1", "detail-title", name); title.id = "page-title";
+    const shortDescription = make("p", "detail-lead", localized(place, "short_description", lang));
+    const review = make("p", "detail-review-summary");
+    const count = Number(place.review_summary?.review_count || 0);
+    review.textContent = count ? format("place_detail.review_summary", { rating: Number(place.review_summary.average_rating).toFixed(1), count }) : t("place_detail.no_reviews");
+    const actions = make("div", "detail-cta");
+    const model = getActionModel(place);
+    const links = [
+      [model.detailMapUrl, "button button--secondary", "place_detail.view_map", false],
+      [model.googleMapsUrl, "button button--primary", "place_detail.navigate", true],
+      [model.phoneUrl, "button button--secondary", "place_detail.call", false],
+      [model.tripPlannerUrl, "button button--accent", "place_detail.add_to_trip", false]
+    ];
+    for (const [href, className, key, external] of links) {
+      if (!href) continue;
+      const link = make("a", className, t(key)); link.href = href;
+      if (external) { link.target = "_blank"; link.rel = "noopener noreferrer"; }
+      actions.append(link);
+    }
+    mount.replaceChildren(badges, title, shortDescription, review, actions);
+  }
+
+  function renderTextSections(place, lang) {
+    const description = global.document.querySelector("[data-detail-description]");
+    description.replaceChildren(heading("detail-description-title", t("place_detail.description")), make("p", "detail-copy", localized(place, "description", lang)));
+    const highlights = global.document.querySelector("[data-detail-highlights]");
+    const highlight = localized(place, "highlight", lang);
+    highlights.hidden = !highlight; highlights.replaceChildren();
+    if (highlight) highlights.append(heading("detail-highlights-title", t("place_detail.highlights")), make("p", "detail-highlight", highlight));
+    const activities = global.document.querySelector("[data-detail-activities]");
+    const items = Array.isArray(place[`activities_${lang}`]) && place[`activities_${lang}`].length ? place[`activities_${lang}`] : place.activities_th || [];
+    activities.hidden = !items.length; activities.replaceChildren();
+    if (items.length) { const list = make("ul", "detail-activity-list"); items.forEach((item) => list.append(make("li", "detail-activity-list__item", item))); activities.append(heading("detail-activities-title", t("place_detail.activities")), list); }
+  }
+
+  function renderVisitor(place, lang) {
+    const mount = global.document.querySelector("[data-detail-visitor]");
+    const fields = [["open_time", "place_detail.opening_time"], ["fee", "place_detail.fee"], ["recommended_duration", "place_detail.duration"], ["best_time", "place_detail.best_time"]];
+    const grid = make("dl", "detail-visitor-grid");
+    for (const [field, key] of fields) {
+      const value = field === "recommended_duration" ? String(place[field] || "") : localized(place, field, lang);
+      if (!value) continue;
+      grid.append(make("dt", "detail-visitor-grid__label", t(key)), make("dd", "detail-visitor-grid__value", value));
+    }
+    mount.replaceChildren(heading("detail-visitor-title", t("place_detail.visitor_information")));
+    if (grid.children.length) mount.append(grid); else mount.append(make("p", "detail-muted", t("place_detail.visitor_unavailable")));
+  }
+
+  function closeLightbox() {
+    const dialog = global.document.querySelector("[data-detail-lightbox]");
+    if (!dialog || dialog.hidden) return;
+    const trigger = dialog._returnFocus;
+    dialog.hidden = true; dialog.classList.remove("is-open");
+    global.document.body.classList.remove("has-modal");
+    trigger?.focus?.();
+  }
+  function openLightbox(source, name, trigger) {
+    const dialog = global.document.querySelector("[data-detail-lightbox]");
+    const media = dialog.querySelector("[data-lightbox-media]");
+    media.replaceChildren(); appendImage(media, source, name, { className: "detail-lightbox__image" });
+    dialog._returnFocus = trigger; dialog.hidden = false; dialog.classList.add("is-open");
+    global.document.body.classList.add("has-modal");
+    dialog.querySelector("[data-lightbox-close]")?.focus();
+  }
+  function renderGallery(place, lang) {
+    const mount = global.document.querySelector("[data-detail-gallery]");
+    const urls = Array.isArray(place.gallery_image_urls) ? place.gallery_image_urls : [];
+    mount.hidden = !urls.length; mount.replaceChildren();
+    if (!urls.length) return;
+    const name = localized(place, "name", lang); const grid = make("div", "detail-gallery-grid");
+    urls.forEach((source, index) => {
+      const button = make("button", "detail-gallery__button"); button.type = "button"; button.setAttribute("aria-label", format("place_detail.open_gallery_image", { number: index + 1, name }));
+      const media = make("span", "detail-gallery__media"); appendImage(media, source, name, { className: "detail-gallery__image", lazy: true }); button.append(media);
+      button.addEventListener("click", () => openLightbox(source, name, button)); grid.append(button);
+    });
+    mount.append(heading("detail-gallery-title", t("place_detail.gallery")), grid);
+  }
+
+  function renderNearby(place, lang) {
+    const mount = global.document.querySelector("[data-detail-nearby]");
+    const nearby = global.TakhunPlaceData?.getNearbyPlaces?.(place.nearby_place_ids, place.place_id) || [];
+    mount.hidden = !nearby.length; mount.replaceChildren();
+    if (!nearby.length) return;
+    const grid = make("div", "detail-nearby-grid");
+    nearby.forEach((item) => {
+      const name = localized(item, "name", lang); const card = make("article", "place-card detail-nearby-card");
+      const media = make("div", "detail-nearby-card__media"); appendImage(media, item.cover_image_url, name, { className: "detail-nearby-card__image", lazy: true });
+      const content = make("div", "detail-nearby-card__content"); content.append(make("span", "badge", labelFor("category", item.category)), make("h3", "detail-nearby-card__title", name), make("p", "detail-nearby-card__copy", localized(item, "short_description", lang)));
+      const link = make("a", "button button--secondary", t("places.view_details")); link.href = `place-detail.html?id=${encodeURIComponent(item.place_id)}`; content.append(link); card.append(media, content); grid.append(card);
+    });
+    mount.append(heading("detail-nearby-title", t("place_detail.nearby")), grid);
+  }
+
+  function renderReviews(place, lang) {
+    const mount = global.document.querySelector("[data-detail-reviews]"); const reviews = getApprovedReviews(place.reviews);
+    mount.replaceChildren(heading("detail-reviews-title", t("place_detail.reviews")));
+    if (!reviews.length) { mount.append(make("p", "detail-muted", t("place_detail.no_reviews"))); return; }
+    const list = make("div", "detail-review-list");
+    reviews.forEach((review) => {
+      const card = make("article", "review-card detail-review-card");
+      const name = review.is_anonymous ? t("place_detail.anonymous_reviewer") : String(review.reviewer_name || t("place_detail.demo_reviewer"));
+      const header = make("div", "review-card__header"); header.append(make("h3", "review-card__name", name), make("span", "review-card__rating", `${"★".repeat(Number(review.rating))} ${review.rating}/5`));
+      card.append(header, make("p", "review-card__comment", localized(review, "comment", lang)), make("p", "review-card__date", t("place_detail.mock_review_notice"))); list.append(card);
+    });
+    mount.append(list);
+  }
+
+  function renderMap(place) {
+    const mount = global.document.querySelector("[data-detail-map]"); const model = getActionModel(place);
+    mount.replaceChildren(heading("detail-map-title", t("place_detail.map")));
+    const actions = make("div", "detail-map-actions");
+    if (model.detailMapUrl) { const link = make("a", "button button--secondary", t("place_detail.view_map")); link.href = model.detailMapUrl; actions.append(link); }
+    if (model.googleMapsUrl) { const link = make("a", "button button--primary", t("place_detail.navigate")); link.href = model.googleMapsUrl; link.target = "_blank"; link.rel = "noopener noreferrer"; actions.append(link); }
+    mount.append(actions.children.length ? actions : make("p", "detail-muted", t("place_detail.map_unavailable")));
+  }
+
+  function initializePage() {
+    const root = global.document?.querySelector?.(".place-detail-page");
+    if (!root) return;
+    const mounts = { loading: global.document.querySelector("[data-detail-loading]"), "not-found": global.document.querySelector("[data-detail-not-found]"), error: global.document.querySelector("[data-detail-error]"), ready: global.document.querySelector("[data-detail-content]") };
+    let currentPlace = null;
+    function render() {
+      try {
+        setPageState(mounts, "loading", root);
+        const resolution = resolvePage(global.location.search); currentPlace = resolution.place;
+        if (resolution.state === "error") { setPageState(mounts, "error", root); return; }
+        if (!currentPlace) { global.document.title = t("place_detail.not_found_page_title"); setPageState(mounts, "not-found", root); return; }
+        const lang = global.TakhunI18n?.getCurrentLang?.() || "th"; const name = localized(currentPlace, "name", lang);
+        global.document.title = format("place_detail.page_title", { name });
+        const heroMedia = global.document.querySelector("[data-detail-hero-media]"); heroMedia.replaceChildren(); appendImage(heroMedia, currentPlace.cover_image_url, name, { className: "detail-hero__image", hero: true });
+        renderSummary(currentPlace, lang, global.document.querySelector("[data-detail-summary]")); renderTextSections(currentPlace, lang); renderVisitor(currentPlace, lang); renderGallery(currentPlace, lang); renderNearby(currentPlace, lang); renderReviews(currentPlace, lang); renderMap(currentPlace);
+        const favorite = global.document.querySelector("[data-detail-favorite]"); const saved = readFavorites().includes(currentPlace.place_id); favorite.classList.toggle("is-active", saved); favorite.setAttribute("aria-pressed", String(saved)); favorite.setAttribute("aria-label", format(saved ? "place_detail.favorite_remove" : "place_detail.favorite_add", { name })); favorite.querySelector("span").textContent = saved ? "♥" : "♡";
+        setPageState(mounts, "ready", root);
+      } catch (_error) { setPageState(mounts, "error", root); }
+    }
+    global.document.querySelector("[data-detail-back]")?.addEventListener("click", () => global.history?.back?.());
+    global.document.querySelector("[data-detail-favorite]")?.addEventListener("click", () => { if (!currentPlace) return; const saved = toggleFavorite(currentPlace.place_id).includes(currentPlace.place_id); showToast(t(saved ? "place_detail.favorite_added" : "place_detail.favorite_removed")); render(); });
+    global.document.querySelector("[data-detail-share]")?.addEventListener("click", async () => { if (!currentPlace) return; const lang = global.TakhunI18n?.getCurrentLang?.() || "th"; const name = localized(currentPlace, "name", lang); const result = await sharePlace({ title: format("place_detail.share_title", { name }), text: format("place_detail.share_text", { name }), url: global.location.href }); if (result === "copied") showToast(t("place_detail.copy_success")); if (result === "copy_failed") showToast(t("place_detail.copy_failed"), "error"); });
+    global.document.querySelector("[data-detail-retry]")?.addEventListener("click", render);
+    global.document.querySelector("[data-lightbox-close]")?.addEventListener("click", closeLightbox);
+    global.document.querySelector("[data-lightbox-backdrop]")?.addEventListener("click", closeLightbox);
+    global.document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeLightbox(); });
+    global.document.addEventListener("takhun:languagechange", () => { global.TakhunI18n?.applyTranslations?.(global.document); render(); });
+    render();
+  }
+
+  global.TakhunPlaceDetail = Object.freeze({ parsePlaceId, validatePlaceId, findPublishedPlace, resolvePage, setPageState, getActionModel, readFavorites, writeFavorites, toggleFavorite, getApprovedReviews, sharePlace });
+  if (global.document?.readyState === "loading") global.document.addEventListener("DOMContentLoaded", initializePage, { once: true }); else initializePage();
+})(window);

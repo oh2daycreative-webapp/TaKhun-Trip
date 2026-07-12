@@ -4,46 +4,13 @@
   const FAVORITES_KEY = "TAKHUN_FAVORITES";
   const PAGE_SIZE = 12;
   const FILTER_KEYS = Object.freeze(["district", "category", "route_group"]);
-  const DEMO_IMAGE = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 520'%3E%3Cdefs%3E%3ClinearGradient id='g' x2='1' y2='1'%3E%3Cstop stop-color='%2300796B'/%3E%3Cstop offset='1' stop-color='%2318B7B5'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='800' height='520' fill='url(%23g)'/%3E%3Cpath d='M0 420 180 210l120 125 130-190 160 205 95-105 115 175' fill='%23064E3B' opacity='.72'/%3E%3Ccircle cx='650' cy='115' r='58' fill='%23FDBA2D'/%3E%3Ctext x='40' y='480' fill='white' font-size='36' font-family='sans-serif'%3EDEMO%3C/text%3E%3C/svg%3E";
-
-  const DEMO_PLACES = Object.freeze([
-    demo("001", "จุดชมธรรมชาติตัวอย่าง 1", "Sample Nature Stop 1", "ban_ta_khun", "nature", "main_point_1", true, true, true),
-    demo("002", "ชุมชนท่องเที่ยวตัวอย่าง 2", "Sample Community Stop 2", "ban_ta_khun", "community_tourism", "main_point_1", true, false, true),
-    demo("003", "จุดชมวิวตัวอย่าง 3", "Sample Viewpoint 3", "ban_ta_khun", "viewpoint", "main_point_2", false, true, false),
-    demo("004", "คาเฟ่ตัวอย่าง 4", "Sample Café 4", "ban_ta_khun", "food_cafe", "main_point_2", true, false, false),
-    demo("005", "กิจกรรมกลางแจ้งตัวอย่าง 5", "Sample Outdoor Activity 5", "khiri_rat_nikhom", "activity", "", false, true, true),
-    demo("006", "พื้นที่ธรรมชาติตัวอย่าง 6", "Sample Nature Area 6", "khiri_rat_nikhom", "nature", "", true, false, false),
-    demo("007", "ชุมชนตัวอย่าง 7", "Sample Community 7", "khiri_rat_nikhom", "community_tourism", "", false, false, true),
-    demo("008", "จุดชมวิวตัวอย่าง 8", "Sample Viewpoint 8", "phanom", "viewpoint", "nearby_phanom", true, true, false),
-    demo("009", "กิจกรรมตัวอย่าง 9", "Sample Activity 9", "phanom", "activity", "nearby_phanom", false, false, false),
-    demo("010", "คาเฟ่ตัวอย่าง 10", "Sample Café 10", "phanom", "food_cafe", "nearby_phanom", true, false, true),
-    demo("011", "เส้นทางธรรมชาติตัวอย่าง 11", "Sample Nature Trail 11", "ban_ta_khun", "nature", "main_point_1", false, true, false),
-    demo("012", "กิจกรรมชุมชนตัวอย่าง 12", "Sample Community Activity 12", "ban_ta_khun", "community_tourism", "main_point_2", true, false, false),
-    demo("013", "จุดพักตัวอย่าง 13", "Sample Rest Stop 13", "ban_ta_khun", "viewpoint", "main_point_1", false, false, false),
-    { ...demo("014", "ข้อมูลร่างตัวอย่าง", "Sample Draft", "ban_ta_khun", "nature", "main_point_1", false, false, false), status: "draft" }
-  ]);
-
-  function demo(id, nameTh, nameEn, district, category, routeGroup, image, coordinates, navigation) {
-    return Object.freeze({
-      place_id: `MOCK-PLACE-${id}`, name_th: nameTh, name_en: nameEn,
-      district, province: "สุราษฎร์ธานี", route_group: routeGroup, category,
-      short_description_th: "ข้อความสาธิตสำหรับทดสอบหน้ารายการ ไม่ใช่รายละเอียดสถานที่ที่ได้รับการยืนยัน",
-      short_description_en: "Demo copy for testing the list page; this is not verified place information.",
-      cover_image_url: image ? DEMO_IMAGE : "", phone: "",
-      google_maps_url: navigation ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(nameEn)}` : "",
-      latitude: coordinates ? 8.9 + Number(id) / 1000 : null,
-      longitude: coordinates ? 98.9 + Number(id) / 1000 : null,
-      coordinate_status: coordinates ? "approximate" : "no_coordinate",
-      is_featured: false, is_main_route_point: false, sort_order: Number(id), status: "published"
-    });
-  }
-
   function createPageState() {
     return { records: [], filters: { keyword: "", district: "", category: "", route_group: "" }, page: 1, status: "idle", error: null };
   }
 
   async function loadPlaces() {
-    return DEMO_PLACES.map((place) => ({ ...place }));
+    if (!global.TakhunPlaceData?.listPlaces) throw new Error("Shared mock place data is unavailable.");
+    return global.TakhunPlaceData.listPlaces();
   }
 
   function getFilterOptions(records) {

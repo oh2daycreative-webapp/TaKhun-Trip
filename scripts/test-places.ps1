@@ -25,6 +25,8 @@ Assert-Match $html 'data-places-grid' "Places must provide a non-empty results m
 Assert-Match $html 'data-places-state' "Places must provide a fallback state mount."
 Assert-Match $html 'data-load-more' "Places must provide Load More."
 Assert-Match $html 'src="js/places\.js"' "Places must load its isolated controller."
+Assert-Match $html 'src="js/place-data\.js"' "Places must load the shared place data source."
+if ($html.IndexOf('src="js/place-data.js"') -gt $html.IndexOf('src="js/places.js"')) { throw "Shared place data must load before the Places controller." }
 Assert-Match $html 'data-i18n="places\.demo_notice"' "Places must visibly identify demo data."
 
 $otherPages = Get-ChildItem -LiteralPath (Join-Path $root "public") -Filter "*.html" -File | Where-Object Name -ne "places.html"

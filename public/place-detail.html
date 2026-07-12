@@ -9,20 +9,87 @@
   <link rel="stylesheet" href="css/components.css">
   <link rel="stylesheet" href="css/mobile.css">
 </head>
-<body class="public-page">
+<body class="public-page place-detail-page">
   <a class="skip-link" href="#main-content" data-i18n="shell.skip">ข้ามไปยังเนื้อหาหลัก</a>
   <div class="public-shell" data-public-shell data-page="place-detail.html"><a class="shell-fallback" href="index.html" data-i18n="shell.fallback_home">Takhun Trip — หน้าแรก</a></div>
-  <main class="page-shell bottom-nav-space" id="main-content">
-    <section class="placeholder" aria-labelledby="page-title">
-      <p class="eyebrow">Takhun Trip</p>
-      <h1 id="page-title" data-i18n="pages.place_detail.heading">รายละเอียดสถานที่</h1>
-      <p data-i18n="system.preparing_page">หน้านี้อยู่ระหว่างการจัดเตรียม</p>
-      <a class="button" href="index.html" data-i18n="actions.back_home">กลับหน้าแรก</a>
+  <main class="detail-page-shell bottom-nav-space" id="main-content">
+    <p class="detail-demo-notice" data-i18n="place_detail.demo_notice">ข้อมูลตัวอย่าง — รายละเอียดทั้งหมดเป็นข้อมูลสาธิตที่ยังไม่ได้รับการยืนยัน</p>
+
+    <section class="detail-state loading-state" data-detail-loading role="status" aria-live="polite">
+      <span class="loading-spinner" aria-hidden="true"></span>
+      <p data-i18n="place_detail.loading">กำลังโหลดรายละเอียดตัวอย่าง…</p>
+    </section>
+    <section class="detail-state empty-state" data-detail-not-found role="status" aria-live="polite" hidden>
+      <span class="empty-state__icon" aria-hidden="true">?</span>
+      <h1 class="empty-state__title" data-i18n="place_detail.not_found_title">ไม่พบสถานที่ตัวอย่าง</h1>
+      <p class="empty-state__description" data-i18n="place_detail.not_found_text">ลิงก์นี้ไม่มีรหัสสถานที่ที่ใช้ได้ หรือรายการไม่พร้อมเผยแพร่</p>
+      <a class="button button--secondary empty-state__action" href="places.html" data-i18n="place_detail.back_to_places">กลับไปดูสถานที่</a>
+    </section>
+    <section class="detail-state error-state" data-detail-error role="alert" hidden>
+      <span class="error-state__icon" aria-hidden="true">!</span>
+      <h1 class="error-state__title" data-i18n="place_detail.error">โหลดรายละเอียดไม่สำเร็จ</h1>
+      <button class="button button--secondary error-state__action" type="button" data-detail-retry data-i18n="place_detail.retry">ลองอีกครั้ง</button>
+    </section>
+
+    <article class="detail-content" data-detail-content hidden>
+      <header class="detail-hero" data-detail-hero>
+        <div class="detail-hero__media" data-detail-hero-media></div>
+        <div class="detail-actions" aria-label="การทำงานของสถานที่" data-i18n-attr="aria-label:place_detail.actions_label">
+          <button class="detail-action" type="button" data-detail-back aria-label="ย้อนกลับ" data-i18n-attr="aria-label:place_detail.back"><span aria-hidden="true">←</span></button>
+          <button class="detail-action favorite-btn" type="button" data-detail-favorite aria-label="บันทึกสถานที่" aria-pressed="false"><span aria-hidden="true">♡</span></button>
+          <button class="detail-action" type="button" data-detail-share aria-label="แชร์สถานที่" data-i18n-attr="aria-label:place_detail.share"><span aria-hidden="true">↗</span></button>
+        </div>
+        <div class="detail-hero__overlay" data-detail-summary></div>
+      </header>
+
+      <div class="detail-layout">
+        <div class="detail-main">
+          <section class="detail-section" data-detail-description aria-labelledby="detail-description-title"></section>
+          <section class="detail-section" data-detail-highlights aria-labelledby="detail-highlights-title" hidden></section>
+          <section class="detail-section" data-detail-activities aria-labelledby="detail-activities-title" hidden></section>
+          <section class="detail-section" data-detail-gallery aria-labelledby="detail-gallery-title" hidden></section>
+          <section class="detail-section" data-detail-nearby aria-labelledby="detail-nearby-title" hidden></section>
+          <section class="detail-section" data-detail-reviews aria-labelledby="detail-reviews-title"></section>
+        </div>
+        <aside class="detail-sidebar">
+          <section class="detail-section" data-detail-visitor aria-labelledby="detail-visitor-title"></section>
+          <section class="detail-section" data-detail-map aria-labelledby="detail-map-title"></section>
+          <section class="detail-section detail-review-disabled" data-detail-review-form aria-labelledby="detail-review-form-title">
+            <h2 id="detail-review-form-title" data-i18n="place_detail.write_review">เขียนรีวิว</h2>
+            <p data-i18n="place_detail.review_unavailable">ระบบรีวิวยังไม่เปิดใช้งานในข้อมูลตัวอย่าง</p>
+            <form data-review-form aria-disabled="true">
+              <label for="detail-review-name" data-i18n="place_detail.review_name">ชื่อของคุณ</label>
+              <input id="detail-review-name" type="text" disabled>
+              <label for="detail-review-comment" data-i18n="place_detail.review_comment">ความคิดเห็น</label>
+              <textarea id="detail-review-comment" rows="4" disabled></textarea>
+              <button class="button button--secondary" type="button" disabled data-i18n="place_detail.review_submit">ส่งรีวิว</button>
+            </form>
+          </section>
+        </aside>
+      </div>
+    </article>
+
+    <section class="detail-noscript" aria-labelledby="noscript-title">
+      <noscript>
+        <h1 id="noscript-title">รายละเอียดสถานที่ตัวอย่าง</h1>
+        <p>ไม่สามารถโหลดรายละเอียดได้ โปรดเปิดใช้งาน JavaScript ข้อมูลทั้งหมดในหน้านี้เป็นข้อมูลสาธิตที่ยังไม่ได้รับการยืนยัน</p>
+        <a class="button" href="places.html">กลับไปดูสถานที่</a>
+      </noscript>
     </section>
   </main>
+  <div class="detail-lightbox" data-detail-lightbox role="dialog" aria-modal="true" aria-labelledby="detail-lightbox-title" hidden>
+    <button class="detail-lightbox__backdrop" type="button" data-lightbox-backdrop aria-label="ปิดภาพขยาย" data-i18n-attr="aria-label:place_detail.close_gallery"></button>
+    <div class="detail-lightbox__panel">
+      <h2 class="sr-only" id="detail-lightbox-title" data-i18n="place_detail.gallery">รูปภาพเพิ่มเติม</h2>
+      <button class="detail-lightbox__close" type="button" data-lightbox-close aria-label="ปิดภาพขยาย" data-i18n-attr="aria-label:place_detail.close_gallery">×</button>
+      <div data-lightbox-media></div>
+    </div>
+  </div>
   <script src="js/config.js"></script>
   <script src="js/i18n.js"></script>
   <script src="js/api.js"></script>
+  <script src="js/place-data.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/place-detail.js"></script>
 </body>
 </html>
