@@ -87,6 +87,7 @@ foreach ($html in $htmlFiles) {
 & (Join-Path $PSScriptRoot "test-home.ps1")
 & (Join-Path $PSScriptRoot "test-public-shell.ps1")
 & (Join-Path $PSScriptRoot "test-foundation.ps1")
+& (Join-Path $PSScriptRoot "test-places.ps1")
 & node (Join-Path $PSScriptRoot "test-i18n.js")
 if ($LASTEXITCODE -ne 0) { throw "i18n behavior verification failed." }
 
