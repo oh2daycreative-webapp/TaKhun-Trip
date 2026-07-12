@@ -18,11 +18,8 @@ Assert-Contains $html 'id="featured-places"' "Home must include the featured pla
 Assert-Contains $html 'id="recommended-routes"' "Home must include the recommended routes mount."
 Assert-Contains $html 'id="trip-inspiration"' "Home must include the trip inspiration mount."
 Assert-Contains $html 'class="[^"]*site-footer' "Home must include the project footer."
-Assert-Contains $html 'class="[^"]*bottom-nav' "Home must include mobile bottom navigation."
-Assert-Contains $html 'aria-current="page"' "Home bottom navigation must expose its active state."
-Assert-Contains $html 'aria-controls="mobile-menu"' "Hamburger must control the mobile drawer."
-Assert-Contains $html 'aria-expanded="false"' "Hamburger must expose its collapsed state."
-Assert-Contains $html 'id="mobile-menu"' "Home must include the mobile menu drawer."
+Assert-Contains $html 'data-public-shell[^>]*data-page="index\.html"' "Home must mount the shared public shell."
+Assert-Contains $html 'class="shell-fallback"' "Home must provide navigation fallback while the shell loads."
 
 $quickActions = [regex]::Matches($html, 'class="[^"]*quick-action(?:\s|"|__)').Count
 if ($quickActions -lt 4) { throw "Home must include at least four quick actions." }
@@ -36,6 +33,8 @@ Assert-Contains $app 'featuredPlaces' "Home data must define featured places."
 Assert-Contains $app 'recommendedRoutes' "Home data must define recommended routes."
 Assert-Contains $app 'tripInspiration' "Home data must define trip inspiration."
 Assert-Contains $app 'aria-expanded' "Drawer behavior must synchronize aria-expanded."
+Assert-Contains $app 'aria-current' "Rendered Home navigation must expose its active state."
+Assert-Contains $app 'id="mobile-menu"' "The public shell must include the mobile menu drawer."
 Assert-Contains $app 'Escape' "Drawer must close with the Escape key."
 
 Assert-Contains ($main + $components) ':focus-visible' "Interactive components must have a visible keyboard focus state."

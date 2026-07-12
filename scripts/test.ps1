@@ -79,5 +79,6 @@ foreach ($html in $htmlFiles) {
 }
 
 & (Join-Path $PSScriptRoot "test-home.ps1")
+& (Join-Path $PSScriptRoot "test-public-shell.ps1")
 
 Write-Host "Skeleton verification passed: $($required.Count) required files, $($htmlFiles.Count) HTML pages."
