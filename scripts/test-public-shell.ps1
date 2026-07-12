@@ -3,6 +3,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $public = Join-Path $root "public"
 $app = Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $public "js/app.js")
+$i18n = Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $public "js/i18n.js")
 $main = Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $public "css/main.css")
 $components = Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $public "css/components.css")
 $mobile = Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $public "css/mobile.css")
@@ -25,6 +26,8 @@ foreach ($page in $shellPages) {
   Assert-Match $html 'class="skip-link"\s+href="#main-content"' "$page must include a skip link."
   Assert-Match $html 'data-public-shell' "$page must include the shared shell mount."
   Assert-Match $html 'class="shell-fallback"[^>]*href="index\.html"' "$page must keep a usable Home fallback while JavaScript loads."
+  Assert-Match $html '<title\s+data-i18n="pages\.[^"]+\.title"' "$page must expose a translated page title."
+  Assert-Match $html 'meta\s+name="description"[^>]*data-i18n-attr="content:pages\.[^"]+\.description"' "$page must expose a translated meta description."
   Assert-Match $html '<main[^>]*id="main-content"' "$page must expose the main landmark target."
   Assert-Match $html 'class="[^"]*bottom-nav-space' "$page must reserve mobile bottom navigation space."
 }
@@ -47,6 +50,22 @@ foreach ($required in @(
 
 if ($app -match 'search\.html') { throw "Prompt 1.2 must not create or link to search.html." }
 if ($app -match 'localStorage') { throw "Prompt 1.2 shell must not write language state to Local Storage." }
+if ($app -match 'TAKHUN_LANG') { throw "app.js must not own the language storage contract." }
+Assert-Match $i18n 'LANG_STORAGE_KEY\s*=\s*"TAKHUN_LANG"' "i18n.js must own the TAKHUN_LANG contract."
+Assert-Match $app 'TakhunI18n\?\.applyTranslations\(mount\)' "The rendered shell must be translated after mounting."
+Assert-Match $app '<header[\s\S]*class="[^"]*language-switcher[^"]*"\s+role="group"[\s\S]*class="menu-toggle"' "The Header must expose the language group before the menu toggle."
+if ($app -match '<aside[\s\S]*class="[^"]*language-switcher') { throw "The Drawer must not duplicate the language switcher." }
+$languageSwitcherCount = [regex]::Matches($app, 'class="[^"]*language-switcher(?:\s|\")').Count
+if ($languageSwitcherCount -ne 1) { throw "The shell must render exactly one language switcher; found $languageSwitcherCount." }
+Assert-Match $app 'data-lang="th"[^>]*aria-pressed="true"' "The Thai language button must expose its initial active state."
+Assert-Match $app 'data-lang="en"[^>]*aria-pressed="false"' "The English language button must expose its initial inactive state."
+if ($app -match 'language-preview|data-lang="(?:th|en)"[^>]*disabled') { throw "Language controls must be enabled." }
+Assert-Match $mobile '\.header-language-switcher' "Mobile CSS must provide a compact Header language switcher."
+Assert-Match $mobile '\.hero-section__content\s*\{[^}]*display\s*:\s*(?:flex|grid)' "Mobile Hero text must use an explicit normal-flow layout."
+Assert-Match $mobile '\.hero-section__eyebrow-text\s*\{[^}]*width\s*:\s*(?:fit-content|auto)' "The Hero eyebrow text must retain a readable width."
+if ($mobile -match '\.hero-section__eyebrow\s+span\s*\{[^}]*width\s*:\s*30px') { throw "Hero eyebrow text must not inherit decorative line dimensions." }
+if (($components + $mobile) -match '\.hero-section\s*\{[^}]*overflow\s*:\s*hidden') { throw "Hero text must not be hidden to mask overflow." }
+if ($mobile -match '\.(?:hero-section__eyebrow|hero-section\s+h1|hero-section__description)\s*\{[^}]*position\s*:\s*absolute') { throw "Mobile Hero text must stay in normal document flow." }
 
 Assert-Match $components '\.public-shell' "Shared component CSS must style the public shell mount."
 Assert-Match $components '\.public-shell\.is-ready\s*\{[^}]*display\s*:\s*contents' "Rendered shell wrapper must not constrain the sticky header."
