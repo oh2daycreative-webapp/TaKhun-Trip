@@ -21,7 +21,7 @@
 .close-glyph { font-size: 1.8rem; line-height: 1; }
 .icon-button svg { width: 24px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 2; }
 
-.hero-section { position: relative; display: grid; min-height: clamp(620px, calc(100svh - var(--header-height)), 780px); align-items: center; overflow: hidden; isolation: isolate; background: #0c655a; }
+.hero-section { position: relative; display: grid; min-height: clamp(620px, calc(100svh - var(--header-height)), 780px); align-items: center; isolation: isolate; background: #0c655a; }
 .hero-section__landscape, .hero-section__overlay { position: absolute; inset: 0; }
 .hero-section__landscape { z-index: -3; overflow: hidden; background: linear-gradient(180deg, #7ccce4 0%, #aadccf 42%, #159f9c 43%, #087c7a 100%); }
 .hero-section__landscape::before { position: absolute; inset: 0; background: radial-gradient(circle at 70% 15%, rgba(255,245,180,.48), transparent 20%), linear-gradient(90deg, rgba(3,45,40,.55), transparent 68%); content: ""; }
@@ -34,8 +34,9 @@
 .hero-section__overlay { z-index: -2; background: linear-gradient(90deg, rgba(2,36,32,.88) 0%, rgba(3,56,50,.62) 44%, rgba(5,49,44,.08) 76%), linear-gradient(0deg, rgba(3,45,40,.4), transparent 45%); }
 .hero-section__content { padding-block: 4.5rem 7rem; color: #fff; }
 .hero-section__eyebrow { display: flex; align-items: center; gap: .6rem; margin-bottom: 1.25rem; color: #d8fff4; font-size: .85rem; font-weight: 700; letter-spacing: .02em; }
-.hero-section__eyebrow span { width: 30px; height: 2px; background: var(--color-accent); }
-.hero-section h1 { max-width: 720px; margin-bottom: 1.25rem; color: #fff; font-size: clamp(3rem, 6vw, 5.7rem); line-height: .98; text-shadow: 0 5px 30px rgba(0,0,0,.2); }
+.hero-section__eyebrow-line { width: 30px; height: 2px; flex: 0 0 auto; background: var(--color-accent); }
+.hero-section__eyebrow-text { width: fit-content; max-width: 100%; }
+.hero-section h1 { display: grid; max-width: 720px; margin-bottom: 1.25rem; color: #fff; font-size: clamp(3rem, 6vw, 5.7rem); line-height: .98; text-shadow: 0 5px 30px rgba(0,0,0,.2); }
 .hero-section h1 em { color: var(--color-accent); font-style: normal; }
 .hero-section__description { max-width: 570px; margin-bottom: 1.8rem; color: #e7f9f4; font-size: clamp(1rem, 2vw, 1.18rem); line-height: 1.8; }
 .hero-section__actions { display: flex; flex-wrap: wrap; gap: .75rem; }
@@ -65,6 +66,7 @@
 .empty-state{grid-column:1/-1;padding:2rem;border:1px dashed var(--color-border);border-radius:var(--radius-md);color:var(--color-muted);text-align:center}
 .site-footer{padding:4rem 0 1.5rem;background:#063e36;color:#cde4dd}.site-footer__grid{display:grid;grid-template-columns:2fr repeat(3,1fr);gap:clamp(2rem,5vw,4rem)}.brand--footer{color:#fff}.brand--footer .brand__text small{color:#b8d7ce}.site-footer__brand>p{max-width:390px;margin-top:1.2rem;color:#a9ccc2;line-height:1.8}.site-footer h2{margin-bottom:1rem;color:#fff;font-size:1rem}.site-footer ul{display:grid;gap:.7rem;margin:0;padding:0;list-style:none}.site-footer a{color:#cde4dd;text-decoration:none}.site-footer a:hover{color:var(--color-accent)}.site-footer address{display:grid;gap:.65rem;font-style:normal;font-size:.85rem;line-height:1.6}.editable-note{display:block;margin-top:.8rem;color:#85aea3;font-size:.65rem}.site-footer__bottom{display:flex;justify-content:space-between;gap:1rem;margin-top:3rem;padding-top:1.4rem;border-top:1px solid rgba(255,255,255,.12);color:#86aaa1;font-size:.72rem}
 .drawer-backdrop,.mobile-drawer,.bottom-nav{display:none}
+.language-switcher{display:grid;grid-template-columns:repeat(2,minmax(44px,1fr));gap:.2rem;padding:.2rem;border:1px solid var(--color-border);border-radius:13px;background:var(--color-bg)}.language-switcher__btn{display:grid;min-width:44px;min-height:44px;place-items:center;padding:.35rem;border:0;border-radius:9px;background:transparent;color:var(--color-muted);font:inherit;font-size:.72rem;font-weight:800;cursor:pointer}.language-switcher__btn.is-active{background:var(--color-primary);color:#fff}.language-switcher__btn:focus-visible{outline:3px solid var(--color-focus);outline-offset:2px}
 
 /* Shared foundation components. Existing Home selectors above remain unchanged. */
 .button--primary { min-height: 46px; background: linear-gradient(135deg, var(--color-accent), var(--color-accent-2)); color: #fff; box-shadow: 0 12px 26px rgba(249, 115, 22, .28); }

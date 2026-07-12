@@ -63,6 +63,10 @@ function activeAttributes(isActive) {
   return isActive ? ' class="is-active" aria-current="page"' : "";
 }
 
+function i18nText(key) {
+  return window.TakhunI18n?.t(key) || key;
+}
+
 function renderPublicShell() {
   const mount = document.querySelector("[data-public-shell]");
   if (!mount) return;
@@ -72,31 +76,32 @@ function renderPublicShell() {
     ...PUBLIC_NAVIGATION.secondary.slice(1, 2),
     ...PUBLIC_NAVIGATION.secondary.slice(0, 1),
     ...PUBLIC_NAVIGATION.primary.slice(1, 3)
-  ].map((item) => `<a${activeAttributes(current.primary === item.key || current.secondary === item.key)} href="${item.href}">${item.label}</a>`).join("");
+  ].map((item) => `<a${activeAttributes(current.primary === item.key || current.secondary === item.key)} href="${item.href}"><span data-i18n="nav.${item.key}">${item.label}</span></a>`).join("");
   const drawerLinks = PUBLIC_NAVIGATION.secondary.map((item) => {
     const tone = item.tone ? ` drawer-link__icon--${item.tone}` : "";
-    return `<a${activeAttributes(current.secondary === item.key)} href="${item.href}"><span class="drawer-link__icon${tone}">${shellSvg(item.icon)}</span><span>${item.label}<small>${item.detail}</small></span></a>`;
+    return `<a${activeAttributes(current.secondary === item.key)} href="${item.href}"><span class="drawer-link__icon${tone}">${shellSvg(item.icon)}</span><span><span data-i18n="nav.${item.key}">${item.label}</span><small data-i18n="nav_detail.${item.key}">${item.detail}</small></span></a>`;
   }).join("");
-  const bottomLinks = PUBLIC_NAVIGATION.primary.map((item) => `<a class="bottom-nav__item${current.primary === item.key ? " is-active" : ""}" href="${item.href}"${current.primary === item.key ? ' aria-current="page"' : ""} aria-label="${item.label}">${shellSvg(item.icon)}<span>${item.label}</span></a>`).join("");
+  const bottomLinks = PUBLIC_NAVIGATION.primary.map((item) => `<a class="bottom-nav__item${current.primary === item.key ? " is-active" : ""}" href="${item.href}"${current.primary === item.key ? ' aria-current="page"' : ""} aria-label="${item.label}" data-i18n-attr="aria-label:nav.${item.key}">${shellSvg(item.icon)}<span data-i18n="nav.${item.key}">${item.label}</span></a>`).join("");
   const template = document.createElement("template");
   template.innerHTML = `
     <header class="site-header" data-site-header>
       <div class="site-header__inner">
-        <a class="brand" href="index.html" aria-label="Takhun Trip หน้าแรก"><span class="brand__mark" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M7 31 18 15l7 10 5-7 11 13H7Z"/><path d="M7 34c7-4 13 4 20 0s10-1 14 1"/></svg></span><span class="brand__text"><strong>Takhun Trip</strong><small>บ้านตาขุน · สุราษฎร์ธานี</small></span></a>
-        <nav class="site-nav" aria-label="เมนูหลัก">${desktopLinks}</nav>
-        <a class="button button--compact site-header__cta" href="trip-planner.html">สร้างทริปของคุณ</a>
-        <button class="menu-toggle" type="button" aria-label="เปิดเมนูเพิ่มเติม" aria-controls="mobile-menu" aria-expanded="false"><span></span><span></span><span></span></button>
+        <a class="brand" href="index.html" aria-label="Takhun Trip หน้าแรก" data-i18n-attr="aria-label:shell.brand_home"><span class="brand__mark" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M7 31 18 15l7 10 5-7 11 13H7Z"/><path d="M7 34c7-4 13 4 20 0s10-1 14 1"/></svg></span><span class="brand__text"><strong>Takhun Trip</strong><small data-i18n="shell.location">บ้านตาขุน · สุราษฎร์ธานี</small></span></a>
+        <nav class="site-nav" aria-label="เมนูหลัก" data-i18n-attr="aria-label:shell.primary_menu">${desktopLinks}</nav>
+        <a class="button button--compact site-header__cta" href="trip-planner.html" data-i18n="actions.create_trip">สร้างทริปของคุณ</a>
+        <div class="language-switcher header-language-switcher" role="group" aria-label="เลือกภาษา" data-i18n-attr="aria-label:shell.language_group"><button class="language-switcher__btn" type="button" data-lang="th" aria-label="ภาษาไทย" data-i18n-attr="aria-label:shell.thai" aria-pressed="true">TH</button><button class="language-switcher__btn" type="button" data-lang="en" aria-label="English" data-i18n-attr="aria-label:shell.english" aria-pressed="false">EN</button></div>
+        <button class="menu-toggle" type="button" aria-label="เปิดเมนูเพิ่มเติม" data-i18n-attr="aria-label:shell.open_menu" aria-controls="mobile-menu" aria-expanded="false"><span></span><span></span><span></span></button>
       </div>
     </header>
     <div class="drawer-backdrop" data-menu-backdrop hidden></div>
-    <aside class="mobile-drawer" id="mobile-menu" aria-label="เมนูเพิ่มเติม" aria-hidden="true" hidden>
-      <div class="mobile-drawer__header"><span class="mobile-drawer__title">ออกสำรวจบ้านตาขุน</span><button class="icon-button" type="button" data-menu-close aria-label="ปิดเมนู"><span class="close-glyph" aria-hidden="true">×</span></button></div>
-      <nav class="mobile-drawer__nav" aria-label="เมนูรอง">${drawerLinks}</nav>
-      <button class="language-preview" type="button" aria-label="เปลี่ยนภาษา ยังไม่เปิดใช้งาน" disabled><span>TH</span> ภาษาไทย <small>EN เร็ว ๆ นี้</small></button>
+    <aside class="mobile-drawer" id="mobile-menu" aria-label="เมนูเพิ่มเติม" data-i18n-attr="aria-label:shell.more_menu" aria-hidden="true" hidden>
+      <div class="mobile-drawer__header"><span class="mobile-drawer__title" data-i18n="shell.explore">ออกสำรวจบ้านตาขุน</span><button class="icon-button" type="button" data-menu-close aria-label="ปิดเมนู" data-i18n-attr="aria-label:shell.close"><span class="close-glyph" aria-hidden="true">×</span></button></div>
+      <nav class="mobile-drawer__nav" aria-label="เมนูรอง" data-i18n-attr="aria-label:shell.secondary_menu">${drawerLinks}</nav>
     </aside>
-    <nav class="bottom-nav" aria-label="เมนูหลักบนมือถือ">${bottomLinks}<button class="bottom-nav__item bottom-nav__more${current.more ? " is-active" : ""}" type="button" aria-label="เพิ่มเติม" aria-controls="mobile-menu" aria-expanded="false">${shellSvg("more")}<span>เพิ่มเติม</span></button></nav>`;
+    <nav class="bottom-nav" aria-label="เมนูหลักบนมือถือ" data-i18n-attr="aria-label:shell.mobile_primary_menu">${bottomLinks}<button class="bottom-nav__item bottom-nav__more${current.more ? " is-active" : ""}" type="button" aria-label="เพิ่มเติม" data-i18n-attr="aria-label:nav.more" aria-controls="mobile-menu" aria-expanded="false">${shellSvg("more")}<span data-i18n="nav.more">เพิ่มเติม</span></button></nav>`;
   mount.replaceChildren(template.content);
   mount.classList.add("is-ready");
+  window.TakhunI18n?.applyTranslations(mount);
 }
 
 renderPublicShell();
@@ -204,14 +209,16 @@ function openMobileMenu(trigger = menuToggle || moreToggle) {
   requestAnimationFrame(() => document.body.classList.add("menu-is-open"));
   menuToggle?.setAttribute("aria-expanded", "true"); moreToggle?.setAttribute("aria-expanded", "true");
   moreToggle?.classList.add("is-expanded"); mobileMenu.setAttribute("aria-hidden", "false");
-  menuToggle?.setAttribute("aria-label", "ปิดเมนูเพิ่มเติม"); menuClose?.focus();
+  menuToggle?.setAttribute("data-i18n-attr", "aria-label:shell.close_menu");
+  menuToggle?.setAttribute("aria-label", i18nText("shell.close_menu")); menuClose?.focus();
 }
 
 function closeMobileMenu({ restoreFocus = true } = {}) {
   if ((!menuToggle && !moreToggle) || !mobileMenu || !menuBackdrop) return;
   document.body.classList.remove("menu-is-open"); menuToggle?.setAttribute("aria-expanded", "false");
   moreToggle?.setAttribute("aria-expanded", "false"); moreToggle?.classList.remove("is-expanded");
-  menuToggle?.setAttribute("aria-label", "เปิดเมนูเพิ่มเติม"); mobileMenu.setAttribute("aria-hidden", "true");
+  menuToggle?.setAttribute("data-i18n-attr", "aria-label:shell.open_menu");
+  menuToggle?.setAttribute("aria-label", i18nText("shell.open_menu")); mobileMenu.setAttribute("aria-hidden", "true");
   window.setTimeout(() => { mobileMenu.hidden = true; menuBackdrop.hidden = true; }, 220);
   if (restoreFocus) lastDrawerTrigger?.focus();
 }

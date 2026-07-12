@@ -62,9 +62,14 @@ if ($unexpected.Count -gt 0) {
 
 foreach ($html in $htmlFiles) {
   $content = Get-Content -Raw -Encoding utf8 -LiteralPath $html.FullName
-  foreach ($pattern in @('<meta charset="UTF-8">', 'name="viewport"', '<title>', '<main')) {
-    if ($content -notlike "*$pattern*") {
-      throw "$($html.FullName) is missing $pattern"
+  foreach ($requirement in @(
+    @{ Pattern = '<meta charset="UTF-8">'; Name = '<meta charset="UTF-8">' },
+    @{ Pattern = 'name="viewport"'; Name = 'name="viewport"' },
+    @{ Pattern = '<title(?:\s[^>]*)?>'; Name = '<title>' },
+    @{ Pattern = '<main'; Name = '<main' }
+  )) {
+    if ($content -notmatch $requirement.Pattern) {
+      throw "$($html.FullName) is missing $($requirement.Name)"
     }
   }
 
@@ -82,5 +87,7 @@ foreach ($html in $htmlFiles) {
 & (Join-Path $PSScriptRoot "test-home.ps1")
 & (Join-Path $PSScriptRoot "test-public-shell.ps1")
 & (Join-Path $PSScriptRoot "test-foundation.ps1")
+& node (Join-Path $PSScriptRoot "test-i18n.js")
+if ($LASTEXITCODE -ne 0) { throw "i18n behavior verification failed." }
 
 Write-Host "Skeleton verification passed: $($required.Count) required files, $($htmlFiles.Count) HTML pages."
