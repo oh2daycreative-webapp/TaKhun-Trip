@@ -8,22 +8,30 @@
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/components.css">
   <link rel="stylesheet" href="css/mobile.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
   <link rel="stylesheet" href="css/map.css">
 </head>
-<body class="public-page">
+<body class="public-page map-page">
   <a class="skip-link" href="#main-content" data-i18n="shell.skip">ข้ามไปยังเนื้อหาหลัก</a>
   <div class="public-shell" data-public-shell data-page="map.html"><a class="shell-fallback" href="index.html" data-i18n="shell.fallback_home">Takhun Trip — หน้าแรก</a></div>
-  <main class="page-shell bottom-nav-space" id="main-content">
-    <section class="placeholder" aria-labelledby="page-title">
-      <p class="eyebrow">Takhun Trip</p>
-      <h1 id="page-title" data-i18n="pages.map.heading">แผนที่ท่องเที่ยว</h1>
-      <p data-i18n="system.preparing_page">หน้านี้อยู่ระหว่างการจัดเตรียม</p>
-      <a class="button" href="index.html" data-i18n="actions.back_home">กลับหน้าแรก</a>
+  <main class="map-page__main bottom-nav-space" id="main-content">
+    <header class="map-page__header"><div><p class="eyebrow">Takhun Trip</p><h1 data-i18n="pages.map.heading">แผนที่ท่องเที่ยว</h1><p data-i18n="map.intro">ค้นหาและสำรวจสถานที่ตัวอย่างที่มีพิกัดบนแผนที่</p></div><button class="button button--ghost" type="button" data-map-reset data-i18n="map.reset_view">กลับไปดูทุกจุด</button></header>
+    <p class="map-demo-notice" data-i18n="map.demo_notice">พิกัดทั้งหมดเป็นข้อมูลสาธิตโดยประมาณ ไม่ใช่ตำแหน่งจริงที่ได้รับการยืนยัน</p>
+    <section class="map-controls" aria-label="ค้นหาและกรองแผนที่" data-i18n-attr="aria-label:map.controls_label">
+      <div class="map-search"><label for="map-search" data-i18n="map.search_label">ค้นหาสถานที่</label><div class="map-search__field"><input id="map-search" type="search" autocomplete="off" data-map-search data-i18n-attr="placeholder:map.search_placeholder" placeholder="ค้นหาชื่อหรือคำอธิบาย"><button type="button" class="button button--ghost" data-map-clear-search data-i18n="map.clear_search">ล้าง</button></div></div>
+      <fieldset class="map-filter"><legend data-i18n="map.category_filters">หมวดหมู่</legend><div class="map-filter__chips" data-map-category-filters></div></fieldset>
+      <fieldset class="map-filter"><legend data-i18n="map.district_filters">อำเภอ</legend><div class="map-filter__chips" data-map-district-filters></div></fieldset>
     </section>
+    <div class="map-secondary-notices" aria-live="polite"><p class="alert alert--error" role="status" data-map-tile-unavailable hidden data-i18n="map.tile_unavailable">พื้นหลังแผนที่โหลดไม่สำเร็จ แต่รายการสถานที่ยังใช้งานได้</p><p class="alert" role="status" data-map-focus-not-found hidden data-i18n="map.focus_not_found">ไม่พบสถานที่ที่ต้องการ</p><p class="alert" role="status" data-map-focus-no-coordinate hidden data-i18n="map.focus_no_coordinate">สถานที่นี้เผยแพร่แล้วแต่ยังไม่มีพิกัดสำหรับแสดงบนแผนที่</p><p class="alert" role="status" data-map-route-unavailable hidden data-i18n="map.route_unavailable">การแสดงเส้นทางบนแผนที่จะพร้อมใช้งานในรอบถัดไป</p></div>
+    <section class="map-primary-state map-primary-state--loading" data-map-loading role="status" aria-live="polite"><span class="loading-spinner" aria-hidden="true"></span><p data-i18n="map.loading">กำลังโหลดแผนที่ท่องเที่ยว…</p></section>
+    <section class="map-primary-state" data-map-empty hidden role="status"><h2 data-i18n="map.empty">ไม่พบสถานที่ที่ตรงกับตัวกรอง</h2></section>
+    <section class="map-primary-state" data-map-error hidden role="alert"><h2 data-i18n="map.error">โหลดข้อมูลแผนที่ไม่สำเร็จ</h2><button type="button" class="button" data-map-retry data-i18n="map.retry">ลองอีกครั้ง</button></section>
+    <section class="map-primary-state" data-map-leaflet-unavailable hidden role="alert"><h2 data-i18n="map.leaflet_unavailable">ไม่สามารถโหลดแผนที่แบบโต้ตอบได้</h2><p data-i18n="map.leaflet_fallback">คุณยังใช้รายการสถานที่ด้านล่างได้</p><button type="button" class="button" data-map-retry data-i18n="map.retry">ลองอีกครั้ง</button></section>
+    <section class="map-workspace" data-map-ready hidden><div class="map-visual"><p id="map-description" class="sr-only" data-i18n="map.map_description">แผนที่แสดงหมุดสถานที่ตัวอย่าง กดหมุดเพื่อเปิดรายละเอียด</p><div id="map" class="map-canvas" data-map-canvas role="region" aria-describedby="map-description" aria-label="แผนที่สถานที่ท่องเที่ยวตัวอย่าง" data-i18n-attr="aria-label:map.map_label"></div><aside class="map-legend" aria-labelledby="map-legend-title"><h2 id="map-legend-title" data-i18n="map.legend">คำอธิบายหมุด</h2><ul data-map-legend-list></ul></aside></div><aside class="map-preview" data-map-preview hidden aria-labelledby="map-preview-title" tabindex="-1"></aside></section>
+    <section class="map-results" aria-labelledby="map-results-title"><div class="map-results__header"><h2 id="map-results-title" data-i18n="map.fallback_title">รายการสถานที่</h2><p data-map-results aria-live="polite">0 รายการ</p></div><div class="map-fallback-list" data-map-fallback-list></div></section>
+    <noscript><section class="error-state" role="alert"><h2>ไม่สามารถเปิดแผนที่แบบโต้ตอบได้</h2><p>โปรดเปิด JavaScript หรือดูรายการสถานที่ท่องเที่ยวแทน</p><a class="button" href="places.html">ดูรายการสถานที่</a></section></noscript>
   </main>
-  <script src="js/config.js"></script>
-  <script src="js/i18n.js"></script>
-  <script src="js/api.js"></script>
-  <script src="js/app.js"></script>
+  <div class="toast-container" data-map-toast aria-live="polite" aria-atomic="true"></div>
+  <script src="js/config.js"></script><script src="js/i18n.js"></script><script src="js/api.js"></script><script src="js/place-data.js"></script><script src="js/app.js"></script><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script><script src="js/map.js"></script>
 </body>
 </html>
