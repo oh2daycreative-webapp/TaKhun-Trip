@@ -5,6 +5,7 @@ $public = Join-Path $root "public"
 
 $required = @(
   "public/index.html",
+  "public/foundation-preview.html",
   "public/map.html",
   "public/routes.html",
   "public/route-detail.html",
@@ -79,5 +80,6 @@ foreach ($html in $htmlFiles) {
 }
 
 & (Join-Path $PSScriptRoot "test-home.ps1")
+& (Join-Path $PSScriptRoot "test-foundation.ps1")
 
 Write-Host "Skeleton verification passed: $($required.Count) required files, $($htmlFiles.Count) HTML pages."
