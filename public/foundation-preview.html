@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="description" content="หน้าตรวจสอบ CSS foundation components สำหรับการพัฒนาในเครื่อง">
+  <title>Foundation Visual QA | Takhun Trip</title>
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/components.css">
+</head>
+<body>
+  <main class="page-shell" id="main-content">
+    <header class="section-heading">
+      <p class="eyebrow">Development Preview</p>
+      <h1>Foundation Visual QA</h1>
+      <p>หน้าตรวจสอบ design tokens, base styles และ shared components โดยไม่เชื่อมกับเมนูของเว็บไซต์</p>
+    </header>
+
+    <div class="stack">
+      <section class="card" aria-labelledby="buttons-title" data-preview="buttons">
+        <div class="card__header"><h2 id="buttons-title">Buttons</h2></div>
+        <div class="card__body stack">
+          <div class="cluster">
+            <button class="button button--primary" type="button">Primary</button>
+            <button class="button button--secondary" type="button">Secondary</button>
+            <button class="button button--ghost" type="button">Ghost</button>
+            <button class="button button--danger" type="button">Danger</button>
+            <a class="button button--link" href="#buttons-title">Link button</a>
+          </div>
+          <div class="cluster" data-preview="button-disabled" aria-label="Disabled button variants">
+            <button class="button button--primary" type="button" disabled>Primary disabled</button>
+            <button class="button button--secondary" type="button" disabled>Secondary disabled</button>
+            <button class="button button--ghost" type="button" disabled>Ghost disabled</button>
+            <button class="button button--danger" type="button" disabled>Danger disabled</button>
+            <button class="button button--link" type="button" disabled>Link disabled</button>
+          </div>
+          <div class="cluster" data-preview="icon-button">
+            <button class="button button--secondary button--icon" type="button" aria-label="ดูตำแหน่งบนแผนที่">
+              <span aria-hidden="true">⌖</span>
+              <span class="sr-only">ดูตำแหน่งบนแผนที่</span>
+            </button>
+            <span>Icon button พร้อม accessible name</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="labels-title">
+        <div class="card__header"><h2 id="labels-title">Badges and chips</h2></div>
+        <div class="card__body stack">
+          <div class="cluster" data-preview="badges">
+            <span class="badge">Primary</span>
+            <span class="badge badge--success">Success: พร้อมใช้งาน</span>
+            <span class="badge badge--warning">Warning: รอตรวจสอบ</span>
+            <span class="badge badge--danger">Danger: ต้องแก้ไข</span>
+            <span class="badge badge--info">Info: ข้อมูลเพิ่มเติม</span>
+            <span class="badge badge--muted">Muted</span>
+          </div>
+          <div class="cluster" data-preview="chips">
+            <button class="chip" type="button">ปกติ</button>
+            <button class="chip is-active" type="button" aria-pressed="true">เลือกแล้ว</button>
+            <button class="chip" type="button" disabled>ปิดใช้งาน</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="card-title" data-preview="card">
+        <div class="card__header"><h2 id="card-title">Generic card header</h2></div>
+        <div class="card__body">
+          <p>Card body รองรับเนื้อหาทั่วไปโดยไม่ผูกกับข้อมูลจริงของเว็บไซต์</p>
+        </div>
+        <div class="card__footer"><small>Generic card footer</small></div>
+      </section>
+
+      <section class="grid" aria-label="Loading and system states">
+        <article class="card" data-preview="loading-spinner">
+          <div class="card__header"><h2>Loading spinner</h2></div>
+          <div class="loading-state" role="status">
+            <span class="loading-spinner" aria-hidden="true"></span>
+            <span>กำลังโหลดตัวอย่าง…</span>
+          </div>
+        </article>
+
+        <article class="skeleton-card" data-preview="skeleton" aria-label="ตัวอย่าง skeleton loading" aria-busy="true">
+          <span class="skeleton">กำลังโหลดภาพตัวอย่าง</span>
+          <span class="skeleton">กำลังโหลดหัวข้อ</span>
+          <span class="skeleton">กำลังโหลดคำอธิบาย</span>
+        </article>
+
+        <article class="card" data-preview="empty-state">
+          <div class="empty-state">
+            <span class="empty-state__icon" aria-hidden="true">○</span>
+            <h2 class="empty-state__title">ยังไม่มีข้อมูลตัวอย่าง</h2>
+            <p class="empty-state__description">ลองเปลี่ยนตัวกรองหรือกลับมาตรวจสอบภายหลัง</p>
+            <a class="button button--secondary empty-state__action" href="#main-content">กลับด้านบน</a>
+          </div>
+        </article>
+
+        <article class="card" data-preview="error-state">
+          <div class="error-state" role="alert">
+            <span class="error-state__icon" aria-hidden="true">!</span>
+            <h2 class="error-state__title">โหลดตัวอย่างไม่สำเร็จ</h2>
+            <p class="error-state__description">กรุณาลองใหม่อีกครั้ง</p>
+            <button class="button button--danger error-state__action" type="button">ลองใหม่</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="card" aria-labelledby="alerts-title" data-preview="alerts">
+        <div class="card__header"><h2 id="alerts-title">Inline alerts</h2></div>
+        <div class="card__body stack">
+          <div class="alert alert--success" role="status"><strong>สำเร็จ:</strong> บันทึกตัวอย่างแล้ว</div>
+          <div class="alert alert--warning" role="status"><strong>คำเตือน:</strong> กรุณาตรวจสอบข้อมูล</div>
+          <div class="alert alert--error" role="alert"><strong>ข้อผิดพลาด:</strong> ดำเนินการไม่สำเร็จ</div>
+          <div class="alert alert--info" role="status"><strong>ข้อมูล:</strong> มีรายละเอียดเพิ่มเติม</div>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="toasts-title" data-preview="toasts">
+        <div class="card__header"><h2 id="toasts-title">Toast messages</h2></div>
+        <div class="card__body stack" aria-live="polite">
+          <div class="toast-message toast-message--success"><strong>สำเร็จ:</strong> อัปเดตตัวอย่างแล้ว</div>
+          <div class="toast-message toast-message--warning"><strong>คำเตือน:</strong> ตรวจสอบรายการอีกครั้ง</div>
+          <div class="toast-message toast-message--error"><strong>ข้อผิดพลาด:</strong> ไม่สามารถดำเนินการได้</div>
+          <div class="toast-message toast-message--info"><strong>ข้อมูล:</strong> ตัวอย่างข้อความแจ้งเตือน</div>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="forms-title" data-preview="form-controls">
+        <div class="card__header"><h2 id="forms-title">Form controls</h2></div>
+        <form class="card__body stack">
+          <label class="stack" for="preview-name">ชื่อสำหรับตัวอย่าง
+            <input id="preview-name" name="preview-name" type="text" value="ผู้ทดสอบ">
+          </label>
+          <label class="stack" for="preview-email">อีเมลตัวอย่าง
+            <input id="preview-email" name="preview-email" type="email" placeholder="name@example.test">
+          </label>
+          <label class="stack" for="preview-category">หมวดหมู่
+            <select id="preview-category" name="preview-category">
+              <option>ธรรมชาติ</option>
+              <option>ชุมชน</option>
+            </select>
+          </label>
+          <label class="stack" for="preview-note">หมายเหตุ
+            <textarea id="preview-note" name="preview-note" rows="3">ข้อความจำลองสำหรับตรวจรูปแบบ</textarea>
+          </label>
+          <div class="cluster">
+            <label><input type="checkbox" checked> Checkbox</label>
+            <label><input type="radio" name="preview-choice" checked> Radio</label>
+            <label><input type="checkbox" disabled> Disabled</label>
+          </div>
+        </form>
+      </section>
+
+      <section class="card" aria-labelledby="table-title" data-preview="table">
+        <div class="card__header"><h2 id="table-title">Table</h2></div>
+        <div class="card__body">
+          <table>
+            <thead><tr><th scope="col">รายการ</th><th scope="col">สถานะ</th><th scope="col">หมายเหตุ</th></tr></thead>
+            <tbody>
+              <tr><td>ตัวอย่าง A</td><td><span class="badge badge--success">พร้อม</span></td><td>ข้อมูลจำลอง</td></tr>
+              <tr><td>ตัวอย่าง B</td><td><span class="badge badge--warning">ตรวจสอบ</span></td><td>ข้อมูลจำลอง</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="accessibility-title">
+        <div class="card__header"><h2 id="accessibility-title">Accessibility behavior</h2></div>
+        <div class="card__body grid">
+          <article class="stack" data-preview="focus-visible">
+            <h3>Focus visible</h3>
+            <p>ใช้ปุ่ม Tab เพื่อดู focus ring ที่ชัดเจน</p>
+            <button class="button button--secondary" type="button" autofocus>เป้าหมาย keyboard focus</button>
+          </article>
+          <article class="stack" data-preview="reduced-motion">
+            <h3>Reduced motion</h3>
+            <p>เมื่อระบบเปิด Reduce Motion การหมุนและ shimmer ด้านล่างจะหยุด</p>
+            <div class="cluster" role="status">
+              <span class="loading-spinner" aria-hidden="true"></span>
+              <span class="skeleton">Motion preview</span>
+            </div>
+          </article>
+        </div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
