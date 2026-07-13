@@ -38,6 +38,66 @@ async function run() {
     assert.equal(typeof api.getPlaceDetail, "function");
     assert.equal(typeof api.getProducts, "function");
     assert.equal(typeof api.getProductDetail, "function");
+    assert.equal(typeof api.getEvents, "function");
+    assert.equal(typeof api.getEventDetail, "function");
+  }
+
+  {
+    const calls = [];
+    const api = loadApi({
+      apiUrl: "https://api.example/exec?token=kept",
+      fetchImpl: async (url) => {
+        calls.push(url);
+        return response({ body: { ok: true, data: { items: [], total: 0 } } });
+      }
+    });
+    const filters = { status: "all", type: "community market", month: "2026-08", lang: "en" };
+    const snapshot = JSON.stringify(filters);
+    await api.getEvents(filters);
+    const url = new URL(calls[0]);
+    assert.equal(url.searchParams.get("token"), "kept");
+    assert.equal(url.searchParams.get("action"), "getEvents");
+    assert.equal(url.searchParams.get("status"), "all");
+    assert.equal(url.searchParams.get("type"), "community market");
+    assert.equal(url.searchParams.get("month"), "2026-08");
+    assert.equal(url.searchParams.get("lang"), "en");
+    assert.match(calls[0], /type=community(?:\+|%20)market/);
+    assert.equal(JSON.stringify(filters), snapshot);
+  }
+
+  {
+    let requestedUrl = "";
+    const api = loadApi({
+      apiUrl: "https://api.example/exec",
+      fetchImpl: async (url) => {
+        requestedUrl = url;
+        return response({ body: { ok: true, data: { event_id: "EVT A/B" } } });
+      }
+    });
+    await api.getEventDetail("EVT A/B", { lang: "th" });
+    const url = new URL(requestedUrl);
+    assert.equal(url.searchParams.get("action"), "getEventDetail");
+    assert.equal(url.searchParams.get("event_id"), "EVT A/B");
+    assert.equal(url.searchParams.get("lang"), "th");
+    assert.match(requestedUrl, /event_id=EVT(?:\+|%20)A%2FB/);
+  }
+
+  {
+    const api = loadApi({ apiUrl: "" });
+    const list = await api.getEvents({}, { mock: () => ({ items: [{ event_id: "MOCK-EVT-001" }], total: 1 }) });
+    const detail = await api.getEventDetail("MOCK-EVT-001", {}, { mock: ({ event_id }) => ({ event_id }) });
+    assert.equal(list.items[0].event_id, "MOCK-EVT-001");
+    assert.equal(detail.event_id, "MOCK-EVT-001");
+  }
+
+  {
+    let mockCalls = 0;
+    const api = loadApi({
+      apiUrl: "https://api.example/exec",
+      fetchImpl: async () => { throw new Error("event network failure"); }
+    });
+    await expectReject(api.getEvents({}, { mock: () => { mockCalls += 1; return {}; } }), "NETWORK_ERROR");
+    assert.equal(mockCalls, 0);
   }
 
   {

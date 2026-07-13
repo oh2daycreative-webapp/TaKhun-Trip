@@ -93,6 +93,7 @@ foreach ($html in $htmlFiles) {
 & (Join-Path $PSScriptRoot "test-routes.ps1")
 & (Join-Path $PSScriptRoot "test-trip-planner.ps1")
 & (Join-Path $PSScriptRoot "test-products.ps1")
+& (Join-Path $PSScriptRoot "test-events.ps1")
 & node (Join-Path $PSScriptRoot "test-i18n.js")
 if ($LASTEXITCODE -ne 0) { throw "i18n behavior verification failed." }
 & node (Join-Path $PSScriptRoot "test-api.js")
