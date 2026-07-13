@@ -94,12 +94,22 @@
     return get("getTripTemplates", params, options);
   }
 
+  function getProducts(params = {}, options = {}) {
+    return get("getProducts", params, options);
+  }
+
+  function getProductDetail(productId, params = {}, options = {}) {
+    return get("getProductDetail", { ...params, product_id: productId }, options);
+  }
+
   global.TakhunApi = Object.freeze({
     get,
     getRoutes,
     getRouteDetail,
     getPlaceDetail,
     getTripTemplates,
+    getProducts,
+    getProductDetail,
     buildUrl,
     validateEnvelope,
     PublicApiError
