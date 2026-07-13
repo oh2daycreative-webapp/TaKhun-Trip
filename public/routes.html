@@ -4,25 +4,64 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title data-i18n="pages.routes.title">เส้นทางท่องเที่ยว | Takhun Trip</title>
-  <meta name="description" content="Takhun Trip เว็บแอปแนะนำการท่องเที่ยวบ้านตาขุน" data-i18n-attr="content:pages.common.description">
+  <meta name="description" content="เลือกเส้นทางเที่ยวบ้านตาขุนตามเวลาและสไตล์" data-i18n-attr="content:pages.routes.description">
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/components.css">
   <link rel="stylesheet" href="css/mobile.css">
 </head>
-<body class="public-page">
+<body class="public-page routes-page">
   <a class="skip-link" href="#main-content" data-i18n="shell.skip">ข้ามไปยังเนื้อหาหลัก</a>
   <div class="public-shell" data-public-shell data-page="routes.html"><a class="shell-fallback" href="index.html" data-i18n="shell.fallback_home">Takhun Trip — หน้าแรก</a></div>
-  <main class="page-shell bottom-nav-space" id="main-content">
-    <section class="placeholder" aria-labelledby="page-title">
-      <p class="eyebrow">Takhun Trip</p>
-      <h1 id="page-title" data-i18n="pages.routes.heading">เส้นทางท่องเที่ยว</h1>
-      <p data-i18n="system.preparing_page">หน้านี้อยู่ระหว่างการจัดเตรียม</p>
-      <a class="button" href="index.html" data-i18n="actions.back_home">กลับหน้าแรก</a>
+  <main class="routes-page__main bottom-nav-space" id="main-content">
+    <header class="routes-page__hero" aria-labelledby="routes-page-title">
+      <div class="routes-page__hero-copy">
+        <p class="eyebrow" data-i18n="routes_page.eyebrow">ออกเดินทางในแบบของคุณ</p>
+        <h1 id="routes-page-title" data-i18n="routes_page.heading">เส้นทางเที่ยวบ้านตาขุน</h1>
+        <p data-i18n="routes_page.intro">เลือกทริปที่เข้ากับเวลาและสไตล์ของคุณ แล้วเปิดแผนที่เพื่อออกเดินทางได้ทันที</p>
+      </div>
+      <div class="routes-page__hero-mark" aria-hidden="true"><span>01</span><span>02</span><span>03</span></div>
+    </header>
+
+    <p class="routes-page__demo-notice" data-routes-demo-notice data-i18n="routes_page.demo_notice" hidden>กำลังแสดงข้อมูลเส้นทางสาธิตที่ยังไม่ได้รับการยืนยัน</p>
+
+    <section class="routes-page__state loading-state" data-routes-loading role="status" aria-live="polite">
+      <span class="loading-spinner" aria-hidden="true"></span>
+      <p data-i18n="routes_page.loading">กำลังโหลดเส้นทางท่องเที่ยว…</p>
     </section>
+    <section class="routes-page__state empty-state" data-routes-empty role="status" aria-live="polite" hidden>
+      <span class="empty-state__icon" aria-hidden="true">↝</span>
+      <h2 class="empty-state__title" data-i18n="routes_page.empty_title">ยังไม่มีเส้นทางที่เผยแพร่</h2>
+      <p class="empty-state__description" data-i18n="routes_page.empty_text">ลองกลับมาใหม่อีกครั้งเมื่อมีเส้นทางพร้อมออกเดินทาง</p>
+    </section>
+    <section class="routes-page__state error-state" data-routes-error role="alert" aria-live="assertive" hidden>
+      <span class="error-state__icon" aria-hidden="true">!</span>
+      <h2 class="error-state__title" data-i18n="routes_page.error_title">โหลดเส้นทางไม่สำเร็จ</h2>
+      <p class="error-state__description" data-i18n="routes_page.error_text">ไม่สามารถเชื่อมต่อข้อมูลเส้นทางได้ในขณะนี้</p>
+      <button class="button button--secondary error-state__action" type="button" data-routes-retry data-i18n="routes_page.retry">ลองอีกครั้ง</button>
+    </section>
+
+    <div data-routes-ready hidden>
+      <section class="routes-page__featured" data-routes-featured-section aria-labelledby="featured-routes-title">
+        <div class="routes-page__section-heading">
+          <div><p class="eyebrow" data-i18n="routes_page.featured_label">เส้นทางเด่น</p><h2 id="featured-routes-title" data-i18n="routes_page.featured_title">ทริปแนะนำสำหรับคุณ</h2></div>
+        </div>
+        <div data-routes-featured></div>
+      </section>
+      <section class="routes-page__all" aria-labelledby="all-routes-title">
+        <div class="routes-page__section-heading"><h2 id="all-routes-title" data-i18n="routes_page.all_title">เส้นทางทั้งหมด</h2></div>
+        <div class="routes-page__grid" data-routes-grid></div>
+      </section>
+      <aside class="routes-page__planner-cta">
+        <div><p class="eyebrow">Takhun Trip</p><h2 data-i18n="routes_page.planner_cta_title">อยากจัดทริปในแบบของคุณ?</h2><p data-i18n="routes_page.planner_cta_text">เลือกเวลาและจุดหมาย แล้วสร้างแผนเที่ยวที่เหมาะกับวันของคุณ</p></div>
+        <a class="button button--primary" href="trip-planner.html" data-i18n="routes_page.planner_cta_action">เริ่มวางแผนทริป</a>
+      </aside>
+    </div>
+    <noscript><section class="error-state" role="alert"><h2 data-i18n="routes_page.no_script">โปรดเปิด JavaScript เพื่อดูรายการเส้นทาง</h2></section></noscript>
   </main>
   <script src="js/config.js"></script>
   <script src="js/i18n.js"></script>
   <script src="js/api.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/routes.js"></script>
 </body>
 </html>
