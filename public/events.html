@@ -9,20 +9,73 @@
   <link rel="stylesheet" href="css/components.css">
   <link rel="stylesheet" href="css/mobile.css">
 </head>
-<body class="public-page">
+<body class="public-page events-page">
   <a class="skip-link" href="#main-content" data-i18n="shell.skip">ข้ามไปยังเนื้อหาหลัก</a>
   <div class="public-shell" data-public-shell data-page="events.html"><a class="shell-fallback" href="index.html" data-i18n="shell.fallback_home">Takhun Trip — หน้าแรก</a></div>
-  <main class="page-shell bottom-nav-space" id="main-content">
-    <section class="placeholder" aria-labelledby="page-title">
-      <p class="eyebrow">Takhun Trip</p>
-      <h1 id="page-title" data-i18n="pages.events.heading">กิจกรรมและเทศกาล</h1>
-      <p data-i18n="system.preparing_page">หน้านี้อยู่ระหว่างการจัดเตรียม</p>
-      <a class="button" href="index.html" data-i18n="actions.back_home">กลับหน้าแรก</a>
+
+  <main class="events-page__main bottom-nav-space" id="main-content">
+    <header class="events-page__hero" aria-labelledby="events-page-title">
+      <div class="events-page__hero-copy">
+        <p class="eyebrow" data-i18n="events.eyebrow">ปฏิทินเที่ยวบ้านตาขุน</p>
+        <h1 id="events-page-title" data-i18n="events.heading">กิจกรรมและเทศกาล</h1>
+        <p data-i18n="events.intro">วางแผนวันพิเศษกับกิจกรรมชุมชน เทศกาล และประสบการณ์ท้องถิ่น</p>
+      </div>
+      <div class="events-page__calendar-art" aria-hidden="true"><span>13</span></div>
+    </header>
+
+    <p class="events-page__demo-notice" data-events-demo-notice data-i18n="events.demo_notice" hidden>กำลังแสดงข้อมูลกิจกรรมสาธิตที่ยังไม่ได้รับการยืนยัน</p>
+
+    <section class="events-page__filters" aria-labelledby="event-filters-title">
+      <div class="events-page__filters-heading">
+        <h2 id="event-filters-title" data-i18n="events.filters">ตัวกรองกิจกรรม</h2>
+        <button class="button button--ghost" type="button" data-events-clear data-i18n="events.clear_filters">ล้างตัวกรอง</button>
+      </div>
+      <form class="events-filter-form" data-events-filter-form>
+        <label class="events-filter-field" for="event-type">
+          <span data-i18n="events.event_type">ประเภทกิจกรรม</span>
+          <select id="event-type" data-event-filter="type"><option value="" data-i18n="events.all_types">ทุกประเภท</option></select>
+        </label>
+        <label class="events-filter-field" for="event-month">
+          <span data-i18n="events.month">เดือน</span>
+          <input id="event-month" data-event-filter="month" type="month" min="2000-01" max="2100-12">
+        </label>
+        <button class="button button--primary events-filter-form__submit" type="submit" data-i18n="events.filters">ตัวกรองกิจกรรม</button>
+      </form>
     </section>
+
+    <section class="events-page__state loading-state" data-events-loading role="status" aria-live="polite">
+      <span class="loading-spinner" aria-hidden="true"></span><p data-i18n="events.loading">กำลังโหลดกิจกรรม…</p>
+    </section>
+    <section class="events-page__state empty-state" data-events-empty role="status" aria-live="polite" hidden>
+      <span class="empty-state__icon" aria-hidden="true">◇</span><h2 class="empty-state__title" data-i18n="events.empty_title">ยังไม่มีกิจกรรม</h2><p class="empty-state__description" data-i18n="events.empty_text">กลับมาตรวจสอบอีกครั้งเมื่อมีกิจกรรมพร้อมเผยแพร่</p>
+    </section>
+    <section class="events-page__state empty-state" data-events-filtered-empty role="status" aria-live="polite" hidden>
+      <span class="empty-state__icon" aria-hidden="true">⌕</span><h2 class="empty-state__title" data-i18n="events.filtered_empty_title">ไม่มีกิจกรรมที่ตรงกับตัวกรอง</h2><p class="empty-state__description" data-i18n="events.filtered_empty_text">ลองล้างตัวกรองหรือเลือกเงื่อนไขอื่น</p><button class="button button--secondary empty-state__action" type="button" data-events-clear data-i18n="events.clear_filters">ล้างตัวกรอง</button>
+    </section>
+    <section class="events-page__state error-state" data-events-invalid-filter role="alert" aria-live="assertive" hidden>
+      <span class="error-state__icon" aria-hidden="true">!</span><h2 class="error-state__title" data-i18n="events.invalid_filter_title">ตัวกรองไม่ถูกต้อง</h2><p class="error-state__description" data-i18n="events.invalid_filter_text">ลิงก์นี้มีตัวกรองที่ไม่รองรับ กรุณาล้างตัวกรองแล้วลองอีกครั้ง</p><button class="button button--secondary error-state__action" type="button" data-events-clear data-i18n="events.clear_filters">ล้างตัวกรอง</button>
+    </section>
+    <section class="events-page__state error-state" data-events-error role="alert" aria-live="assertive" hidden>
+      <span class="error-state__icon" aria-hidden="true">!</span><h2 class="error-state__title" data-i18n="events.error_title">โหลดกิจกรรมไม่สำเร็จ</h2><p class="error-state__description" data-i18n="events.error_text">ไม่สามารถเชื่อมต่อข้อมูลกิจกรรมได้ในขณะนี้</p><button class="button button--secondary error-state__action" type="button" data-events-retry data-i18n="events.retry">ลองอีกครั้ง</button>
+    </section>
+
+    <div data-events-ready hidden>
+      <section class="events-page__featured" data-events-featured-section aria-labelledby="featured-events-title" hidden>
+        <div class="events-page__section-heading"><h2 id="featured-events-title" data-i18n="events.upcoming">กิจกรรมที่กำลังจะมาถึง</h2><p data-events-upcoming-count aria-live="polite"></p></div>
+        <div class="events-page__grid events-page__grid--featured" data-events-featured></div>
+      </section>
+      <section class="events-page__all" data-events-past-section aria-labelledby="past-events-title">
+        <div class="events-page__section-heading"><h2 id="past-events-title" data-i18n="events.past">ผ่านมาแล้ว</h2><p data-events-past-count aria-live="polite"></p></div>
+        <div class="events-page__grid" data-events-grid></div>
+      </section>
+    </div>
+    <noscript><section class="error-state" role="alert"><h2>โปรดเปิด JavaScript เพื่อดูกิจกรรม</h2></section></noscript>
   </main>
+
   <script src="js/config.js"></script>
   <script src="js/i18n.js"></script>
   <script src="js/api.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/events.js"></script>
 </body>
 </html>

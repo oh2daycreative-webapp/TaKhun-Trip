@@ -102,6 +102,14 @@
     return get("getProductDetail", { ...params, product_id: productId }, options);
   }
 
+  function getEvents(params = {}, options = {}) {
+    return get("getEvents", params, options);
+  }
+
+  function getEventDetail(eventId, params = {}, options = {}) {
+    return get("getEventDetail", { ...params, event_id: eventId }, options);
+  }
+
   global.TakhunApi = Object.freeze({
     get,
     getRoutes,
@@ -110,6 +118,8 @@
     getTripTemplates,
     getProducts,
     getProductDetail,
+    getEvents,
+    getEventDetail,
     buildUrl,
     validateEnvelope,
     PublicApiError
