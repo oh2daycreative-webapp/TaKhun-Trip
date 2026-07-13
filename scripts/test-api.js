@@ -33,6 +33,29 @@ async function expectReject(promise, code) {
 
 async function run() {
   {
+    const api = loadApi({ apiUrl: "https://api.example/exec" });
+    assert.equal(typeof api.getTripTemplates, "function");
+    assert.equal(typeof api.getPlaceDetail, "function");
+  }
+
+  {
+    let requestedUrl = "";
+    const api = loadApi({
+      apiUrl: "https://api.example/exec",
+      fetchImpl: async (url) => {
+        requestedUrl = url;
+        return response({ body: { ok: true, data: { items: [], total: 0 } } });
+      }
+    });
+    await api.getTripTemplates({ duration_type: "one_day", style: "food/cafe", lang: "en" });
+    const url = new URL(requestedUrl);
+    assert.equal(url.searchParams.get("action"), "getTripTemplates");
+    assert.equal(url.searchParams.get("duration_type"), "one_day");
+    assert.equal(url.searchParams.get("style"), "food/cafe");
+    assert.equal(url.searchParams.get("lang"), "en");
+  }
+
+  {
     const api = loadApi({ apiUrl: "https://api.example/exec?token=kept" });
     const url = api.buildUrl("get Routes/A", { lang: "th", style: "nature & lake", unsafe: "A/B?C" });
     assert.equal(url.searchParams.get("token"), "kept");

@@ -86,10 +86,20 @@
     return get("getRouteDetail", { ...params, route_id: routeId }, options);
   }
 
+  function getPlaceDetail(placeId, params = {}, options = {}) {
+    return get("getPlaceDetail", { ...params, place_id: placeId }, options);
+  }
+
+  function getTripTemplates(params = {}, options = {}) {
+    return get("getTripTemplates", params, options);
+  }
+
   global.TakhunApi = Object.freeze({
     get,
     getRoutes,
     getRouteDetail,
+    getPlaceDetail,
+    getTripTemplates,
     buildUrl,
     validateEnvelope,
     PublicApiError
