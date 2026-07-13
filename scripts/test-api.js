@@ -36,6 +36,52 @@ async function run() {
     const api = loadApi({ apiUrl: "https://api.example/exec" });
     assert.equal(typeof api.getTripTemplates, "function");
     assert.equal(typeof api.getPlaceDetail, "function");
+    assert.equal(typeof api.getProducts, "function");
+    assert.equal(typeof api.getProductDetail, "function");
+  }
+
+  {
+    const calls = [];
+    const api = loadApi({
+      apiUrl: "https://api.example/exec?token=kept",
+      fetchImpl: async (url) => {
+        calls.push(url);
+        return response({ body: { ok: true, data: { items: [], total: 0 } } });
+      }
+    });
+    const filters = { category: "food & honey", district: "ban_ta_khun", related_place_id: "BTK A/B", lang: "en" };
+    const snapshot = JSON.stringify(filters);
+    await api.getProducts(filters);
+    const url = new URL(calls[0]);
+    assert.equal(url.searchParams.get("token"), "kept");
+    assert.equal(url.searchParams.get("action"), "getProducts");
+    assert.equal(url.searchParams.get("category"), "food & honey");
+    assert.equal(url.searchParams.get("related_place_id"), "BTK A/B");
+    assert.equal(JSON.stringify(filters), snapshot);
+  }
+
+  {
+    let requestedUrl = "";
+    const api = loadApi({
+      apiUrl: "https://api.example/exec",
+      fetchImpl: async (url) => {
+        requestedUrl = url;
+        return response({ body: { ok: true, data: { product_id: "PROD A/B" } } });
+      }
+    });
+    await api.getProductDetail("PROD A/B", { lang: "th" });
+    const url = new URL(requestedUrl);
+    assert.equal(url.searchParams.get("action"), "getProductDetail");
+    assert.equal(url.searchParams.get("product_id"), "PROD A/B");
+    assert.match(requestedUrl, /product_id=PROD(?:\+|%20)A%2FB/);
+  }
+
+  {
+    const api = loadApi({ apiUrl: "" });
+    const list = await api.getProducts({}, { mock: () => ({ items: [{ product_id: "MOCK-PROD-001" }], total: 1 }) });
+    const detail = await api.getProductDetail("MOCK-PROD-001", {}, { mock: ({ product_id }) => ({ product_id }) });
+    assert.equal(list.items[0].product_id, "MOCK-PROD-001");
+    assert.equal(detail.product_id, "MOCK-PROD-001");
   }
 
   {

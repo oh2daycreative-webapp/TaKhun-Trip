@@ -4,25 +4,71 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title data-i18n="pages.products.title">สินค้าและชุมชน | Takhun Trip</title>
-  <meta name="description" content="Takhun Trip เว็บแอปแนะนำการท่องเที่ยวบ้านตาขุน" data-i18n-attr="content:pages.common.description">
+  <meta name="description" content="เลือกชมสินค้า ของฝาก และบริการจากชุมชนบ้านตาขุน" data-i18n-attr="content:pages.products.description">
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/components.css">
   <link rel="stylesheet" href="css/mobile.css">
 </head>
-<body class="public-page">
+<body class="public-page products-page">
   <a class="skip-link" href="#main-content" data-i18n="shell.skip">ข้ามไปยังเนื้อหาหลัก</a>
   <div class="public-shell" data-public-shell data-page="products.html"><a class="shell-fallback" href="index.html" data-i18n="shell.fallback_home">Takhun Trip — หน้าแรก</a></div>
-  <main class="page-shell bottom-nav-space" id="main-content">
-    <section class="placeholder" aria-labelledby="page-title">
-      <p class="eyebrow">Takhun Trip</p>
-      <h1 id="page-title" data-i18n="pages.products.heading">สินค้าและชุมชน</h1>
-      <p data-i18n="system.preparing_page">หน้านี้อยู่ระหว่างการจัดเตรียม</p>
-      <a class="button" href="index.html" data-i18n="actions.back_home">กลับหน้าแรก</a>
+
+  <main class="products-page__main bottom-nav-space" id="main-content">
+    <header class="products-page__hero" aria-labelledby="products-page-title">
+      <div class="products-page__hero-copy">
+        <p class="eyebrow" data-i18n="products.eyebrow">ของดีที่พาเรื่องราวชุมชนกลับบ้าน</p>
+        <h1 id="products-page-title" data-i18n="products.heading">ของดีชุมชนบ้านตาขุน</h1>
+        <p data-i18n="products.intro">ค้นพบสินค้า ของฝาก และประสบการณ์จากผู้ผลิตในพื้นที่ แล้วติดต่อชุมชนได้โดยตรง</p>
+      </div>
+      <div class="products-page__hero-art" aria-hidden="true"><span></span><span></span><span></span></div>
+    </header>
+
+    <p class="products-page__demo-notice" data-products-demo-notice data-i18n="products.demo_notice" hidden>กำลังแสดงข้อมูลสินค้าสาธิตที่ยังไม่ได้รับการยืนยัน</p>
+    <p class="products-page__invalid-filter" data-products-invalid-filter role="status" data-i18n="products.invalid_filter" hidden>ละเว้นตัวกรองในลิงก์ที่ไม่ถูกต้องแล้ว</p>
+
+    <section class="products-page__filters" aria-labelledby="product-filters-title">
+      <div class="products-page__filters-heading">
+        <div><p class="eyebrow" data-i18n="products.filter_eyebrow">เลือกให้ตรงใจ</p><h2 id="product-filters-title" data-i18n="products.filters">ตัวกรองสินค้า</h2></div>
+        <button class="button button--ghost" type="button" data-products-clear data-i18n="products.clear_filters">ล้างตัวกรอง</button>
+      </div>
+      <form class="products-filter-form" data-products-filter-form>
+        <label class="products-filter-field" for="product-category"><span data-i18n="products.category">หมวดหมู่</span><select id="product-category" data-product-filter="category"><option value="" data-i18n="products.all">ทั้งหมด</option></select></label>
+        <label class="products-filter-field" for="product-district"><span data-i18n="products.district">พื้นที่</span><select id="product-district" data-product-filter="district"><option value="" data-i18n="products.all">ทั้งหมด</option></select></label>
+        <label class="products-filter-field" for="product-related-place"><span data-i18n="products.related_place_id">รหัสสถานที่เกี่ยวข้อง</span><input id="product-related-place" type="text" inputmode="text" autocomplete="off" data-product-filter="related_place_id" data-i18n-attr="placeholder:products.related_place_placeholder" placeholder="เช่น BTK-003"></label>
+        <button class="button button--primary products-filter-form__submit" type="submit" data-i18n="products.apply_filters">แสดงสินค้า</button>
+      </form>
     </section>
+
+    <section class="products-page__state loading-state" data-products-loading role="status" aria-live="polite">
+      <span class="loading-spinner" aria-hidden="true"></span><p data-i18n="products.loading">กำลังโหลดสินค้า…</p>
+    </section>
+    <section class="products-page__state empty-state" data-products-empty role="status" aria-live="polite" hidden>
+      <span class="empty-state__icon" aria-hidden="true">◇</span><h2 class="empty-state__title" data-i18n="products.empty_title">ยังไม่มีสินค้า</h2><p class="empty-state__description" data-i18n="products.empty_text">ลองกลับมาใหม่เมื่อชุมชนมีเรื่องราวและสินค้าเพิ่มเติม</p>
+    </section>
+    <section class="products-page__state empty-state" data-products-filtered-empty role="status" aria-live="polite" hidden>
+      <span class="empty-state__icon" aria-hidden="true">⌕</span><h2 class="empty-state__title" data-i18n="products.filtered_empty_title">ไม่พบสินค้าตามตัวกรอง</h2><p class="empty-state__description" data-i18n="products.filtered_empty_text">ลองล้างตัวกรองหรือเลือกเงื่อนไขอื่น</p><button class="button button--secondary empty-state__action" type="button" data-products-clear data-i18n="products.clear_filters">ล้างตัวกรอง</button>
+    </section>
+    <section class="products-page__state error-state" data-products-error role="alert" aria-live="assertive" hidden>
+      <span class="error-state__icon" aria-hidden="true">!</span><h2 class="error-state__title" data-i18n="products.error_title">โหลดข้อมูลไม่สำเร็จ</h2><p class="error-state__description" data-i18n="products.error_text">ไม่สามารถเชื่อมต่อข้อมูลสินค้าได้ในขณะนี้</p><button class="button button--secondary error-state__action" type="button" data-products-retry data-i18n="products.retry">ลองใหม่</button>
+    </section>
+
+    <div data-products-ready hidden>
+      <section class="products-page__featured" data-products-featured-section aria-labelledby="featured-products-title">
+        <div class="products-page__section-heading"><div><p class="eyebrow" data-i18n="products.featured_label">คัดสรรจากชุมชน</p><h2 id="featured-products-title" data-i18n="products.featured_title">สินค้าแนะนำ</h2></div></div>
+        <div class="products-page__grid products-page__grid--featured" data-products-featured></div>
+      </section>
+      <section class="products-page__all" aria-labelledby="all-products-title">
+        <div class="products-page__section-heading"><h2 id="all-products-title" data-i18n="products.all_title">สินค้าทั้งหมด</h2><p data-products-summary aria-live="polite"></p></div>
+        <div class="products-page__grid" data-products-grid></div>
+      </section>
+    </div>
+    <noscript><section class="error-state" role="alert"><h2>โปรดเปิด JavaScript เพื่อดูรายการสินค้า</h2></section></noscript>
   </main>
+
   <script src="js/config.js"></script>
   <script src="js/i18n.js"></script>
   <script src="js/api.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/products.js"></script>
 </body>
 </html>
