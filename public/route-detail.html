@@ -4,25 +4,71 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title data-i18n="pages.route_detail.title">รายละเอียดเส้นทาง | Takhun Trip</title>
-  <meta name="description" content="Takhun Trip เว็บแอปแนะนำการท่องเที่ยวบ้านตาขุน" data-i18n-attr="content:pages.common.description">
+  <meta name="description" content="ดูรายละเอียดเส้นทางและลำดับจุดแวะ" data-i18n-attr="content:pages.route_detail.description">
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/components.css">
   <link rel="stylesheet" href="css/mobile.css">
 </head>
-<body class="public-page">
+<body class="public-page route-detail-page">
   <a class="skip-link" href="#main-content" data-i18n="shell.skip">ข้ามไปยังเนื้อหาหลัก</a>
   <div class="public-shell" data-public-shell data-page="route-detail.html"><a class="shell-fallback" href="index.html" data-i18n="shell.fallback_home">Takhun Trip — หน้าแรก</a></div>
-  <main class="page-shell bottom-nav-space" id="main-content">
-    <section class="placeholder" aria-labelledby="page-title">
-      <p class="eyebrow">Takhun Trip</p>
-      <h1 id="page-title" data-i18n="pages.route_detail.heading">รายละเอียดเส้นทาง</h1>
-      <p data-i18n="system.preparing_page">หน้านี้อยู่ระหว่างการจัดเตรียม</p>
-      <a class="button" href="index.html" data-i18n="actions.back_home">กลับหน้าแรก</a>
+  <main class="route-detail-page__main bottom-nav-space" id="main-content">
+    <section class="route-detail-page__state loading-state" data-route-detail-loading role="status" aria-live="polite">
+      <span class="loading-spinner" aria-hidden="true"></span>
+      <p data-i18n="route_detail.loading">กำลังโหลดรายละเอียดเส้นทาง…</p>
     </section>
+    <section class="route-detail-page__state empty-state" data-route-detail-invalid role="alert" hidden>
+      <span class="empty-state__icon" aria-hidden="true">?</span>
+      <h1 class="empty-state__title" data-i18n="route_detail.invalid_title">ลิงก์เส้นทางไม่ถูกต้อง</h1>
+      <p class="empty-state__description" data-i18n="route_detail.invalid_text">ไม่พบรหัสเส้นทางที่ใช้ได้ โปรดกลับไปเลือกจากรายการเส้นทาง</p>
+      <a class="button button--secondary empty-state__action" href="routes.html" data-i18n="route_detail.back_to_routes">กลับไปดูเส้นทาง</a>
+    </section>
+    <section class="route-detail-page__state empty-state" data-route-detail-not-found role="status" aria-live="polite" hidden>
+      <span class="empty-state__icon" aria-hidden="true">↝</span>
+      <h1 class="empty-state__title" data-i18n="route_detail.not_found_title">ไม่พบเส้นทางนี้</h1>
+      <p class="empty-state__description" data-i18n="route_detail.not_found_text">เส้นทางอาจถูกซ่อน ย้าย หรือยังไม่พร้อมเผยแพร่</p>
+      <a class="button button--secondary empty-state__action" href="routes.html" data-i18n="route_detail.back_to_routes">กลับไปดูเส้นทาง</a>
+    </section>
+    <section class="route-detail-page__state error-state" data-route-detail-error role="alert" aria-live="assertive" hidden>
+      <span class="error-state__icon" aria-hidden="true">!</span>
+      <h1 class="error-state__title" data-i18n="route_detail.error_title">โหลดรายละเอียดเส้นทางไม่สำเร็จ</h1>
+      <p class="error-state__description" data-i18n="route_detail.error_text">ไม่สามารถเชื่อมต่อข้อมูลเส้นทางได้ในขณะนี้</p>
+      <button class="button button--secondary error-state__action" type="button" data-route-detail-retry data-i18n="route_detail.retry">ลองอีกครั้ง</button>
+    </section>
+
+    <article data-route-detail-ready hidden>
+      <p class="route-detail-page__demo-notice" data-route-detail-demo-notice data-i18n="route_detail.demo_notice" hidden>ข้อมูลในเส้นทางนี้เป็นข้อมูลสาธิตที่ยังไม่ได้รับการยืนยัน</p>
+      <header class="route-detail-page__hero">
+        <div class="route-detail-page__hero-media" data-route-detail-media></div>
+        <div class="route-detail-page__hero-overlay">
+          <a class="route-detail-page__back" href="routes.html" data-i18n="route_detail.back_to_routes">กลับไปดูเส้นทาง</a>
+          <div data-route-detail-summary></div>
+        </div>
+      </header>
+      <div class="route-detail-page__layout">
+        <div class="route-detail-page__content">
+          <section class="route-detail-page__overview" aria-labelledby="route-overview-title">
+            <h2 id="route-overview-title" data-i18n="route_detail.overview">ภาพรวมเส้นทาง</h2>
+            <p data-route-detail-description></p>
+          </section>
+          <section class="route-detail-page__timeline-section" aria-labelledby="route-timeline-title">
+            <div class="route-detail-page__section-heading"><p class="eyebrow">Takhun Trip</p><h2 id="route-timeline-title" data-i18n="route_detail.timeline_title">ลำดับการเดินทาง</h2><p data-i18n="route_detail.timeline_intro">แวะเที่ยวตามลำดับที่จัดไว้ เพื่อให้ทุกช่วงของทริปต่อเนื่องและเข้าใจง่าย</p></div>
+            <div class="route-detail-page__timeline" data-route-timeline></div>
+            <p class="route-detail-page__no-stops" data-route-timeline-empty data-i18n="route_detail.no_stops" role="status" hidden>เส้นทางนี้ยังไม่มีจุดแวะ</p>
+          </section>
+        </div>
+        <aside class="route-detail-page__actions" aria-label="การทำงานของเส้นทาง" data-i18n-attr="aria-label:route_detail.actions_label">
+          <a class="button button--primary" data-route-map-link href="map.html" data-i18n="route_detail.open_map">เปิดแผนที่</a>
+          <a class="button button--secondary" data-route-trip-link href="trip-planner.html" data-i18n="route_detail.add_to_trip">เพิ่มเส้นทางลงทริป</a>
+        </aside>
+      </div>
+    </article>
+    <noscript><section class="error-state" role="alert"><h1>โปรดเปิด JavaScript เพื่อดูรายละเอียดเส้นทาง</h1><a class="button" href="routes.html">กลับไปดูเส้นทาง</a></section></noscript>
   </main>
   <script src="js/config.js"></script>
   <script src="js/i18n.js"></script>
   <script src="js/api.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/routes.js"></script>
 </body>
 </html>
