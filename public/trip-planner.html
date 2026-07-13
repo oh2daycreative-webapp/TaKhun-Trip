@@ -12,17 +12,28 @@
 <body class="public-page">
   <a class="skip-link" href="#main-content" data-i18n="shell.skip">ข้ามไปยังเนื้อหาหลัก</a>
   <div class="public-shell" data-public-shell data-page="trip-planner.html"><a class="shell-fallback" href="index.html" data-i18n="shell.fallback_home">Takhun Trip — หน้าแรก</a></div>
-  <main class="page-shell bottom-nav-space" id="main-content">
-    <section class="placeholder" aria-labelledby="page-title">
-      <p class="eyebrow">Takhun Trip</p>
-      <h1 id="page-title" data-i18n="pages.planner.heading">วางแผนทริป</h1>
-      <p data-i18n="system.preparing_page">หน้านี้อยู่ระหว่างการจัดเตรียม</p>
-      <a class="button" href="index.html" data-i18n="actions.back_home">กลับหน้าแรก</a>
-    </section>
+  <main class="trip-planner bottom-nav-space" id="main-content" data-trip-planner>
+    <header class="trip-planner__hero" aria-labelledby="page-title">
+      <div><p class="eyebrow">Takhun Trip</p><h1 id="page-title" data-i18n="pages.planner.heading">วางแผนทริป</h1><p data-i18n="trip_planner.intro">เลือกเวลา สไตล์ และจุดหมายที่ใช่ แล้วเก็บแผนเที่ยวไว้ในเครื่องนี้</p></div>
+      <span class="trip-planner__badge" data-i18n="trip_planner.badge">วางแผนง่ายใน 3 ขั้น</span>
+    </header>
+    <p class="trip-planner__status" data-planner-status role="status" aria-live="polite"></p>
+    <div class="trip-planner__layout">
+      <div class="trip-planner__steps">
+        <section class="planner-panel" aria-labelledby="planner-duration-title"><span class="planner-panel__step">1</span><div><h2 id="planner-duration-title" data-i18n="trip_planner.step_duration">เลือกระยะเวลา</h2><p data-i18n="trip_planner.step_duration_hint">คุณมีเวลาเที่ยวเท่าไร?</p><fieldset><legend class="sr-only" data-i18n="trip_planner.step_duration">เลือกระยะเวลา</legend><div class="planner-options" data-planner-duration></div></fieldset></div></section>
+        <section class="planner-panel" aria-labelledby="planner-style-title"><span class="planner-panel__step">2</span><div><h2 id="planner-style-title" data-i18n="trip_planner.step_style">เลือกสไตล์การเที่ยว</h2><p data-i18n="trip_planner.step_style_hint">เลือกได้มากกว่าหนึ่งแบบ</p><div class="planner-chips" data-planner-styles role="group" aria-labelledby="planner-style-title"></div></div></section>
+        <section class="planner-panel" aria-labelledby="planner-template-title"><span class="planner-panel__step">3</span><div><h2 id="planner-template-title" data-i18n="trip_planner.step_template">เลือกแผนแนะนำ</h2><p data-i18n="trip_planner.step_template_hint">แผนจะปรับตามตัวเลือกของคุณ</p><div class="planner-template-grid" data-planner-templates></div></div></section>
+      </div>
+      <aside class="planner-plan" aria-labelledby="planner-plan-title"><div class="planner-plan__heading"><div><p class="eyebrow" data-i18n="trip_planner.your_plan_label">แผนของคุณ</p><h2 id="planner-plan-title" data-i18n="trip_planner.your_plan">จุดหมายตามลำดับ</h2></div><button class="button button--ghost" type="button" data-planner-clear data-i18n="trip_planner.clear">ล้างแผน</button></div><div class="planner-stop-list" data-planner-places></div><div class="planner-plan__actions"><a class="button button--primary" href="map.html" data-planner-map data-i18n="trip_planner.open_trip_map">เปิดแผนที่ทั้งทริป</a><button class="button button--secondary" type="button" data-planner-share data-i18n="trip_planner.share">แชร์แผน</button></div></aside>
+    </div>
+    <noscript><section class="error-state" role="alert"><h2 data-i18n="trip_planner.no_script">โปรดเปิด JavaScript เพื่อวางแผนทริป</h2></section></noscript>
   </main>
   <script src="js/config.js"></script>
   <script src="js/i18n.js"></script>
   <script src="js/api.js"></script>
+  <script src="js/place-data.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/routes.js"></script>
+  <script src="js/trip-planner.js"></script>
 </body>
 </html>

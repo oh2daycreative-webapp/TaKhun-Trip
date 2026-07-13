@@ -214,3 +214,44 @@
 @media (min-width:1024px){.route-detail-page .route-detail-page__layout{grid-template-columns:minmax(0,1.65fr) minmax(17rem,.62fr);align-items:start}.route-detail-page .route-detail-page__actions{position:sticky;top:calc(var(--header-height) + var(--space-4))}.routes-page .routes-page__grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:479px){.routes-page .routes-page__hero{min-height:28rem;border-radius:var(--radius-lg)}.routes-page .routes-page__hero-mark span:nth-child(n+3){display:none}.routes-page .route-explorer-card__actions,.route-detail-page .route-stop__actions{display:grid;grid-template-columns:1fr}.routes-page .route-explorer-card__actions .button,.route-detail-page .route-stop__actions .button{width:100%}.route-detail-page .route-detail-page__hero{min-height:38rem;border-radius:var(--radius-lg)}.route-detail-page .route-stop{grid-template-columns:2.75rem minmax(0,1fr);gap:var(--space-2)}.route-detail-page .route-stop__number{width:2.6rem;height:2.6rem;border-width:4px}.route-detail-page .route-stop__rail{grid-template-rows:2.6rem 1fr}.route-detail-page .route-stop__card{grid-template-columns:1fr}.route-detail-page .route-stop__body{padding:var(--space-4)}}
 @media (prefers-reduced-motion:reduce){.routes-page .route-explorer-card,.route-detail-page .route-stop__number{transition:none!important;animation:none!important}}
+/* Trip Planner */
+.trip-planner { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 42px 0 96px; }
+.trip-planner__hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 34px; color: white; border-radius: var(--radius-lg); background: linear-gradient(135deg, var(--color-primary-dark), var(--color-primary), var(--color-water)); box-shadow: var(--shadow-card); }
+.trip-planner__hero h1 { margin: 4px 0 10px; color: white; font-size: clamp(2rem, 5vw, 3.6rem); }
+.trip-planner__hero p { max-width: 650px; margin-bottom: 0; }
+.trip-planner__badge { flex: 0 0 auto; padding: 10px 16px; color: var(--color-primary-dark); border-radius: var(--radius-pill); background: var(--color-accent); font-weight: 800; }
+.trip-planner__status { min-height: 28px; margin: 16px 4px; color: var(--color-primary-dark); font-weight: 700; }
+.trip-planner__status[data-type="error"] { color: #b42318; }
+.trip-planner__layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(310px, .75fr); gap: 24px; align-items: start; }
+.trip-planner__steps { display: grid; gap: 18px; }
+.planner-panel, .planner-plan { border: 1px solid rgba(0, 121, 107, .13); border-radius: 22px; background: white; box-shadow: 0 12px 34px rgba(15, 23, 42, .08); }
+.planner-panel { display: grid; grid-template-columns: 42px 1fr; gap: 16px; padding: 24px; }
+.planner-panel__step { display: grid; place-items: center; width: 42px; height: 42px; color: white; border-radius: 14px; background: var(--color-primary); font-size: 1.1rem; font-weight: 900; }
+.planner-panel h2, .planner-plan h2 { margin: 0 0 4px; }
+.planner-panel p { margin: 0 0 16px; color: var(--color-muted); }
+.planner-panel fieldset { min-width: 0; padding: 0; border: 0; }
+.planner-options, .planner-chips { display: flex; flex-wrap: wrap; gap: 10px; }
+.planner-choice { position: relative; cursor: pointer; }
+.planner-choice input { position: absolute; opacity: 0; pointer-events: none; }
+.planner-choice span, .planner-chip { display: grid; place-items: center; min-height: 46px; padding: 10px 16px; border: 1px solid #cbd5e1; border-radius: var(--radius-pill); background: #fff; color: var(--color-text); font-weight: 750; }
+.planner-choice input:focus-visible + span, .planner-chip:focus-visible { outline: 3px solid rgba(24, 183, 181, .35); outline-offset: 2px; }
+.planner-choice.is-selected span, .planner-chip.is-selected { color: white; border-color: var(--color-primary); background: var(--color-primary); }
+.planner-template-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.planner-template { display: flex; flex-direction: column; align-items: flex-start; padding: 18px; border-radius: 16px; background: var(--color-sand); }
+.planner-template h3 { margin: 0 0 6px; }
+.planner-template p { flex: 1; }
+.planner-plan { position: sticky; top: 94px; overflow: hidden; }
+.planner-plan__heading { display: flex; justify-content: space-between; gap: 12px; padding: 22px; border-bottom: 1px solid #e5e7eb; }
+.planner-stop-list { display: grid; gap: 1px; background: #e5e7eb; }
+.planner-stop { display: grid; grid-template-columns: 34px 1fr; gap: 12px; padding: 18px 22px; background: white; }
+.planner-stop__number { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: #dff7f3; color: var(--color-primary-dark); font-weight: 900; }
+.planner-stop__content h3 { margin: 2px 0 4px; font-size: 1rem; }
+.planner-stop__content p { margin: 0; color: var(--color-muted); font-size: .9rem; }
+.planner-stop__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.planner-stop__actions .button { min-height: 40px; padding: 7px 10px; font-size: .82rem; }
+.planner-message { margin: 0; padding: 18px; border-radius: 14px; background: #f1f5f4; color: var(--color-muted); }
+.planner-message--error { color: #b42318; background: #fef3f2; }
+.planner-plan__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 18px 22px; background: #f8faf8; }
+@media (max-width: 900px) { .trip-planner__layout { grid-template-columns: 1fr; } .planner-plan { position: static; } }
+@media (max-width: 620px) { .trip-planner { width: min(100% - 20px, 1180px); padding-top: 18px; } .trip-planner__hero { align-items: flex-start; flex-direction: column; padding: 24px 20px; } .planner-panel { grid-template-columns: 34px 1fr; gap: 10px; padding: 18px 14px; } .planner-panel__step { width: 34px; height: 34px; } .planner-template-grid { grid-template-columns: 1fr; } .planner-plan__heading { align-items: flex-start; } .planner-plan__actions { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { .trip-planner * { scroll-behavior: auto; transition-duration: .01ms; } }
