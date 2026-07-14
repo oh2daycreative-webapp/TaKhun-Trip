@@ -46,7 +46,8 @@ $required = @(
   "apps-script/Router.gs",
   "apps-script/ApiResponse.gs",
   "apps-script/SheetService.gs",
-  "apps-script/PlaceService.gs"
+  "apps-script/PlaceService.gs",
+  "apps-script/RouteService.gs"
 )
 
 $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root $_)) })
@@ -107,6 +108,8 @@ if ($LASTEXITCODE -ne 0) { throw "i18n behavior verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Public API client behavior verification failed." }
 & node (Join-Path $PSScriptRoot "test-place-service.js")
 if ($LASTEXITCODE -ne 0) { throw "PlaceService and public place API verification failed." }
+& node (Join-Path $PSScriptRoot "test-route-service.js")
+if ($LASTEXITCODE -ne 0) { throw "RouteService and public route/trip API verification failed." }
 & node (Join-Path $PSScriptRoot "test-apps-script.js")
 if ($LASTEXITCODE -ne 0) { throw "Apps Script static verification failed." }
 & node (Join-Path $PSScriptRoot "test-routes.js")
