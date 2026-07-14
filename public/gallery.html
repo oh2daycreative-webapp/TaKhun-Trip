@@ -4,25 +4,54 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title data-i18n="pages.gallery.title">แกลเลอรี | Takhun Trip</title>
-  <meta name="description" content="Takhun Trip เว็บแอปแนะนำการท่องเที่ยวบ้านตาขุน" data-i18n-attr="content:pages.common.description">
+  <meta name="description" content="ภาพเล่าเรื่องบ้านตาขุน ทั้งธรรมชาติ ชุมชน กิจกรรม และของดีท้องถิ่น" data-i18n-attr="content:pages.gallery.description">
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/components.css">
   <link rel="stylesheet" href="css/mobile.css">
 </head>
-<body class="public-page">
+<body class="public-page gallery-page">
   <a class="skip-link" href="#main-content" data-i18n="shell.skip">ข้ามไปยังเนื้อหาหลัก</a>
   <div class="public-shell" data-public-shell data-page="gallery.html"><a class="shell-fallback" href="index.html" data-i18n="shell.fallback_home">Takhun Trip — หน้าแรก</a></div>
-  <main class="page-shell bottom-nav-space" id="main-content">
-    <section class="placeholder" aria-labelledby="page-title">
-      <p class="eyebrow">Takhun Trip</p>
-      <h1 id="page-title" data-i18n="pages.gallery.heading">แกลเลอรี</h1>
-      <p data-i18n="system.preparing_page">หน้านี้อยู่ระหว่างการจัดเตรียม</p>
-      <a class="button" href="index.html" data-i18n="actions.back_home">กลับหน้าแรก</a>
-    </section>
+  <main class="gallery-page__main bottom-nav-space" id="main-content">
+    <header class="gallery-page__hero" aria-labelledby="gallery-title">
+      <p class="eyebrow" data-i18n="gallery.eyebrow">ภาพเล่าเรื่อง</p>
+      <h1 id="gallery-title" data-i18n="gallery.heading">ภาพเล่าเรื่องบ้านตาขุน</h1>
+      <p data-i18n="gallery.intro">รวมภาพธรรมชาติ เส้นทาง ชุมชน กิจกรรม และของดีที่ชวนให้ออกเดินทาง</p>
+    </header>
+
+    <form class="gallery-page__filters" data-gallery-filters aria-label="ตัวกรองแกลเลอรี" data-i18n-attr="aria-label:gallery.filters">
+      <label><span data-i18n="gallery.category">หมวดหมู่</span><select data-gallery-filter="category"><option value="" data-i18n="gallery.all_media">ทั้งหมด</option><option value="place" data-i18n="gallery.categories.place">สถานที่</option><option value="route" data-i18n="gallery.categories.route">เส้นทาง</option><option value="event" data-i18n="gallery.categories.event">กิจกรรม</option><option value="product" data-i18n="gallery.categories.product">สินค้า</option><option value="community" data-i18n="gallery.categories.community">ชุมชน</option><option value="hero" data-i18n="gallery.categories.hero">ภาพเด่น</option><option value="other" data-i18n="gallery.categories.other">อื่น ๆ</option></select></label>
+      <label><span data-i18n="gallery.media_type">ประเภทสื่อ</span><select data-gallery-filter="media_type"><option value="" data-i18n="gallery.all_media">สื่อทั้งหมด</option><option value="image" data-i18n="gallery.images">รูปภาพ</option><option value="video" data-i18n="gallery.videos">วิดีโอ</option></select></label>
+      <label><span data-i18n="gallery.related_place">สถานที่เกี่ยวข้อง</span><input type="text" maxlength="64" data-gallery-filter="related_place_id" data-i18n-attr="placeholder:gallery.related_place_placeholder" placeholder="เช่น BTK-001"></label>
+      <button class="button button--ghost" type="button" data-gallery-clear data-i18n="gallery.clear_filters">ล้างตัวกรอง</button>
+    </form>
+
+    <div class="gallery-page__summary" data-gallery-summary aria-live="polite"></div>
+    <section class="gallery-state" data-gallery-state="initial" role="status"><p data-i18n="gallery.initial">กำลังเตรียมแกลเลอรี…</p></section>
+    <section class="gallery-state" data-gallery-state="loading" role="status" aria-live="polite" hidden><span class="loading-spinner" aria-hidden="true"></span><p data-i18n="gallery.loading">กำลังโหลดภาพและวิดีโอ…</p></section>
+    <section class="gallery-state" data-gallery-state="ready" hidden><div class="gallery-page__grid" data-gallery-grid></div></section>
+    <section class="gallery-state" data-gallery-state="empty" role="status" hidden><h2 data-i18n="gallery.no_media">ยังไม่มีสื่อในแกลเลอรี</h2></section>
+    <section class="gallery-state" data-gallery-state="filtered-empty" role="status" hidden><h2 data-i18n="gallery.no_media_filtered">ไม่พบสื่อที่ตรงกับตัวกรอง</h2><button class="button button--secondary" type="button" data-gallery-clear data-i18n="gallery.clear_filters">ล้างตัวกรอง</button></section>
+    <section class="gallery-state" data-gallery-state="invalid-filter" role="alert" hidden><h2 data-i18n="gallery.invalid_filter">ตัวกรองไม่ถูกต้อง</h2><button class="button button--secondary" type="button" data-gallery-clear data-i18n="gallery.clear_filters">ล้างตัวกรอง</button></section>
+    <section class="gallery-state" data-gallery-state="error" role="alert" hidden><h2 data-i18n="gallery.load_failed">โหลดแกลเลอรีไม่สำเร็จ</h2><button class="button button--secondary" type="button" data-gallery-retry data-i18n="gallery.try_again">ลองอีกครั้ง</button></section>
+    <section class="gallery-state" data-gallery-state="malformed-response" role="alert" hidden><h2 data-i18n="gallery.load_failed">ข้อมูลแกลเลอรีไม่ถูกต้อง</h2><button class="button button--secondary" type="button" data-gallery-retry data-i18n="gallery.try_again">ลองอีกครั้ง</button></section>
+    <section class="gallery-state" data-gallery-state="media-load-error" role="alert" hidden><h2 data-i18n="gallery.media_load_failed">ไม่สามารถเปิดสื่อนี้ได้</h2><button class="button button--secondary" type="button" data-gallery-back-to-grid data-i18n="gallery.back_to_gallery">กลับไปดูแกลเลอรี</button></section>
   </main>
+
+  <div class="gallery-viewer" data-gallery-viewer role="dialog" aria-modal="true" aria-labelledby="gallery-viewer-title" hidden>
+    <button class="gallery-viewer__backdrop" type="button" data-gallery-viewer-backdrop aria-label="ปิดตัวแสดงสื่อ" data-i18n-attr="aria-label:gallery.close_viewer"></button>
+    <div class="gallery-viewer__panel">
+      <div class="gallery-viewer__heading"><h2 id="gallery-viewer-title" data-gallery-viewer-title></h2><button class="gallery-viewer__close" type="button" data-gallery-viewer-close aria-label="ปิดตัวแสดงสื่อ" data-i18n-attr="aria-label:gallery.close_viewer">×</button></div>
+      <div class="gallery-viewer__media" data-gallery-viewer-media></div>
+      <p class="gallery-viewer__caption" data-gallery-viewer-caption></p>
+      <div class="gallery-viewer__nav"><button type="button" class="button button--ghost" data-gallery-previous data-i18n="gallery.previous">ก่อนหน้า</button><button type="button" class="button button--ghost" data-gallery-next data-i18n="gallery.next">ถัดไป</button></div>
+    </div>
+  </div>
+  <div class="toast-container" data-gallery-toast aria-live="polite" aria-atomic="true"></div>
   <script src="js/config.js"></script>
   <script src="js/i18n.js"></script>
   <script src="js/api.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/gallery.js"></script>
 </body>
 </html>

@@ -110,6 +110,14 @@
     return get("getEventDetail", { ...params, event_id: eventId }, options);
   }
 
+  function getGallery(params = {}, options = {}) {
+    const allowed = {};
+    for (const key of ["category", "media_type", "related_place_id", "lang"]) {
+      if (params?.[key] !== undefined) allowed[key] = params[key];
+    }
+    return get("getGallery", allowed, options);
+  }
+
   global.TakhunApi = Object.freeze({
     get,
     getRoutes,
@@ -120,6 +128,7 @@
     getProductDetail,
     getEvents,
     getEventDetail,
+    getGallery,
     buildUrl,
     validateEnvelope,
     PublicApiError

@@ -39,6 +39,8 @@ $required = @(
   "public/js/api.js",
   "public/js/i18n.js",
   "public/js/app.js",
+  "public/js/gallery.js",
+  "public/js/favorites.js",
   "apps-script/Code.gs",
   "apps-script/Config.gs",
   "apps-script/Router.gs",
@@ -94,6 +96,8 @@ foreach ($html in $htmlFiles) {
 & (Join-Path $PSScriptRoot "test-trip-planner.ps1")
 & (Join-Path $PSScriptRoot "test-products.ps1")
 & (Join-Path $PSScriptRoot "test-events.ps1")
+& (Join-Path $PSScriptRoot "test-gallery.ps1")
+& (Join-Path $PSScriptRoot "test-favorites.ps1")
 & node (Join-Path $PSScriptRoot "test-i18n.js")
 if ($LASTEXITCODE -ne 0) { throw "i18n behavior verification failed." }
 & node (Join-Path $PSScriptRoot "test-api.js")
@@ -102,5 +106,9 @@ if ($LASTEXITCODE -ne 0) { throw "Public API client behavior verification failed
 if ($LASTEXITCODE -ne 0) { throw "Routes behavior verification failed." }
 & node (Join-Path $PSScriptRoot "test-trip-planner.js")
 if ($LASTEXITCODE -ne 0) { throw "Trip Planner behavior verification failed." }
+& node (Join-Path $PSScriptRoot "test-gallery.js")
+if ($LASTEXITCODE -ne 0) { throw "Gallery behavior verification failed." }
+& node (Join-Path $PSScriptRoot "test-favorites.js")
+if ($LASTEXITCODE -ne 0) { throw "Favorites behavior verification failed." }
 
 Write-Host "Skeleton verification passed: $($required.Count) required files, $($htmlFiles.Count) HTML pages."

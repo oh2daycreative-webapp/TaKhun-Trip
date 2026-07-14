@@ -4,25 +4,34 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title data-i18n="pages.favorites.title">รายการโปรด | Takhun Trip</title>
-  <meta name="description" content="Takhun Trip เว็บแอปแนะนำการท่องเที่ยวบ้านตาขุน" data-i18n-attr="content:pages.common.description">
+  <meta name="description" content="สถานที่บ้านตาขุนที่บันทึกไว้ในอุปกรณ์นี้" data-i18n-attr="content:pages.favorites.description">
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/components.css">
   <link rel="stylesheet" href="css/mobile.css">
 </head>
-<body class="public-page">
+<body class="public-page favorites-page">
   <a class="skip-link" href="#main-content" data-i18n="shell.skip">ข้ามไปยังเนื้อหาหลัก</a>
   <div class="public-shell" data-public-shell data-page="favorites.html"><a class="shell-fallback" href="index.html" data-i18n="shell.fallback_home">Takhun Trip — หน้าแรก</a></div>
-  <main class="page-shell bottom-nav-space" id="main-content">
-    <section class="placeholder" aria-labelledby="page-title">
-      <p class="eyebrow">Takhun Trip</p>
-      <h1 id="page-title" data-i18n="pages.favorites.heading">รายการโปรด</h1>
-      <p data-i18n="system.preparing_page">หน้านี้อยู่ระหว่างการจัดเตรียม</p>
-      <a class="button" href="index.html" data-i18n="actions.back_home">กลับหน้าแรก</a>
-    </section>
+  <main class="favorites-page__main bottom-nav-space" id="main-content">
+    <header class="favorites-page__hero" aria-labelledby="favorites-title">
+      <div><p class="eyebrow" data-i18n="favorites.eyebrow">ทริปที่คุณเลือกเอง</p><h1 id="favorites-title" data-i18n="favorites.heading">สถานที่ที่บันทึกไว้</h1><p data-i18n="favorites.intro">เก็บจุดหมายที่สนใจไว้ในอุปกรณ์นี้ แล้วเปิดดูรายละเอียด แผนที่ หรือเพิ่มลงทริปได้ทันที</p></div>
+      <p class="favorites-page__count" data-favorites-count aria-live="polite">0 รายการ</p>
+    </header>
+
+    <section class="favorites-state" data-favorites-state="initial" role="status"><p data-i18n="favorites.initial">กำลังเตรียมรายการที่บันทึกไว้…</p></section>
+    <section class="favorites-state" data-favorites-state="loading" role="status" aria-live="polite" hidden><span class="loading-spinner" aria-hidden="true"></span><p data-i18n="favorites.loading">กำลังโหลดสถานที่ที่บันทึกไว้…</p></section>
+    <section class="favorites-state" data-favorites-state="empty" role="status" hidden><h2 data-i18n="favorites.no_saved">ยังไม่มีสถานที่ที่บันทึกไว้</h2><p data-i18n="favorites.empty_intro">เริ่มสำรวจสถานที่แล้วกดหัวใจเพื่อเก็บไว้ที่นี่</p><a class="button button--primary" href="places.html" data-i18n="favorites.start_exploring">เริ่มสำรวจสถานที่</a></section>
+    <section class="favorites-state" data-favorites-state="malformed-storage-recovered" role="status" hidden><h2 data-i18n="favorites.storage_recovered">กู้คืนข้อมูลรายการบันทึกแล้ว</h2><p data-i18n="favorites.no_saved">ยังไม่มีสถานที่ที่บันทึกไว้</p><a class="button button--primary" href="places.html" data-i18n="favorites.start_exploring">เริ่มสำรวจสถานที่</a></section>
+    <section class="favorites-state" data-favorites-state="error" role="alert" hidden><h2 data-i18n="favorites.all_failed">โหลดสถานที่ที่บันทึกไว้ไม่สำเร็จ</h2><button class="button button--secondary" type="button" data-favorites-retry data-i18n="favorites.try_again">ลองอีกครั้ง</button></section>
+    <section class="favorites-state favorites-state--results" data-favorites-state="ready" hidden><p class="alert alert--info" data-favorites-partial hidden data-i18n="favorites.partial_error">บางสถานที่ไม่สามารถโหลดได้</p><div class="favorites-page__grid" data-favorites-grid></div></section>
+    <section class="favorites-state favorites-state--results" data-favorites-state="partial-error" hidden><p class="alert alert--info" data-i18n="favorites.partial_error">บางสถานที่ไม่สามารถโหลดได้</p><div class="favorites-page__grid" data-favorites-grid></div></section>
   </main>
+  <div class="toast-container" data-favorites-toast aria-live="polite" aria-atomic="true"></div>
   <script src="js/config.js"></script>
   <script src="js/i18n.js"></script>
   <script src="js/api.js"></script>
+  <script src="js/place-data.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/favorites.js"></script>
 </body>
 </html>
