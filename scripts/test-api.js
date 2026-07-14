@@ -256,6 +256,44 @@ async function run() {
   }
 
   {
+    const calls = [];
+    const api = loadApi({
+      apiUrl: "https://api.example/exec?token=kept",
+      fetchImpl: async (url) => {
+        calls.push(url);
+        return response({ body: { ok: true, data: { items: [], total: 0 } } });
+      }
+    });
+    assert.equal(typeof api.getGallery, "function");
+    const filters = { category: "place", media_type: "video", related_place_id: "BTK A/B", lang: "en", ignored: "no" };
+    const snapshot = JSON.stringify(filters);
+    await api.getGallery(filters);
+    const url = new URL(calls[0]);
+    assert.equal(url.searchParams.get("token"), "kept");
+    assert.equal(url.searchParams.get("action"), "getGallery");
+    assert.equal(url.searchParams.get("category"), "place");
+    assert.equal(url.searchParams.get("media_type"), "video");
+    assert.equal(url.searchParams.get("related_place_id"), "BTK A/B");
+    assert.equal(url.searchParams.get("lang"), "en");
+    assert.equal(url.searchParams.get("ignored"), null);
+    assert.match(calls[0], /related_place_id=BTK(?:\+|%20)A%2FB/);
+    assert.equal(JSON.stringify(filters), snapshot);
+  }
+
+  {
+    const api = loadApi({ apiUrl: "" });
+    const data = await api.getGallery({}, { mock: () => ({ items: [{ media_id: "MOCK-GAL-001" }], total: 1 }) });
+    assert.equal(data.items[0].media_id, "MOCK-GAL-001");
+  }
+
+  {
+    let mockCalls = 0;
+    const api = loadApi({ apiUrl: "https://api.example/exec", fetchImpl: async () => { throw new Error("network"); } });
+    await expectReject(api.getGallery({}, { mock: () => { mockCalls += 1; return {}; } }), "NETWORK_ERROR");
+    assert.equal(mockCalls, 0);
+  }
+
+  {
     const api = loadApi({
       apiUrl: "https://api.example/exec",
       fetchImpl: async (_url, options) => new Promise((_resolve, reject) => {
