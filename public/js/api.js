@@ -12,7 +12,11 @@
   }
 
   function apiBaseUrl() {
-    return String(global.APP_CONFIG?.API_URL || "").trim();
+    let config = global.APP_CONFIG;
+    try {
+      if (typeof APP_CONFIG !== "undefined") config = APP_CONFIG;
+    } catch (_error) { /* Use the window property when no global lexical binding exists. */ }
+    return String(config?.API_URL || "").trim();
   }
 
   function buildUrl(action, params = {}) {
@@ -78,6 +82,10 @@
     return requestJson(url, Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : DEFAULT_TIMEOUT_MS);
   }
 
+  function getSettings(options = {}) {
+    return get("getSettings", {}, options);
+  }
+
   function getRoutes(params = {}, options = {}) {
     return get("getRoutes", params, options);
   }
@@ -120,6 +128,7 @@
 
   global.TakhunApi = Object.freeze({
     get,
+    getSettings,
     getRoutes,
     getRouteDetail,
     getPlaceDetail,

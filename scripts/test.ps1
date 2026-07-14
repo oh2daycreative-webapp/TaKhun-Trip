@@ -98,6 +98,8 @@ foreach ($html in $htmlFiles) {
 & (Join-Path $PSScriptRoot "test-events.ps1")
 & (Join-Path $PSScriptRoot "test-gallery.ps1")
 & (Join-Path $PSScriptRoot "test-favorites.ps1")
+& (Join-Path $PSScriptRoot "test-about.ps1")
+& (Join-Path $PSScriptRoot "test-404.ps1")
 & node (Join-Path $PSScriptRoot "test-i18n.js")
 if ($LASTEXITCODE -ne 0) { throw "i18n behavior verification failed." }
 & node (Join-Path $PSScriptRoot "test-api.js")
@@ -110,5 +112,7 @@ if ($LASTEXITCODE -ne 0) { throw "Trip Planner behavior verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Gallery behavior verification failed." }
 & node (Join-Path $PSScriptRoot "test-favorites.js")
 if ($LASTEXITCODE -ne 0) { throw "Favorites behavior verification failed." }
+& node (Join-Path $PSScriptRoot "test-about.js")
+if ($LASTEXITCODE -ne 0) { throw "About behavior verification failed." }
 
 Write-Host "Skeleton verification passed: $($required.Count) required files, $($htmlFiles.Count) HTML pages."
