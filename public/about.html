@@ -4,25 +4,124 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title data-i18n="pages.about.title">เกี่ยวกับ Takhun Trip</title>
-  <meta name="description" content="Takhun Trip เว็บแอปแนะนำการท่องเที่ยวบ้านตาขุน" data-i18n-attr="content:pages.common.description">
+  <meta name="description" content="รู้จัก Takhun Trip และออกสำรวจธรรมชาติ ชุมชน และเส้นทางท่องเที่ยวบ้านตาขุน" data-i18n-attr="content:pages.about.description">
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/components.css">
   <link rel="stylesheet" href="css/mobile.css">
 </head>
-<body class="public-page">
+<body class="public-page about-page">
   <a class="skip-link" href="#main-content" data-i18n="shell.skip">ข้ามไปยังเนื้อหาหลัก</a>
   <div class="public-shell" data-public-shell data-page="about.html"><a class="shell-fallback" href="index.html" data-i18n="shell.fallback_home">Takhun Trip — หน้าแรก</a></div>
-  <main class="page-shell bottom-nav-space" id="main-content">
-    <section class="placeholder" aria-labelledby="page-title">
-      <p class="eyebrow">Takhun Trip</p>
-      <h1 id="page-title" data-i18n="pages.about.heading">เกี่ยวกับ Takhun Trip</h1>
-      <p data-i18n="system.preparing_page">หน้านี้อยู่ระหว่างการจัดเตรียม</p>
-      <a class="button" href="index.html" data-i18n="actions.back_home">กลับหน้าแรก</a>
-    </section>
+
+  <main class="about-page__main bottom-nav-space" id="main-content" data-about-page>
+    <div class="about-page__states" aria-live="polite" aria-atomic="true">
+      <section class="about-page__status" data-about-state="loading" aria-labelledby="about-loading-title" hidden>
+        <span class="about-page__status-icon" aria-hidden="true">⌁</span>
+        <h1 id="about-loading-title" data-i18n="about_page.loading">กำลังโหลดข้อมูลโครงการ…</h1>
+      </section>
+
+      <section class="about-page__status" data-about-state="empty" aria-labelledby="about-empty-title" hidden>
+        <span class="about-page__status-icon" aria-hidden="true">○</span>
+        <h1 id="about-empty-title" data-i18n="about_page.no_project_information">ยังไม่มีข้อมูลโครงการ</h1>
+        <p data-i18n="about_page.empty_body">คุณยังสามารถสำรวจสถานที่และวางแผนการเดินทางได้</p>
+        <a class="button" href="places.html" data-i18n="about_page.explore_places">ดูสถานที่</a>
+      </section>
+
+      <section class="about-page__status" data-about-state="error" aria-labelledby="about-error-title" hidden>
+        <span class="about-page__status-icon" aria-hidden="true">!</span>
+        <h1 id="about-error-title" data-i18n="about_page.load_failed">โหลดข้อมูลไม่สำเร็จ</h1>
+        <p data-i18n="about_page.error_body">ไม่สามารถเชื่อมต่อข้อมูลโครงการได้ในขณะนี้</p>
+        <button class="button" type="button" data-about-retry data-i18n="about_page.try_again">ลองอีกครั้ง</button>
+      </section>
+
+      <section class="about-page__status" data-about-state="malformed-response" aria-labelledby="about-malformed-title" hidden>
+        <span class="about-page__status-icon" aria-hidden="true">!</span>
+        <h1 id="about-malformed-title" data-i18n="about_page.load_failed">โหลดข้อมูลไม่สำเร็จ</h1>
+        <p data-i18n="about_page.error_body">ไม่สามารถเชื่อมต่อข้อมูลโครงการได้ในขณะนี้</p>
+        <button class="button" type="button" data-about-retry data-i18n="about_page.try_again">ลองอีกครั้ง</button>
+      </section>
+    </div>
+
+    <article class="about-page__content" data-about-state="ready" hidden>
+      <header class="about-page__hero" aria-labelledby="about-title">
+        <div class="about-page__hero-media" aria-hidden="true">
+          <img class="about-page__hero-image" data-about-hero-image alt="" hidden>
+          <div class="about-page__hero-fallback" data-about-hero-fallback><span></span><span></span><span></span></div>
+        </div>
+        <div class="about-page__hero-overlay"></div>
+        <div class="about-page__hero-content">
+          <p class="eyebrow" data-i18n="about_page.eyebrow">เรื่องราวของเรา</p>
+          <div class="about-page__brand-mark" data-about-logo-wrap hidden>
+            <img data-about-logo data-i18n-attr="alt:about_page.logo_alt" alt="โลโก้ Takhun Trip">
+          </div>
+          <h1 id="about-title" data-about-site-name>Takhun Trip</h1>
+          <p class="about-page__slogan" data-about-slogan></p>
+          <p class="about-page__mock-notice" data-about-mock-notice data-i18n="about_page.mock_notice" hidden>กำลังแสดงข้อมูลตัวอย่างสำหรับการพัฒนา</p>
+          <nav class="about-page__hero-actions" aria-label="ทางลัด" data-i18n-attr="aria-label:about_page.quick_actions">
+            <a class="button button--accent" href="map.html" data-i18n="about_page.explore_map">เปิดแผนที่</a>
+            <a class="button button--ghost-light" href="trip-planner.html" data-i18n="about_page.plan_your_trip">วางแผนทริป</a>
+          </nav>
+        </div>
+      </header>
+
+      <section class="about-page__section about-page__overview" aria-labelledby="project-overview-title">
+        <div class="about-page__section-heading">
+          <p class="eyebrow" data-i18n="about_page.about_takhun_trip">เกี่ยวกับ Takhun Trip</p>
+          <h2 id="project-overview-title" data-i18n="about_page.project_overview">ภาพรวมโครงการ</h2>
+        </div>
+        <p class="about-page__lead" data-i18n="about_page.project_overview_body">Takhun Trip ช่วยให้การค้นหาธรรมชาติ ชุมชน และไอเดียการเดินทางในบ้านตาขุนเป็นเรื่องง่ายในที่เดียว</p>
+      </section>
+
+      <section class="about-page__section about-page__purpose" aria-labelledby="purpose-title">
+        <div class="about-page__purpose-card">
+          <span class="about-page__purpose-number" aria-hidden="true">01</span>
+          <div>
+            <h2 id="purpose-title" data-i18n="about_page.our_purpose">จุดประสงค์ของเรา</h2>
+            <p data-i18n="about_page.purpose_body">เชื่อมโยงข้อมูลท่องเที่ยวที่จำเป็นกับการวางแผนที่ใช้งานง่าย เพื่อให้นักเดินทางออกสำรวจบ้านตาขุนได้อย่างมั่นใจ</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="about-page__section" aria-labelledby="discover-title">
+        <div class="about-page__section-heading">
+          <p class="eyebrow" data-i18n="about_page.local_experiences">ประสบการณ์ท้องถิ่น</p>
+          <h2 id="discover-title" data-i18n="about_page.discover_ban_ta_khun">ค้นพบบ้านตาขุน</h2>
+        </div>
+        <div class="about-page__highlights">
+          <article class="about-page__highlight about-page__highlight--nature"><span aria-hidden="true">ภู</span><h3 data-i18n="about_page.nature_highlight">ธรรมชาติที่ชวนออกเดินทาง</h3><p data-i18n="about_page.nature_body">ค้นหามุมธรรมชาติและทิวทัศน์ที่เหมาะกับช่วงเวลาของคุณ</p></article>
+          <article class="about-page__highlight about-page__highlight--community"><span aria-hidden="true">ชุม</span><h3 data-i18n="about_page.community_highlight">วิถีชุมชนที่อบอุ่น</h3><p data-i18n="about_page.community_body">ทำความรู้จักเรื่องราว กิจกรรม และผู้คนในพื้นที่</p></article>
+          <article class="about-page__highlight about-page__highlight--products"><span aria-hidden="true">ของดี</span><h3 data-i18n="about_page.local_products_highlight">ของดีจากท้องถิ่น</h3><p data-i18n="about_page.local_products_body">พบสินค้าและบริการจากชุมชนที่ช่วยเติมเต็มการเดินทาง</p></article>
+          <article class="about-page__highlight about-page__highlight--routes"><span aria-hidden="true">ทาง</span><h3 data-i18n="about_page.routes_highlight">เส้นทางที่วางแผนได้ง่าย</h3><p data-i18n="about_page.routes_body">เชื่อมสถานที่น่าสนใจเข้ากับแผนที่และแผนทริปของคุณ</p></article>
+        </div>
+      </section>
+
+      <section class="about-page__section about-page__contact" data-about-contact-section aria-labelledby="contact-title" hidden>
+        <div class="about-page__contact-copy">
+          <p class="eyebrow" data-i18n="about_page.stay_connected">พูดคุยกับเรา</p>
+          <h2 id="contact-title" data-i18n="about_page.contact_us">ติดต่อเรา</h2>
+          <p data-i18n="about_page.contact_body">เลือกช่องทางที่สะดวกสำหรับข้อมูลเพิ่มเติมเกี่ยวกับ Takhun Trip</p>
+        </div>
+        <address class="about-page__contact-list">
+          <a data-about-contact="phone" hidden><span data-i18n="about_page.phone">โทรศัพท์</span><strong data-about-contact-value></strong></a>
+          <a data-about-contact="email" hidden><span data-i18n="about_page.email">อีเมล</span><strong data-about-contact-value></strong></a>
+          <a data-about-contact="facebook" target="_blank" rel="noopener noreferrer" hidden><span data-i18n="about_page.facebook">Facebook</span><strong data-i18n="about_page.open_channel">เปิดช่องทางติดต่อ</strong></a>
+          <a data-about-contact="line" target="_blank" rel="noopener noreferrer" hidden><span data-i18n="about_page.line">Line</span><strong data-i18n="about_page.open_channel">เปิดช่องทางติดต่อ</strong></a>
+        </address>
+      </section>
+
+      <section class="about-page__cta" aria-labelledby="about-cta-title">
+        <div><p class="eyebrow" data-i18n="about_page.ready_to_explore">พร้อมออกสำรวจหรือยัง</p><h2 id="about-cta-title" data-i18n="about_page.cta_title">เริ่มออกแบบทริปบ้านตาขุนในแบบของคุณ</h2></div>
+        <div class="about-page__cta-actions"><a class="button button--accent" href="trip-planner.html" data-i18n="about_page.plan_your_trip">วางแผนทริป</a><a class="button button--ghost-light" href="places.html" data-i18n="about_page.explore_places">ดูสถานที่</a><a class="button button--ghost-light" href="map.html" data-i18n="about_page.explore_map">เปิดแผนที่</a></div>
+      </section>
+    </article>
+
+    <noscript><section class="about-page__status"><h1>JavaScript required</h1><p>Please enable JavaScript to view this page.</p></section></noscript>
   </main>
+
   <script src="js/config.js"></script>
   <script src="js/i18n.js"></script>
   <script src="js/api.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/about.js"></script>
 </body>
 </html>

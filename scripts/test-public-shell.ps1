@@ -36,7 +36,21 @@ $notFound = Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $public "404
 Assert-Match $notFound 'class="skip-link"\s+href="#main-content"' "404 must include a skip link."
 Assert-Match $notFound '<main[^>]*id="main-content"' "404 must expose the main landmark target."
 Assert-Match $notFound 'href="index\.html"' "404 must provide a clear Home link."
-if ($notFound -match 'data-public-shell') { throw "404 must not render potentially misleading global navigation." }
+Assert-Match $notFound 'data-public-shell' "404 must mount the shared Global Public Shell."
+Assert-Match $notFound 'data-page="404\.html"' "404 must identify itself to the shared Global Public Shell."
+Assert-Match $notFound 'class="shell-fallback"[^>]*href="index\.html"' "404 must keep a usable Home fallback while the shared shell loads."
+Assert-Match $notFound 'class="[^"]*bottom-nav-space' "404 must reserve space for the shared mobile bottom navigation."
+Assert-Match $notFound '<script\s+src="js/app\.js"></script>' "404 must load the shared shell renderer."
+# The current shared shell excludes Footer; index.html owns its page-local Footer.
+foreach ($shellContract in @(
+  @{ Pattern = '<header'; Name = 'Header' },
+  @{ Pattern = 'class="site-nav"'; Name = 'desktop navigation' },
+  @{ Pattern = 'class="mobile-drawer"'; Name = 'mobile drawer' },
+  @{ Pattern = 'class="mobile-drawer__nav"'; Name = 'mobile drawer navigation' },
+  @{ Pattern = 'class="bottom-nav"'; Name = 'mobile bottom navigation' }
+)) {
+  Assert-Match $app $shellContract.Pattern "The shared shell renderer used by 404 must include $($shellContract.Name)."
+}
 
 foreach ($required in @(
   'PUBLIC_NAVIGATION', 'renderPublicShell', 'resolvePublicNavigation',

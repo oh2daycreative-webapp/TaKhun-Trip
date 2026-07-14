@@ -4,19 +4,34 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title data-i18n="pages.not_found.title">ไม่พบหน้า | Takhun Trip</title>
-  <meta name="description" content="ไม่พบหน้าที่ต้องการใน Takhun Trip" data-i18n-attr="content:pages.not_found.description">
+  <meta name="description" content="หน้าที่คุณกำลังค้นหาอาจถูกย้ายหรือไม่มีอยู่" data-i18n-attr="content:pages.not_found.description">
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/components.css">
   <link rel="stylesheet" href="css/mobile.css">
 </head>
-<body class="public-page">
+<body class="public-page not-found-page">
   <a class="skip-link" href="#main-content" data-i18n="shell.skip">ข้ามไปยังเนื้อหาหลัก</a>
-  <main class="page-shell" id="main-content">
-    <section class="placeholder"><h1 data-i18n="pages.not_found.heading">404 — ไม่พบหน้า</h1><p data-i18n="pages.not_found.message">หน้าที่คุณกำลังค้นหาอาจถูกย้ายหรือไม่มีอยู่</p><a class="button" href="index.html" data-i18n="actions.back_home">กลับหน้าแรก</a></section>
+  <div class="public-shell" data-public-shell data-page="404.html"><a class="shell-fallback" href="index.html" data-i18n="shell.fallback_home">Takhun Trip — หน้าแรก</a></div>
+
+  <main class="not-found-page__main bottom-nav-space" id="main-content">
+    <section class="not-found-page__card" aria-labelledby="not-found-title">
+      <div class="not-found-page__visual" aria-hidden="true"><span class="not-found-page__sun"></span><span class="not-found-page__mountain not-found-page__mountain--back"></span><span class="not-found-page__mountain not-found-page__mountain--front"></span><span class="not-found-page__route"></span></div>
+      <div class="not-found-page__copy">
+        <p class="not-found-page__code">404</p>
+        <p class="eyebrow" data-i18n="not_found_page.eyebrow">หลงทางนิดหน่อย</p>
+        <h1 id="not-found-title" data-i18n="not_found_page.heading">ไม่พบหน้าที่คุณต้องการ</h1>
+        <p data-i18n="not_found_page.page_may_have_moved">หน้านี้อาจถูกย้ายหรือไม่มีอยู่แล้ว แต่ยังมีอีกหลายเส้นทางให้คุณออกสำรวจ</p>
+        <nav class="not-found-page__actions" aria-label="เส้นทางกลับ" data-i18n-attr="aria-label:not_found_page.actions_label">
+          <a class="button button--accent" href="index.html" data-i18n="not_found_page.back_home">กลับหน้าแรก</a>
+          <a class="button button--secondary" href="places.html" data-i18n="not_found_page.explore_places">ดูสถานที่</a>
+          <a class="button button--secondary" href="map.html" data-i18n="not_found_page.open_map">เปิดแผนที่</a>
+        </nav>
+      </div>
+    </section>
   </main>
+
   <script src="js/config.js"></script>
   <script src="js/i18n.js"></script>
-  <script src="js/api.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

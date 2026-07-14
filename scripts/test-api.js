@@ -27,11 +27,99 @@ function loadApi({ apiUrl = "", fetchImpl, abortController } = {}) {
   return context.TakhunApi;
 }
 
+function loadApiWithLexicalConfig({ apiUrl, fetchImpl }) {
+  const context = vm.createContext({
+    URL, AbortController, clearTimeout, setTimeout, fetch: fetchImpl,
+    location: { href: "https://example.test/about.html" }, window: null
+  });
+  context.window = context;
+  vm.runInContext(`const APP_CONFIG = Object.freeze({ API_URL: ${JSON.stringify(apiUrl)}, DEFAULT_LANG: "th" });`, context);
+  vm.runInContext(source, context, { filename: "api.js" });
+  return context.TakhunApi;
+}
+
 async function expectReject(promise, code) {
   await assert.rejects(promise, (error) => error && error.code === code && !String(error.message).includes("https://"));
 }
 
 async function run() {
+  {
+    let requestedUrl = "";
+    const api = loadApiWithLexicalConfig({
+      apiUrl: "https://api.example/exec?source=classic-script",
+      fetchImpl: async (url) => {
+        requestedUrl = url;
+        return response({ body: { ok: true, data: { site_name: "Configured" } } });
+      }
+    });
+    const data = await api.getSettings();
+    assert.equal(data.site_name, "Configured");
+    assert.equal(new URL(requestedUrl).searchParams.get("source"), "classic-script");
+  }
+
+  {
+    const calls = [];
+    const api = loadApi({
+      apiUrl: "https://api.example/exec?token=kept",
+      fetchImpl: async (url) => {
+        calls.push(url);
+        return response({ body: { ok: true, data: { site_name: "Takhun Trip" } } });
+      }
+    });
+    assert.equal(typeof api.getSettings, "function");
+    const options = { timeoutMs: 5000 };
+    const snapshot = JSON.stringify(options);
+    const data = await api.getSettings(options);
+    const url = new URL(calls[0]);
+    assert.equal(data.site_name, "Takhun Trip");
+    assert.equal(url.searchParams.get("token"), "kept");
+    assert.equal(url.searchParams.get("action"), "getSettings");
+    assert.deepEqual([...url.searchParams.keys()].sort(), ["action", "token"]);
+    assert.match(calls[0], /action=getSettings/);
+    assert.equal(JSON.stringify(options), snapshot);
+  }
+
+  {
+    const api = loadApi({ apiUrl: "" });
+    const data = await api.getSettings({ mock: () => ({ site_name: "Mock Takhun Trip" }) });
+    assert.equal(data.site_name, "Mock Takhun Trip");
+  }
+
+  {
+    let mockCalls = 0;
+    const api = loadApi({
+      apiUrl: "https://api.example/exec",
+      fetchImpl: async () => { throw new Error("network contains https://internal.example/secret"); }
+    });
+    await expectReject(api.getSettings({ mock: () => { mockCalls += 1; return {}; } }), "NETWORK_ERROR");
+    assert.equal(mockCalls, 0);
+  }
+
+  {
+    const api = loadApi({ apiUrl: "https://api.example/exec", fetchImpl: async () => response({ ok: false, status: 500, body: {} }) });
+    await expectReject(api.getSettings(), "HTTP_ERROR");
+  }
+
+  {
+    const api = loadApi({ apiUrl: "https://api.example/exec", fetchImpl: async () => ({ ok: true, async json() { throw new SyntaxError("bad json"); } }) });
+    await expectReject(api.getSettings(), "MALFORMED_RESPONSE");
+  }
+
+  {
+    const api = loadApi({ apiUrl: "https://api.example/exec", fetchImpl: async () => response({ body: { ok: true } }) });
+    await expectReject(api.getSettings(), "MALFORMED_RESPONSE");
+  }
+
+  {
+    const api = loadApi({
+      apiUrl: "https://api.example/exec",
+      fetchImpl: async (_url, options) => new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => { const error = new Error("aborted"); error.name = "AbortError"; reject(error); }, { once: true });
+      })
+    });
+    await expectReject(api.getSettings({ timeoutMs: 5 }), "TIMEOUT");
+  }
+
   {
     const api = loadApi({ apiUrl: "https://api.example/exec" });
     assert.equal(typeof api.getTripTemplates, "function");
