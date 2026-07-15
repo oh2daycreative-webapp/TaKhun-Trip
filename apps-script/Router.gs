@@ -35,6 +35,8 @@ function routeRequest_(method, event) {
           return createJsonResponse_(getGallery_(parameters));
         case "getReviews":
           return createJsonResponse_(getReviews_(parameters));
+        case "searchAll":
+          return createJsonResponse_(searchAll_(parameters));
       }
     }
 

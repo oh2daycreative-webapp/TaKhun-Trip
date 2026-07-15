@@ -56,6 +56,7 @@ $required = @(
   "apps-script/GalleryService.gs"
   "apps-script/HomeService.gs"
   "apps-script/ReviewService.gs"
+  "apps-script/SearchService.gs"
 )
 
 $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root $_)) })
@@ -134,6 +135,8 @@ if ($LASTEXITCODE -ne 0) { throw "GalleryService verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "ReviewService verification failed." }
 & node (Join-Path $PSScriptRoot "test-home-service.js")
 if ($LASTEXITCODE -ne 0) { throw "HomeService verification failed." }
+& node (Join-Path $PSScriptRoot "test-search-service.js")
+if ($LASTEXITCODE -ne 0) { throw "SearchService verification failed." }
 & node (Join-Path $PSScriptRoot "test-apps-script.js")
 if ($LASTEXITCODE -ne 0) { throw "Apps Script static verification failed." }
 & node (Join-Path $PSScriptRoot "test-routes.js")

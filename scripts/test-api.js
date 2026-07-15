@@ -529,6 +529,46 @@ async function run() {
     assert.equal(mockCalls, 0);
   }
 
+  {
+    const calls = [];
+    const api = loadApi({ apiUrl: "https://api.example/exec?token=kept", fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return response({ body: { ok: true, data: { places: [], products: [], events: [], routes: [], total: 0 }, message: "success" } });
+    } });
+    assert.equal(typeof api.searchAll, "function");
+    const params = { keyword: "น้ำ ผึ้ง & /", lang: "unknown", domain: "gallery", page: 2 };
+    const options = { timeoutMs: 5000 };
+    const paramsSnapshot = JSON.stringify(params); const optionsSnapshot = JSON.stringify(options);
+    const result = await api.searchAll(params, options);
+    assert.deepEqual(result, { places: [], products: [], events: [], routes: [], total: 0 });
+    const first = new URL(calls[0].url);
+    assert.equal(first.searchParams.get("token"), "kept");
+    assert.equal(first.searchParams.get("action"), "searchAll");
+    assert.equal(first.searchParams.get("keyword"), "น้ำ ผึ้ง & /");
+    assert.equal(first.searchParams.get("lang"), "th");
+    assert.equal(first.searchParams.has("domain"), false); assert.equal(first.searchParams.has("page"), false);
+    assert.match(calls[0].url, /keyword=.*%26.*%2F/);
+    await api.searchAll({ keyword: "Lake", lang: "en", ignored: "x" });
+    assert.equal(new URL(calls[1].url).searchParams.get("lang"), "en");
+    assert.equal(JSON.stringify(params), paramsSnapshot); assert.equal(JSON.stringify(options), optionsSnapshot);
+  }
+
+  {
+    const api = loadApi({ apiUrl: "" });
+    const params = { keyword: "mock", lang: "fr", ignored: "x" };
+    const snapshot = JSON.stringify(params);
+    const result = await api.searchAll(params, { mock: (allowed) => ({ allowed }) });
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), { allowed: { keyword: "mock", lang: "th" } });
+    assert.equal(JSON.stringify(params), snapshot);
+  }
+
+  {
+    let mockCalls = 0;
+    const api = loadApi({ apiUrl: "https://api.example/exec", fetchImpl: async () => { throw new Error("search network failure"); } });
+    await expectReject(api.searchAll({ keyword: "lake", lang: "en" }, { mock: () => { mockCalls += 1; return {}; } }), "NETWORK_ERROR");
+    assert.equal(mockCalls, 0);
+  }
+
   process.stdout.write("Public API client behavior verification passed.\n");
 }
 
