@@ -50,7 +50,7 @@
     return result.data;
   }
 
-  async function requestJson(url, requestOptions = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  async function requestJson(url, requestOptions = {}, timeoutMs = DEFAULT_TIMEOUT_MS, includeEnvelope = false) {
     const controller = typeof global.AbortController === "function" ? new global.AbortController() : null;
     const timeout = controller ? global.setTimeout(() => controller.abort(), timeoutMs) : null;
     let response;
@@ -71,7 +71,8 @@
     } catch (_error) {
       throw new PublicApiError("MALFORMED_RESPONSE");
     }
-    return validateEnvelope(result);
+    const data = validateEnvelope(result);
+    return includeEnvelope ? result : data;
   }
 
   async function get(action, params = {}, options = {}) {
@@ -81,7 +82,7 @@
       return options.mock(params);
     }
     const url = buildUrl(action, params);
-    return requestJson(url, {}, Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : DEFAULT_TIMEOUT_MS);
+    return requestJson(url, {}, Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : DEFAULT_TIMEOUT_MS, options.includeEnvelope === true);
   }
 
   async function post(action, payload = {}, options = {}) {
@@ -102,6 +103,11 @@
 
   function getSettings(options = {}) {
     return get("getSettings", {}, options);
+  }
+
+  function getHomeData(params = {}, options = {}) {
+    const lang = params?.lang === "en" ? "en" : "th";
+    return get("getHomeData", { lang }, { ...options, includeEnvelope: true });
   }
 
   function getCategories(params = {}, options = {}) {
@@ -170,6 +176,7 @@
     get,
     post,
     getSettings,
+    getHomeData,
     getCategories,
     getRoutes,
     getRouteDetail,

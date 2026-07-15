@@ -39,6 +39,7 @@ $required = @(
   "public/js/api.js",
   "public/js/i18n.js",
   "public/js/app.js",
+  "public/js/home.js",
   "public/js/gallery.js",
   "public/js/favorites.js",
   "apps-script/Code.gs",
@@ -96,6 +97,8 @@ foreach ($html in $htmlFiles) {
 }
 
 & (Join-Path $PSScriptRoot "test-home.ps1")
+& node (Join-Path $PSScriptRoot "test-home.js")
+if ($LASTEXITCODE -ne 0) { throw "Home behavior verification failed." }
 & (Join-Path $PSScriptRoot "test-public-shell.ps1")
 & (Join-Path $PSScriptRoot "test-foundation.ps1")
 & (Join-Path $PSScriptRoot "test-places.ps1")
