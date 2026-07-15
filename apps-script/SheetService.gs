@@ -23,3 +23,23 @@ function readSheetObjects_(sheetName) {
     return item;
   });
 }
+
+function appendSheetObject_(sheetName, requiredHeaders, record) {
+  var config = getAppConfig_();
+  if (!config.spreadsheetId) throw new Error("Data source is not configured.");
+  var spreadsheet = SpreadsheetApp.openById(config.spreadsheetId);
+  var sheet = spreadsheet.getSheetByName(sheetName);
+  if (!sheet) throw new Error("Requested data is not available.");
+  var values = sheet.getDataRange().getValues();
+  if (!values || !values.length) throw new Error("Data headers are not available.");
+  var headers = values[0].map(function (header) {
+    return header === null || header === undefined ? "" : String(header).trim();
+  });
+  (requiredHeaders || []).forEach(function (header) {
+    if (headers.indexOf(header) === -1) throw new Error("Required data headers are not available.");
+  });
+  var row = headers.map(function (header) {
+    return header && Object.prototype.hasOwnProperty.call(record || {}, header) ? record[header] : "";
+  });
+  sheet.getRange(sheet.getLastRow() + 1, 1, 1, headers.length).setValues([row]);
+}

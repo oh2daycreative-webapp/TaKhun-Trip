@@ -88,6 +88,94 @@
     return (Array.isArray(reviews) ? reviews : []).filter((review) => review?.status === "approved" && Number(review?.rating) >= 1 && Number(review?.rating) <= 5 && String(review?.comment || review?.comment_th || "").trim());
   }
 
+  function normalizeReviewResponse(value) {
+    const total = value?.total;
+    const count = value?.summary?.review_count;
+    const average = value?.summary?.average_rating;
+    if (!value || !Array.isArray(value.items) || !Number.isInteger(total) || total < 0 || !Number.isInteger(count) || count < 0 || count !== total || typeof average !== "number" || !Number.isFinite(average) || average < 0 || average > 5 || (count === 0 && average !== 0)) throw new Error("Invalid review response");
+    const items = value.items.filter((review) => review?.status === undefined || review.status === "approved");
+    if (items.some((review) => !review || !String(review.review_id || "").trim() || !String(review.place_id || "").trim() || typeof review.reviewer_name !== "string" || typeof review.is_anonymous !== "boolean" || typeof review.rating !== "number" || !Number.isInteger(review.rating) || review.rating < 1 || review.rating > 5 || typeof review.comment !== "string" || !review.comment.trim() || typeof review.admin_reply !== "string" || typeof review.created_at !== "string")) throw new Error("Invalid review response");
+    return {
+      items,
+      summary: { average_rating: average, review_count: count },
+      total
+    };
+  }
+
+  function mockReviewResponse(place) {
+    const items = getApprovedReviews(place?.reviews).map((review) => ({
+      review_id: String(review.review_id || ""), place_id: String(review.place_id || place?.place_id || ""), reviewer_name: String(review.reviewer_name || ""),
+      is_anonymous: Boolean(review.is_anonymous), rating: Number(review.rating), comment: String(review.comment || review.comment_th || review.comment_en || ""),
+      admin_reply: String(review.admin_reply || review.admin_reply_th || review.admin_reply_en || ""), created_at: String(review.created_at || "")
+    }));
+    const total = items.length;
+    const average = total ? Math.round((items.reduce((sum, review) => sum + Number(review.rating), 0) / total) * 10) / 10 : 0;
+    return { items, summary: { average_rating: average, review_count: total }, total };
+  }
+
+  async function fetchReviews(place, api = global.TakhunApi) {
+    const result = await api.getReviews(place.place_id, { page: 1, page_size: 20 }, { mock: () => mockReviewResponse(place) });
+    return normalizeReviewResponse(result);
+  }
+
+  function validateReviewPayload(value) {
+    const source = value || {};
+    const payload = {
+      place_id: String(source.place_id || "").trim(),
+      reviewer_name: String(source.reviewer_name || "").trim(),
+      is_anonymous: source.is_anonymous === undefined ? false : source.is_anonymous,
+      rating: Number(source.rating),
+      comment: String(source.comment || "").trim()
+    };
+    const ok = validatePlaceId(payload.place_id) && typeof payload.is_anonymous === "boolean" && Number.isInteger(payload.rating) && payload.rating >= 1 && payload.rating <= 5 && payload.comment.length > 0 && payload.comment.length <= 1000;
+    return { ok, payload };
+  }
+
+  function createReviewSubmitHandler(options = {}) {
+    const getPlace = options.getPlace || (() => null);
+    const api = options.api || global.TakhunApi;
+    const translate = options.translate || t;
+    let submitInFlight = false;
+    return async function handleReviewSubmit(event) {
+      event.preventDefault();
+      const currentPlace = getPlace();
+      if (!currentPlace || submitInFlight) return "ignored";
+      const form = event.currentTarget;
+      const button = form.querySelector("[data-review-submit]");
+      const status = form.querySelector("[data-review-status]");
+      const validation = validateReviewPayload({
+        place_id: currentPlace.place_id,
+        reviewer_name: form.querySelector("[data-review-name]")?.value,
+        is_anonymous: Boolean(form.querySelector("[data-review-anonymous]")?.checked),
+        rating: form.querySelector("[data-review-rating]")?.value,
+        comment: form.querySelector("[data-review-comment]")?.value
+      });
+      if (!validation.ok) {
+        status.textContent = validation.payload.comment ? translate("place_detail.review_rating_invalid") : translate("place_detail.review_comment_required");
+        return "invalid";
+      }
+      submitInFlight = true; button.disabled = true; button.textContent = translate("place_detail.review_submitting"); status.textContent = "";
+      try {
+        await api.submitReview(validation.payload, { mock: () => ({ review_id: "MOCK-REVIEW-SUBMITTED", status: "pending" }) });
+        form.reset(); status.textContent = translate("place_detail.review_success");
+        return "success";
+      } catch (_error) {
+        status.textContent = translate("place_detail.review_submit_error");
+        return "error";
+      } finally {
+        submitInFlight = false; button.disabled = false; button.textContent = translate("place_detail.review_submit");
+      }
+    };
+  }
+
+  const REVIEW_STATES = Object.freeze(["loading", "empty", "error", "ready"]);
+  function setReviewState(mounts, nextState) {
+    Object.values(mounts || {}).forEach((mount) => { if (mount) mount.hidden = true; });
+    if (!REVIEW_STATES.includes(nextState) || !mounts?.[nextState]) throw new Error("Unknown review state");
+    mounts[nextState].hidden = false;
+    return nextState;
+  }
+
   async function sharePlace(payload) {
     try {
       if (typeof global.navigator?.share === "function") {
@@ -107,7 +195,7 @@
 
   function t(key) { return global.TakhunI18n?.t?.(key) || key; }
   function format(key, values) { return String(t(key)).replace(/\{(\w+)\}/g, (_match, name) => String(values?.[name] ?? "")); }
-  function localized(item, field, lang) { return global.TakhunI18n?.pickLangValue?.(item, field, lang) || String(item?.[`${field}_${lang}`] || item?.[`${field}_th`] || ""); }
+  function localized(item, field, lang) { return global.TakhunI18n?.pickLangValue?.(item, field, lang) || String(item?.[`${field}_${lang}`] || item?.[`${field}_th`] || item?.[field] || ""); }
   function make(tag, className, text) {
     const element = global.document.createElement(tag);
     if (className) element.className = className;
@@ -154,8 +242,9 @@
     const title = make("h1", "detail-title", name); title.id = "page-title";
     const shortDescription = make("p", "detail-lead", localized(place, "short_description", lang));
     const review = make("p", "detail-review-summary");
-    const count = Number(place.review_summary?.review_count || 0);
-    review.textContent = count ? format("place_detail.review_summary", { rating: Number(place.review_summary.average_rating).toFixed(1), count }) : t("place_detail.no_reviews");
+    const summary = place.reviews_summary || place.review_summary || {};
+    const count = Number(summary.review_count || 0);
+    review.textContent = count ? format("place_detail.review_summary", { rating: Number(summary.average_rating).toFixed(1), count }) : t("place_detail.no_reviews");
     const actions = make("div", "detail-cta");
     const model = getActionModel(place);
     const links = [
@@ -181,7 +270,8 @@
     highlights.hidden = !highlight; highlights.replaceChildren();
     if (highlight) highlights.append(heading("detail-highlights-title", t("place_detail.highlights")), make("p", "detail-highlight", highlight));
     const activities = global.document.querySelector("[data-detail-activities]");
-    const items = Array.isArray(place[`activities_${lang}`]) && place[`activities_${lang}`].length ? place[`activities_${lang}`] : place.activities_th || [];
+    const activityValue = place[`activities_${lang}`] || place.activities_th || place.activities || [];
+    const items = Array.isArray(activityValue) ? activityValue : String(activityValue || "").split("|").map((item) => item.trim()).filter(Boolean);
     activities.hidden = !items.length; activities.replaceChildren();
     if (items.length) { const list = make("ul", "detail-activity-list"); items.forEach((item) => list.append(make("li", "detail-activity-list__item", item))); activities.append(heading("detail-activities-title", t("place_detail.activities")), list); }
   }
@@ -231,7 +321,7 @@
 
   function renderNearby(place, lang) {
     const mount = global.document.querySelector("[data-detail-nearby]");
-    const nearby = global.TakhunPlaceData?.getNearbyPlaces?.(place.nearby_place_ids, place.place_id) || [];
+    const nearby = Array.isArray(place.nearby_places) && place.nearby_places.length ? place.nearby_places : global.TakhunPlaceData?.getNearbyPlaces?.(place.nearby_place_ids, place.place_id) || [];
     mount.hidden = !nearby.length; mount.replaceChildren();
     if (!nearby.length) return;
     const grid = make("div", "detail-nearby-grid");
@@ -244,16 +334,18 @@
     mount.append(heading("detail-nearby-title", t("place_detail.nearby")), grid);
   }
 
-  function renderReviews(place, lang) {
-    const mount = global.document.querySelector("[data-detail-reviews]"); const reviews = getApprovedReviews(place.reviews);
-    mount.replaceChildren(heading("detail-reviews-title", t("place_detail.reviews")));
-    if (!reviews.length) { mount.append(make("p", "detail-muted", t("place_detail.no_reviews"))); return; }
+  function renderReviews(response, lang) {
+    const mount = global.document.querySelector("[data-review-ready]"); const reviews = response?.items || [];
+    mount.replaceChildren();
     const list = make("div", "detail-review-list");
     reviews.forEach((review) => {
       const card = make("article", "review-card detail-review-card");
       const name = review.is_anonymous ? t("place_detail.anonymous_reviewer") : String(review.reviewer_name || t("place_detail.demo_reviewer"));
       const header = make("div", "review-card__header"); header.append(make("h3", "review-card__name", name), make("span", "review-card__rating", `${"★".repeat(Number(review.rating))} ${review.rating}/5`));
-      card.append(header, make("p", "review-card__comment", localized(review, "comment", lang)), make("p", "review-card__date", t("place_detail.mock_review_notice"))); list.append(card);
+      card.append(header, make("p", "review-card__comment", localized(review, "comment", lang)));
+      if (review.admin_reply) card.append(make("p", "review-card__reply", String(review.admin_reply)));
+      if (review.created_at) card.append(make("p", "review-card__date", String(review.created_at)));
+      list.append(card);
     });
     mount.append(list);
   }
@@ -271,32 +363,65 @@
     const root = global.document?.querySelector?.(".place-detail-page");
     if (!root) return;
     const mounts = { loading: global.document.querySelector("[data-detail-loading]"), "not-found": global.document.querySelector("[data-detail-not-found]"), error: global.document.querySelector("[data-detail-error]"), ready: global.document.querySelector("[data-detail-content]") };
+    const reviewMounts = { loading: global.document.querySelector("[data-review-loading]"), empty: global.document.querySelector("[data-review-empty]"), error: global.document.querySelector("[data-review-error]"), ready: global.document.querySelector("[data-review-ready]") };
     let currentPlace = null;
-    function render() {
+    let currentReviews = null;
+
+    function renderCached() {
+      if (!currentPlace) return;
+      const lang = global.TakhunI18n?.getCurrentLang?.() || "th"; const name = localized(currentPlace, "name", lang);
+      global.document.title = format("place_detail.page_title", { name });
+      const heroMedia = global.document.querySelector("[data-detail-hero-media]"); heroMedia.replaceChildren(); appendImage(heroMedia, currentPlace.cover_image_url, name, { className: "detail-hero__image", hero: true });
+      renderSummary(currentPlace, lang, global.document.querySelector("[data-detail-summary]")); renderTextSections(currentPlace, lang); renderVisitor(currentPlace, lang); renderGallery(currentPlace, lang); renderNearby(currentPlace, lang); renderMap(currentPlace);
+      if (currentReviews) renderReviews(currentReviews, lang);
+      const favorite = global.document.querySelector("[data-detail-favorite]"); const saved = readFavorites().includes(currentPlace.place_id); favorite.classList.toggle("is-active", saved); favorite.setAttribute("aria-pressed", String(saved)); favorite.setAttribute("aria-label", format(saved ? "place_detail.favorite_remove" : "place_detail.favorite_add", { name })); favorite.querySelector("span").textContent = saved ? "♥" : "♡";
+      setPageState(mounts, "ready", root);
+    }
+
+    async function loadReviews() {
+      if (!currentPlace) return;
+      currentReviews = null;
+      setReviewState(reviewMounts, "loading");
+      try {
+        currentReviews = await fetchReviews(currentPlace);
+        currentPlace = { ...currentPlace, reviews_summary: currentReviews.summary };
+        renderSummary(currentPlace, global.TakhunI18n?.getCurrentLang?.() || "th", global.document.querySelector("[data-detail-summary]"));
+        if (!currentReviews.items.length) setReviewState(reviewMounts, "empty");
+        else { renderReviews(currentReviews, global.TakhunI18n?.getCurrentLang?.() || "th"); setReviewState(reviewMounts, "ready"); }
+      } catch (_error) {
+        setReviewState(reviewMounts, "error");
+      }
+    }
+
+    async function render() {
       try {
         setPageState(mounts, "loading", root);
-        const resolution = resolvePage(global.location.search); currentPlace = resolution.place;
-        if (resolution.state === "error") { setPageState(mounts, "error", root); return; }
+        const placeId = parsePlaceId(global.location.search);
+        if (!validatePlaceId(placeId)) { currentPlace = null; global.document.title = t("place_detail.not_found_page_title"); setPageState(mounts, "not-found", root); return; }
+        const lang = global.TakhunI18n?.getCurrentLang?.() || "th";
+        currentPlace = await global.TakhunApi.getPlaceDetail(placeId, { lang }, { mock: () => findPublishedPlace(placeId) });
         if (!currentPlace) { global.document.title = t("place_detail.not_found_page_title"); setPageState(mounts, "not-found", root); return; }
-        const lang = global.TakhunI18n?.getCurrentLang?.() || "th"; const name = localized(currentPlace, "name", lang);
-        global.document.title = format("place_detail.page_title", { name });
-        const heroMedia = global.document.querySelector("[data-detail-hero-media]"); heroMedia.replaceChildren(); appendImage(heroMedia, currentPlace.cover_image_url, name, { className: "detail-hero__image", hero: true });
-        renderSummary(currentPlace, lang, global.document.querySelector("[data-detail-summary]")); renderTextSections(currentPlace, lang); renderVisitor(currentPlace, lang); renderGallery(currentPlace, lang); renderNearby(currentPlace, lang); renderReviews(currentPlace, lang); renderMap(currentPlace);
-        const favorite = global.document.querySelector("[data-detail-favorite]"); const saved = readFavorites().includes(currentPlace.place_id); favorite.classList.toggle("is-active", saved); favorite.setAttribute("aria-pressed", String(saved)); favorite.setAttribute("aria-label", format(saved ? "place_detail.favorite_remove" : "place_detail.favorite_add", { name })); favorite.querySelector("span").textContent = saved ? "♥" : "♡";
-        setPageState(mounts, "ready", root);
-      } catch (_error) { setPageState(mounts, "error", root); }
+        renderCached();
+        await loadReviews();
+      } catch (error) {
+        currentPlace = null;
+        if (error?.code === "NOT_FOUND" || error?.code === "VALIDATION_ERROR") setPageState(mounts, "not-found", root);
+        else setPageState(mounts, "error", root);
+      }
     }
     global.document.querySelector("[data-detail-back]")?.addEventListener("click", () => global.history?.back?.());
-    global.document.querySelector("[data-detail-favorite]")?.addEventListener("click", () => { if (!currentPlace) return; const saved = toggleFavorite(currentPlace.place_id).includes(currentPlace.place_id); showToast(t(saved ? "place_detail.favorite_added" : "place_detail.favorite_removed")); render(); });
+    global.document.querySelector("[data-detail-favorite]")?.addEventListener("click", () => { if (!currentPlace) return; const saved = toggleFavorite(currentPlace.place_id).includes(currentPlace.place_id); showToast(t(saved ? "place_detail.favorite_added" : "place_detail.favorite_removed")); renderCached(); });
     global.document.querySelector("[data-detail-share]")?.addEventListener("click", async () => { if (!currentPlace) return; const lang = global.TakhunI18n?.getCurrentLang?.() || "th"; const name = localized(currentPlace, "name", lang); const result = await sharePlace({ title: format("place_detail.share_title", { name }), text: format("place_detail.share_text", { name }), url: global.location.href }); if (result === "copied") showToast(t("place_detail.copy_success")); if (result === "copy_failed") showToast(t("place_detail.copy_failed"), "error"); });
     global.document.querySelector("[data-detail-retry]")?.addEventListener("click", render);
+    global.document.querySelector("[data-review-retry]")?.addEventListener("click", loadReviews);
+    global.document.querySelector("[data-review-form]")?.addEventListener("submit", createReviewSubmitHandler({ getPlace: () => currentPlace }));
     global.document.querySelector("[data-lightbox-close]")?.addEventListener("click", closeLightbox);
     global.document.querySelector("[data-lightbox-backdrop]")?.addEventListener("click", closeLightbox);
     global.document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeLightbox(); });
-    global.document.addEventListener("takhun:languagechange", () => { global.TakhunI18n?.applyTranslations?.(global.document); render(); });
+    global.document.addEventListener("takhun:languagechange", () => { global.TakhunI18n?.applyTranslations?.(global.document); renderCached(); });
     render();
   }
 
-  global.TakhunPlaceDetail = Object.freeze({ parsePlaceId, validatePlaceId, findPublishedPlace, resolvePage, setPageState, getActionModel, readFavorites, writeFavorites, toggleFavorite, getApprovedReviews, sharePlace });
+  global.TakhunPlaceDetail = Object.freeze({ parsePlaceId, validatePlaceId, findPublishedPlace, resolvePage, setPageState, getActionModel, readFavorites, writeFavorites, toggleFavorite, getApprovedReviews, normalizeReviewResponse, validateReviewPayload, fetchReviews, createReviewSubmitHandler, setReviewState, sharePlace });
   if (global.document?.readyState === "loading") global.document.addEventListener("DOMContentLoaded", initializePage, { once: true }); else initializePage();
 })(window);

@@ -36,8 +36,9 @@ foreach ($mount in @("detail-loading", "detail-not-found", "detail-error", "deta
 Assert-Match $html 'role="dialog"' "Lightbox must use dialog semantics."
 Assert-Match $html 'aria-modal="true"' "Lightbox must be modal."
 Assert-Match $html 'data-lightbox-close' "Lightbox must have a close control."
-Assert-Match $html 'data-review-form[^>]*aria-disabled="true"' "Review form must be explicitly read-only."
-Assert-Match $html 'disabled' "Review controls must be disabled."
+foreach ($contract in @('data-review-form','data-review-name','data-review-anonymous','data-review-rating','data-review-comment','maxlength="1000"','data-review-submit','data-review-status','data-review-loading','data-review-empty','data-review-error','data-review-ready')) {
+  Assert-Match $html $contract "Missing active review UI contract: $contract"
+}
 
 $scripts = @('js/config.js','js/i18n.js','js/api.js','js/place-data.js','js/app.js','js/place-detail.js')
 $last = -1
@@ -59,13 +60,16 @@ foreach ($contract in @('parsePlaceId','validatePlaceId','findPublishedPlace','r
 }
 if ($controller -match '\.innerHTML\s*=') { throw "Dynamic Place Detail rendering must not assign innerHTML." }
 if (($html + $controller) -match 'href\s*=\s*["'']#["'']') { throw "Place Detail actions must not use href=#." }
-if ($controller -match 'submitReview|fetch\s*\(') { throw "Mock review UI must not submit to an API." }
+foreach ($contract in @('getReviews','submitReview','submitInFlight','setReviewState','validateReviewPayload','normalizeReviewResponse','data-review-submit','data-review-form')) {
+  Assert-Match $controller $contract "Missing production review behavior contract: $contract"
+}
+if ($controller -match 'fetch\s*\(') { throw "Place Detail must call reviews through TakhunApi, not fetch directly." }
 if ($controller -match 'localStorage[^\r\n]*(?:REVIEW|review)') { throw "Mock reviews must not persist to Local Storage." }
 Assert-Match $controller 'data-detail-retry[^\r\n]*addEventListener\("click",\s*render\)' "Retry must restart the render cycle, which enters Loading first."
 Assert-Match $controller 'setPageState\(mounts,\s*"loading"' "Every render cycle must enter Loading before resolving data."
 Assert-Match $controller 'if\s*\(!currentPlace\)[^{]*\{[^}]*setPageState\(mounts,\s*"not-found"[^}]*return' "Invalid places must transition to Not Found and return before detail rendering."
 
-foreach ($key in @('demo_notice','back','favorite_add','favorite_remove','share','copy_success','copy_failed','description','highlights','activities','visitor_information','opening_time','fee','duration','best_time','gallery','map','nearby','reviews','review_unavailable','loading','not_found_title','not_found_text','error','retry','image_alt','image_fallback','close_gallery')) {
+foreach ($key in @('demo_notice','back','favorite_add','favorite_remove','share','copy_success','copy_failed','description','highlights','activities','visitor_information','opening_time','fee','duration','best_time','gallery','map','nearby','reviews','review_loading','review_empty','review_error','review_retry','write_review','review_name','review_anonymous','review_rating','review_comment','review_submit','review_submitting','review_success','review_submit_error','review_comment_required','review_rating_invalid','loading','not_found_title','not_found_text','error','retry','image_alt','image_fallback','close_gallery')) {
   Assert-Match $i18n ("{0}:" -f $key) "Missing Place Detail i18n key: $key"
 }
 

@@ -27,7 +27,23 @@ function routeRequest_(method, event) {
           return createJsonResponse_(getEventDetail_(parameters));
         case "getGallery":
           return createJsonResponse_(getGallery_(parameters));
+        case "getReviews":
+          return createJsonResponse_(getReviews_(parameters));
       }
+    }
+
+    if (method === "POST" && (!action || action === "submitReview")) {
+      if (!event || !event.postData || typeof event.postData.contents !== "string" || !event.postData.contents.trim()) {
+        return createJsonResponse_({ ok: false, error: { code: "VALIDATION_ERROR", message: "ข้อมูลคำขอไม่ถูกต้อง" } });
+      }
+      var body;
+      try {
+        body = JSON.parse(event.postData.contents);
+      } catch (_jsonError) {
+        return createJsonResponse_({ ok: false, error: { code: "VALIDATION_ERROR", message: "ข้อมูลคำขอไม่ถูกต้อง" } });
+      }
+      action = body && body.action ? String(body.action).trim() : "";
+      if (action === "submitReview") return createJsonResponse_(submitReview_(body.payload));
     }
 
     return createJsonResponse_({

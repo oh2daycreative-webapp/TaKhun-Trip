@@ -99,6 +99,19 @@
     }
   });
 
+  Object.assign(I18N_MESSAGES.th.place_detail, {
+    review_loading: "กำลังโหลดรีวิว…", review_empty: "ยังไม่มีรีวิวที่เผยแพร่", review_error: "โหลดรีวิวไม่สำเร็จ", review_retry: "ลองอีกครั้ง",
+    review_anonymous: "ไม่แสดงชื่อ", review_rating: "ให้คะแนน", review_submitting: "กำลังส่ง…",
+    review_success: "ส่งรีวิวแล้ว รอตรวจสอบก่อนเผยแพร่", review_submit_error: "ส่งรีวิวไม่สำเร็จ กรุณาลองใหม่อีกครั้ง",
+    review_comment_required: "กรุณากรอกความคิดเห็น", review_rating_invalid: "กรุณาเลือกคะแนน 1 ถึง 5"
+  });
+  Object.assign(I18N_MESSAGES.en.place_detail, {
+    review_loading: "Loading reviews…", review_empty: "No approved reviews yet.", review_error: "Unable to load reviews.", review_retry: "Try Again",
+    review_anonymous: "Post Anonymously", review_rating: "Rating", review_submitting: "Submitting…",
+    review_success: "Thank you. Your review is pending moderation.", review_submit_error: "Unable to submit your review. Please try again.",
+    review_comment_required: "Please enter a comment.", review_rating_invalid: "Please select a rating from 1 to 5."
+  });
+
   let currentLang = DEFAULT_LANG;
   let initialized = false;
 
