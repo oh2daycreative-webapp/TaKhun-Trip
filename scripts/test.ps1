@@ -53,6 +53,7 @@ $required = @(
   "apps-script/ProductService.gs",
   "apps-script/EventService.gs",
   "apps-script/GalleryService.gs"
+  "apps-script/HomeService.gs"
   "apps-script/ReviewService.gs"
 )
 
@@ -128,6 +129,8 @@ if ($LASTEXITCODE -ne 0) { throw "EventService verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "GalleryService verification failed." }
 & node (Join-Path $PSScriptRoot "test-review-service.js")
 if ($LASTEXITCODE -ne 0) { throw "ReviewService verification failed." }
+& node (Join-Path $PSScriptRoot "test-home-service.js")
+if ($LASTEXITCODE -ne 0) { throw "HomeService verification failed." }
 & node (Join-Path $PSScriptRoot "test-apps-script.js")
 if ($LASTEXITCODE -ne 0) { throw "Apps Script static verification failed." }
 & node (Join-Path $PSScriptRoot "test-routes.js")

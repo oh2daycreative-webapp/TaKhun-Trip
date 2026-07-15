@@ -7,6 +7,8 @@ function routeRequest_(method, event) {
       switch (action) {
         case "getSettings":
           return createJsonResponse_(getSettings_(parameters));
+        case "getHomeData":
+          return createJsonResponse_(getHomeData_(parameters));
         case "getCategories":
           return createJsonResponse_(getCategories_(parameters));
         case "getPlaces":

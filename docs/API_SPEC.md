@@ -244,7 +244,7 @@ GET ?action=getHomeData&lang=th
 
 | Parameter | Required | Example | Description |
 |---|---:|---|---|
-| `lang` | no | `th` | ภาษา `th` หรือ `en` |
+| `lang` | no | `th` | ภาษา `th` หรือ `en`; ถ้าไม่ส่งหรือส่งค่าอื่นให้ใช้ `th` |
 
 ### Response
 
@@ -261,6 +261,133 @@ GET ?action=getHomeData&lang=th
   "message": "success"
 }
 ```
+
+### Section Item Projections
+
+แต่ละ section ต้องใช้ public list projection ของ API ต้นทางเท่านั้น ห้ามเพิ่ม response envelope, pagination metadata, status, internal field หรือ field สำหรับ UI โดยเฉพาะ
+
+#### `featured_routes`
+
+ใช้ item projection เดียวกับ `getRoutes`:
+
+```json
+{
+  "route_id": "ROUTE-001",
+  "name": "เส้นทางเที่ยวบ้านตาขุน 4 จุดหลัก",
+  "short_description": "เส้นทางแนะนำจากเขื่อนสู่ชุมชน",
+  "duration": "1 วัน",
+  "travel_style": ["nature", "community", "photo"],
+  "cover_image_url": "",
+  "is_featured": true
+}
+```
+
+ส่งเฉพาะข้อมูล `status = published` และ `is_featured = true` หลังเรียงตามกติกาของ `getRoutes` แล้วให้ไม่เกิน 2 รายการ
+
+#### `featured_places`
+
+ใช้ item projection เดียวกับ `getPlaces`:
+
+```json
+{
+  "place_id": "BTK-001",
+  "name": "วิสาหกิจชุมชนท่องเที่ยวเขื่อนรัชชประภา",
+  "name_th": "วิสาหกิจชุมชนท่องเที่ยวเขื่อนรัชชประภา",
+  "name_en": "Ratchaprapha Dam Community Tourism Enterprise",
+  "district": "ban_ta_khun",
+  "category": "community_tourism",
+  "route_group": "main_point_1",
+  "short_description": "จุดบริการท่องเที่ยวใกล้เขื่อนรัชชประภา",
+  "phone": "083 789 4493",
+  "google_maps_url": "https://maps.app.goo.gl/w3bUxMLBWFF1THb78",
+  "latitude": "",
+  "longitude": "",
+  "cover_image_url": "",
+  "is_featured": true,
+  "is_main_route_point": true
+}
+```
+
+ส่งเฉพาะข้อมูล `status = published` และ `is_featured = true` หลังเรียงตามกติกาของ `getPlaces` แล้วให้ไม่เกิน 4 รายการ
+
+#### `featured_products`
+
+ใช้ item projection เดียวกับ `getProducts`:
+
+```json
+{
+  "product_id": "PROD-001",
+  "name": "น้ำผึ้งพรุไทย ฮันนี่บี",
+  "category": "honey",
+  "producer_name": "วิสาหกิจชุมชนพรุไทย ฮันนี่บี",
+  "related_place_id": "BTK-003",
+  "description": "",
+  "price_range": "",
+  "phone": "081 396 8145",
+  "contact_url": "",
+  "google_maps_url": "https://maps.app.goo.gl/s8xAKHfxqCozuhEX7",
+  "image_url": "",
+  "is_featured": true
+}
+```
+
+ส่งเฉพาะข้อมูล `status = published` และ `is_featured = true` หลังเรียงตามกติกาของ `getProducts` แล้วให้ไม่เกิน 4 รายการ
+
+#### `upcoming_events`
+
+ใช้ item projection เดียวกับ `getEvents`:
+
+```json
+{
+  "event_id": "EVT-001",
+  "title": "กิจกรรมเปิดเส้นทางท่องเที่ยวบ้านตาขุน",
+  "event_type": "launch",
+  "event_date": "2026-08-01",
+  "start_time": "10:00",
+  "end_time": "16:00",
+  "location": "ตลาดคลองแสง",
+  "image_url": "",
+  "contact_name": "",
+  "contact_phone": "",
+  "register_url": ""
+}
+```
+
+ส่งเฉพาะข้อมูล `status = published` ที่มี `event_date` ถูกต้องและมีวันที่ตั้งแต่วันปัจจุบันเป็นต้นไป หลังเรียงตามกติกาของ `getEvents` แล้วให้ไม่เกิน 3 รายการ
+
+#### `gallery_preview`
+
+ใช้ item projection เดียวกับ `getGallery`:
+
+```json
+{
+  "media_id": "GAL-001",
+  "title": "ทะเลสาบเชี่ยวหลาน",
+  "media_type": "image",
+  "category": "place",
+  "related_place_id": "BTK-001",
+  "image_url": "",
+  "video_url": "",
+  "thumbnail_url": "",
+  "caption": "",
+  "credit": ""
+}
+```
+
+ส่งเฉพาะข้อมูล `status = published` ที่เป็น media row ถูกต้อง หลังเรียงตามกติกาปัจจุบันของ `getGallery` แล้วให้ไม่เกิน 6 รายการ
+
+### Rules
+
+- Effective language มีเพียง `th` และ `en`: ไม่ส่ง `lang` ให้ใช้ `th`, ส่ง `en` ให้ใช้ `en`, และค่าอื่นให้ normalize เป็น `th`
+- ถ้าเลือก `lang=en` แต่ field ภาษาอังกฤษว่าง ให้ fallback เป็นภาษาไทยตามกติกาของ API ต้นทาง
+- Deduplicate แต่ละ section ด้วย `route_id`, `place_id`, `product_id`, `event_id` หรือ `media_id` ตาม domain โดยเลือก valid item แรก และต้องรองรับ identifier ที่เหมือนชื่อ property บน prototype ได้อย่างปลอดภัย
+- ต้อง filter, deduplicate และเรียงข้อมูลให้เสร็จก่อนใช้ limit `2/4/4/3/6`; equal values ต้องคงลำดับเดิมและห้าม mutate source rows
+- Section ที่ไม่มีข้อมูลต้องเป็น `[]`; ถ้าทุก section ไม่มีข้อมูลยังต้องตอบ success พร้อม array ว่างครบทั้ง 5 section
+- ถ้าอ่านข้อมูล, build หรือ validate section ใดไม่สำเร็จ ให้ทั้ง request ตอบ safe `SERVER_ERROR`; ห้ามตอบ partial data, warnings หรือ cache failure response
+- ใช้ Cache Service 300 วินาที โดยมี effective key เฉพาะ `public:getHomeData:lang=th` และ `public:getHomeData:lang=en`
+- Cache เฉพาะ successful response ที่มี envelope, section names และ item projections ตรงตาม contract; cache ที่ parse ไม่ได้ มี shape ผิด หรือมี field เกินต้องถูกละทิ้งและโหลดข้อมูลใหม่
+- Cache Service failure ต้องไม่ทำให้ request ล้มเมื่อยังอ่านข้อมูลต้นทางได้ และห้ามใช้ Lock Service
+- `getHomeData` ไม่อ่านหรือส่ง Settings และไม่ใช้ `maintenance_mode`, `events_enabled` หรือ `reviews_enabled` ควบคุม section ใด
 
 ---
 
