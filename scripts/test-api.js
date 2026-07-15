@@ -91,6 +91,47 @@ async function run() {
       apiUrl: "https://api.example/exec?token=kept",
       fetchImpl: async (url) => {
         calls.push(url);
+        return response({ body: { ok: true, data: { featured_routes: [], featured_places: [], featured_products: [], upcoming_events: [], gallery_preview: [] } } });
+      }
+    });
+    assert.equal(typeof api.getHomeData, "function");
+    const params = { lang: "en", ignored: "no" };
+    const snapshot = JSON.stringify(params);
+    const home = await api.getHomeData();
+    await api.getHomeData(params);
+    await api.getHomeData({ lang: "fr", extra: "ignored" });
+    assert.equal(home.ok, true);
+    assert.deepEqual(Object.keys(home.data).sort(), ["featured_places", "featured_products", "featured_routes", "gallery_preview", "upcoming_events"]);
+    assert.equal(JSON.stringify(params), snapshot);
+    assert.equal(new URL(calls[0]).searchParams.get("lang"), "th");
+    assert.deepEqual([...new URL(calls[0]).searchParams.keys()].sort(), ["action", "lang", "token"]);
+    assert.equal(new URL(calls[1]).searchParams.get("lang"), "en");
+    assert.equal(new URL(calls[1]).searchParams.has("ignored"), false);
+    assert.equal(new URL(calls[2]).searchParams.get("lang"), "th");
+  }
+
+  {
+    const api = loadApi({ apiUrl: "" });
+    const params = { lang: "en", ignored: "no" };
+    const snapshot = JSON.stringify(params);
+    const data = await api.getHomeData(params, { mock: (allowed) => ({ ok: true, data: { allowed }, message: "success" }) });
+    assert.deepEqual(JSON.parse(JSON.stringify(data)), { ok: true, data: { allowed: { lang: "en" } }, message: "success" });
+    assert.equal(JSON.stringify(params), snapshot);
+  }
+
+  {
+    let mockCalls = 0;
+    const api = loadApi({ apiUrl: "https://api.example/exec", fetchImpl: async () => { throw new Error("home network failure"); } });
+    await expectReject(api.getHomeData({ lang: "th" }, { mock: () => { mockCalls += 1; return {}; } }), "NETWORK_ERROR");
+    assert.equal(mockCalls, 0);
+  }
+
+  {
+    const calls = [];
+    const api = loadApi({
+      apiUrl: "https://api.example/exec?token=kept",
+      fetchImpl: async (url) => {
+        calls.push(url);
         return response({ body: { ok: true, data: { items: [] } } });
       }
     });
