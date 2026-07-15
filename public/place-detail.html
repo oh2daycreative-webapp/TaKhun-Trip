@@ -49,20 +49,34 @@
           <section class="detail-section" data-detail-activities aria-labelledby="detail-activities-title" hidden></section>
           <section class="detail-section" data-detail-gallery aria-labelledby="detail-gallery-title" hidden></section>
           <section class="detail-section" data-detail-nearby aria-labelledby="detail-nearby-title" hidden></section>
-          <section class="detail-section" data-detail-reviews aria-labelledby="detail-reviews-title"></section>
+          <section class="detail-section" data-detail-reviews aria-labelledby="detail-reviews-title">
+            <h2 class="detail-section__title" id="detail-reviews-title" data-i18n="place_detail.reviews">รีวิว</h2>
+            <div data-review-loading role="status"><p data-i18n="place_detail.review_loading">กำลังโหลดรีวิว…</p></div>
+            <div data-review-empty hidden><p class="detail-muted" data-i18n="place_detail.review_empty">ยังไม่มีรีวิวที่เผยแพร่</p></div>
+            <div data-review-error role="alert" hidden>
+              <p data-i18n="place_detail.review_error">โหลดรีวิวไม่สำเร็จ</p>
+              <button class="button button--secondary" type="button" data-review-retry data-i18n="place_detail.review_retry">ลองอีกครั้ง</button>
+            </div>
+            <div data-review-ready hidden></div>
+          </section>
         </div>
         <aside class="detail-sidebar">
           <section class="detail-section" data-detail-visitor aria-labelledby="detail-visitor-title"></section>
           <section class="detail-section" data-detail-map aria-labelledby="detail-map-title"></section>
           <section class="detail-section detail-review-disabled" data-detail-review-form aria-labelledby="detail-review-form-title">
             <h2 id="detail-review-form-title" data-i18n="place_detail.write_review">เขียนรีวิว</h2>
-            <p data-i18n="place_detail.review_unavailable">ระบบรีวิวยังไม่เปิดใช้งานในข้อมูลตัวอย่าง</p>
-            <form data-review-form aria-disabled="true">
+            <form data-review-form>
               <label for="detail-review-name" data-i18n="place_detail.review_name">ชื่อของคุณ</label>
-              <input id="detail-review-name" type="text" disabled>
+              <input id="detail-review-name" type="text" data-review-name autocomplete="name">
+              <label><input type="checkbox" data-review-anonymous> <span data-i18n="place_detail.review_anonymous">ไม่แสดงชื่อ</span></label>
+              <label for="detail-review-rating" data-i18n="place_detail.review_rating">ให้คะแนน</label>
+              <select id="detail-review-rating" data-review-rating required>
+                <option value="">—</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+              </select>
               <label for="detail-review-comment" data-i18n="place_detail.review_comment">ความคิดเห็น</label>
-              <textarea id="detail-review-comment" rows="4" disabled></textarea>
-              <button class="button button--secondary" type="button" disabled data-i18n="place_detail.review_submit">ส่งรีวิว</button>
+              <textarea id="detail-review-comment" rows="4" maxlength="1000" data-review-comment required></textarea>
+              <button class="button button--secondary" type="submit" data-review-submit data-i18n="place_detail.review_submit">ส่งรีวิว</button>
+              <p data-review-status role="status" aria-live="polite"></p>
             </form>
           </section>
         </aside>

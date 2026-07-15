@@ -34,6 +34,11 @@ function loadModules(options = {}) {
       pickLangValue(item, field, lang = "th") { return item?.[`${field}_${lang}`] || item?.[`${field}_th`] || ""; },
       t(key) { return key; }
     },
+    TakhunApi: options.api || {
+      getPlaceDetail(_id, _params, config) { return Promise.resolve(config.mock()); },
+      getReviews(_id, _params, config) { return Promise.resolve(config.mock()); },
+      submitReview(payload, config) { return Promise.resolve(config.mock(payload)); }
+    },
     window: null
   };
   context.window = context;
@@ -165,6 +170,74 @@ test("reviews are normalized to valid approved mock entries only", () => {
     { review_id: "C", status: "approved", rating: 7, comment: "invalid" }
   ]);
   assert.deepEqual(reviews.map((item) => item.review_id), ["A"]);
+});
+
+test("review state machine exposes exactly one loading empty error or ready state", () => {
+  const { detail } = loadModules();
+  const mounts = { loading: { hidden: false }, empty: { hidden: false }, error: { hidden: false }, ready: { hidden: false } };
+  for (const state of ["loading", "empty", "error", "ready"]) {
+    assert.equal(detail.setReviewState(mounts, state), state);
+    assert.deepEqual(Object.entries(mounts).filter(([, mount]) => !mount.hidden).map(([name]) => name), [state]);
+  }
+  assert.throws(() => detail.setReviewState(mounts, "unknown"), /review state/i);
+  assert.ok(Object.values(mounts).every((mount) => mount.hidden));
+});
+
+test("review response normalization accepts public projection and rejects malformed envelopes", () => {
+  const { detail } = loadModules();
+  const item = { review_id: "A", place_id: "P-1", reviewer_name: "A", is_anonymous: false, rating: 5, comment: "ok", admin_reply: "", created_at: "2026-07-15 10:00:00" };
+  const response = detail.normalizeReviewResponse({ items: [item, { ...item, review_id: "B", status: "pending" }], summary: { average_rating: 5, review_count: 1 }, total: 1 });
+  assert.deepEqual(JSON.parse(JSON.stringify(response)), { items: [item], summary: { average_rating: 5, review_count: 1 }, total: 1 });
+  assert.throws(() => detail.normalizeReviewResponse(null), /review response/i);
+  assert.throws(() => detail.normalizeReviewResponse({ items: [] }), /review response/i);
+  for (const malformed of [
+    { items: [], summary: { average_rating: 0, review_count: 0 }, total: -1 },
+    { items: [], summary: { average_rating: "x", review_count: 0 }, total: 0 },
+    { items: [], summary: { average_rating: 0, review_count: 1.5 }, total: 0 },
+    { items: [{ review_id: "A", rating: 5 }], summary: { average_rating: 5, review_count: 1 }, total: 1 }
+  ]) assert.throws(() => detail.normalizeReviewResponse(malformed), /review response/i);
+});
+
+test("review payload validation mirrors backend rating comment and boolean rules", () => {
+  const { detail } = loadModules();
+  assert.deepEqual(JSON.parse(JSON.stringify(detail.validateReviewPayload({ place_id: " P-1 ", reviewer_name: " A ", is_anonymous: false, rating: "5", comment: " Good " }).payload)), { place_id: "P-1", reviewer_name: "A", is_anonymous: false, rating: 5, comment: "Good" });
+  assert.equal(detail.validateReviewPayload({ place_id: "P-1", rating: 0, comment: "x" }).ok, false);
+  assert.equal(detail.validateReviewPayload({ place_id: "P-1", rating: 1.5, comment: "x" }).ok, false);
+  assert.equal(detail.validateReviewPayload({ place_id: "P-1", rating: 5, comment: " " }).ok, false);
+  assert.equal(detail.validateReviewPayload({ place_id: "P-1", rating: 5, comment: "x".repeat(1001) }).ok, false);
+  assert.equal(detail.validateReviewPayload({ place_id: "P-1", rating: 5, comment: "x", is_anonymous: "true" }).ok, false);
+});
+
+test("review loader calls API once with contract pagination and uses mock response only through API options", async () => {
+  const calls = [];
+  const api = { async getReviews(id, params, options) { calls.push({ id, params, options }); return options.mock(); } };
+  const { detail, data } = loadModules({ api: { ...api, getPlaceDetail() {}, submitReview() {} } });
+  const place = data.getPlaceById("MOCK-PLACE-001");
+  const response = await detail.fetchReviews(place, api);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[0].params)), { page: 1, page_size: 20 });
+  assert.equal("lang" in calls[0].params, false);
+  assert.equal(response.total, 1);
+});
+
+test("review submit handler deduplicates in-flight requests resets on success and reports errors", async () => {
+  const { detail } = loadModules();
+  assert.equal(typeof detail.createReviewSubmitHandler, "function");
+  const controls = {
+    "[data-review-name]": { value: " A " }, "[data-review-anonymous]": { checked: false }, "[data-review-rating]": { value: "5" },
+    "[data-review-comment]": { value: " Good " }, "[data-review-submit]": { disabled: false, textContent: "" }, "[data-review-status]": { textContent: "" }
+  };
+  let resets = 0; const form = { querySelector(selector) { return controls[selector]; }, reset() { resets += 1; } };
+  let resolveSubmit; let calls = 0;
+  const api = { submitReview() { calls += 1; return new Promise((resolve) => { resolveSubmit = resolve; }); } };
+  const handler = detail.createReviewSubmitHandler({ getPlace: () => ({ place_id: "P-1" }), api, translate: (key) => key });
+  const event = { currentTarget: form, preventDefault() {} };
+  const first = handler(event); const second = handler(event);
+  assert.equal(calls, 1); assert.equal(controls["[data-review-submit]"].disabled, true);
+  resolveSubmit({ review_id: "R", status: "pending" }); await Promise.all([first, second]);
+  assert.equal(resets, 1); assert.equal(controls["[data-review-status]"].textContent, "place_detail.review_success"); assert.equal(controls["[data-review-submit]"].disabled, false);
+  const failing = detail.createReviewSubmitHandler({ getPlace: () => ({ place_id: "P-1" }), api: { async submitReview() { throw new Error("network"); } }, translate: (key) => key });
+  await failing(event); assert.equal(controls["[data-review-status]"].textContent, "place_detail.review_submit_error");
 });
 
 test("share uses Web Share, treats cancellation as neutral, and falls back to clipboard", async () => {

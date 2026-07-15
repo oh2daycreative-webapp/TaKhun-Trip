@@ -50,12 +50,14 @@
     return result.data;
   }
 
-  async function requestJson(url, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  async function requestJson(url, requestOptions = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
     const controller = typeof global.AbortController === "function" ? new global.AbortController() : null;
     const timeout = controller ? global.setTimeout(() => controller.abort(), timeoutMs) : null;
     let response;
     try {
-      response = await global.fetch(url.toString(), controller ? { signal: controller.signal } : {});
+      const fetchOptions = { ...requestOptions };
+      if (controller) fetchOptions.signal = controller.signal;
+      response = await global.fetch(url.toString(), fetchOptions);
     } catch (error) {
       if (error?.name === "AbortError") throw new PublicApiError("TIMEOUT");
       throw new PublicApiError("NETWORK_ERROR");
@@ -79,7 +81,23 @@
       return options.mock(params);
     }
     const url = buildUrl(action, params);
-    return requestJson(url, Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : DEFAULT_TIMEOUT_MS);
+    return requestJson(url, {}, Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : DEFAULT_TIMEOUT_MS);
+  }
+
+  async function post(action, payload = {}, options = {}) {
+    const base = apiBaseUrl();
+    if (!base) {
+      if (typeof options.mock !== "function") throw new PublicApiError("CONFIG_ERROR");
+      return options.mock(payload);
+    }
+    let url;
+    try { url = new URL(base, global.location?.href); }
+    catch (_error) { throw new PublicApiError("CONFIG_ERROR"); }
+    return requestJson(url, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action: String(action || ""), payload })
+    }, Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : DEFAULT_TIMEOUT_MS);
   }
 
   function getSettings(options = {}) {
@@ -126,8 +144,23 @@
     return get("getGallery", allowed, options);
   }
 
+  function getReviews(placeId, params = {}, options = {}) {
+    const allowed = { place_id: placeId };
+    for (const key of ["page", "page_size"]) if (params?.[key] !== undefined) allowed[key] = params[key];
+    return get("getReviews", allowed, options);
+  }
+
+  function submitReview(payload = {}, options = {}) {
+    const allowed = {};
+    for (const key of ["place_id", "reviewer_name", "is_anonymous", "rating", "comment"]) {
+      if (payload?.[key] !== undefined) allowed[key] = payload[key];
+    }
+    return post("submitReview", allowed, options);
+  }
+
   global.TakhunApi = Object.freeze({
     get,
+    post,
     getSettings,
     getRoutes,
     getRouteDetail,
@@ -138,6 +171,8 @@
     getEvents,
     getEventDetail,
     getGallery,
+    getReviews,
+    submitReview,
     buildUrl,
     validateEnvelope,
     PublicApiError

@@ -391,6 +391,60 @@ async function run() {
     await expectReject(api.getRoutes({}, { timeoutMs: 5 }), "TIMEOUT");
   }
 
+  {
+    const calls = [];
+    const api = loadApi({ apiUrl: "https://api.example/exec?kept=1", fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return response({ body: { ok: true, data: { items: [], summary: { average_rating: 0, review_count: 0 }, total: 0 } } });
+    } });
+    assert.equal(typeof api.getReviews, "function");
+    const params = { page: 2, page_size: 10, lang: "en", ignored: "x" };
+    const snapshot = JSON.stringify(params);
+    await api.getReviews(" P-1 ", params);
+    const url = new URL(calls[0].url);
+    assert.equal(url.searchParams.get("action"), "getReviews");
+    assert.equal(url.searchParams.get("place_id"), " P-1 ");
+    assert.equal(url.searchParams.get("page"), "2");
+    assert.equal(url.searchParams.get("page_size"), "10");
+    assert.equal(url.searchParams.get("lang"), null);
+    assert.equal(url.searchParams.get("ignored"), null);
+    assert.equal(JSON.stringify(params), snapshot);
+  }
+
+  {
+    const calls = [];
+    const api = loadApi({ apiUrl: "https://api.example/exec", fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return response({ body: { ok: true, data: { review_id: "REV-1", status: "pending" } } });
+    } });
+    assert.equal(typeof api.submitReview, "function");
+    const payload = { place_id: "P-1", reviewer_name: "A", is_anonymous: false, rating: 5, comment: "Good", status: "approved", approved_by: "ADM", created_at: "client" };
+    const allowedPayload = { place_id: "P-1", reviewer_name: "A", is_anonymous: false, rating: 5, comment: "Good" };
+    const snapshot = JSON.stringify(payload);
+    const result = await api.submitReview(payload);
+    assert.deepEqual(result, { review_id: "REV-1", status: "pending" });
+    assert.equal(calls[0].url, "https://api.example/exec");
+    assert.equal(calls[0].options.method, "POST");
+    assert.equal(calls[0].options.headers["Content-Type"], "text/plain;charset=utf-8");
+    assert.deepEqual(JSON.parse(calls[0].options.body), { action: "submitReview", payload: allowedPayload });
+    assert.ok(calls[0].options.signal);
+    assert.equal(JSON.stringify(payload), snapshot);
+  }
+
+  {
+    const api = loadApi({ apiUrl: "" });
+    assert.deepEqual(await api.getReviews("MOCK", {}, { mock: ({ place_id }) => ({ items: [{ place_id }], summary: { average_rating: 5, review_count: 1 }, total: 1 }) }), { items: [{ place_id: "MOCK" }], summary: { average_rating: 5, review_count: 1 }, total: 1 });
+    assert.deepEqual(await api.submitReview({ place_id: "MOCK" }, { mock: (payload) => ({ review_id: payload.place_id, status: "pending" }) }), { review_id: "MOCK", status: "pending" });
+  }
+
+  {
+    let mockCalls = 0;
+    const api = loadApi({ apiUrl: "https://api.example/exec", fetchImpl: async () => { throw new Error("network"); } });
+    await expectReject(api.getReviews("P-1", {}, { mock: () => { mockCalls += 1; } }), "NETWORK_ERROR");
+    await expectReject(api.submitReview({ place_id: "P-1" }, { mock: () => { mockCalls += 1; } }), "NETWORK_ERROR");
+    assert.equal(mockCalls, 0);
+  }
+
   process.stdout.write("Public API client behavior verification passed.\n");
 }
 
