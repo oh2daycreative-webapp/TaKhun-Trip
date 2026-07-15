@@ -26,10 +26,33 @@ for (const { name, source } of sources) {
 const router = sources.find(({ name }) => name === "Router.gs").source;
 const cases = [...router.matchAll(/case\s+"([^"]+)"\s*:/g)].map((match) => match[1]);
 assert.equal(new Set(cases).size, cases.length, "Router must not contain duplicate action cases");
-assert.deepEqual(cases.sort(), ["getMapPlaces", "getPlaceDetail", "getPlaces", "getRouteDetail", "getRoutes", "getTripTemplates"]);
+assert.deepEqual(cases.sort(), ["getEventDetail", "getEvents", "getGallery", "getMapPlaces", "getPlaceDetail", "getPlaces", "getProductDetail", "getProducts", "getRouteDetail", "getRoutes", "getTripTemplates"]);
 assert.match(router, /createJsonResponse_\(/);
 assert.match(router, /UNKNOWN_ACTION/);
 assert.match(router, /SERVER_ERROR/);
 assert.doesNotMatch(router, /stack|spreadsheetId|_error\.(?:message|stack)/);
+
+const calls = [];
+const routerContext = {
+  JSON,
+  ContentService: {
+    MimeType: { JSON: "application/json" },
+    createTextOutput(text) { return { text, mime: "", setMimeType(mime) { this.mime = mime; return this; } }; }
+  }
+};
+for (const action of cases) routerContext[`${action}_`] = (parameters) => { calls.push({ action, parameters }); return { ok: true, data: { action } }; };
+vm.createContext(routerContext);
+vm.runInContext(sources.find(({ name }) => name === "ApiResponse.gs").source, routerContext, { filename: "apps-script/ApiResponse.gs" });
+vm.runInContext(router, routerContext, { filename: "apps-script/Router.gs" });
+for (const action of cases) {
+  const output = routerContext.routeRequest_("GET", { parameter: { action, marker: "kept" } });
+  assert.equal(output.mime, "application/json");
+  assert.deepEqual(JSON.parse(output.text), { ok: true, data: { action } });
+}
+assert.equal(calls.length, cases.length);
+assert.equal(calls.every((call) => call.parameters.marker === "kept"), true);
+routerContext.getGallery_ = () => { throw new Error("gallery / sheet / spreadsheet id / stack secret"); };
+assert.deepEqual(JSON.parse(routerContext.routeRequest_("GET", { parameter: { action: "getGallery" } }).text), { ok: false, error: { code: "SERVER_ERROR", message: "เกิดข้อผิดพลาดของระบบ" } });
+assert.equal(JSON.parse(routerContext.routeRequest_("GET", { parameter: { action: "missing" } }).text).error.code, "UNKNOWN_ACTION");
 
 process.stdout.write(`Apps Script static verification passed for ${files.length} files and ${declarations.size} unique functions.\n`);

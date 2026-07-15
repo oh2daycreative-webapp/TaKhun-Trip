@@ -17,6 +17,16 @@ function routeRequest_(method, event) {
           return createJsonResponse_(getRouteDetail_(parameters));
         case "getTripTemplates":
           return createJsonResponse_(getTripTemplates_(parameters));
+        case "getProducts":
+          return createJsonResponse_(getProducts_(parameters));
+        case "getProductDetail":
+          return createJsonResponse_(getProductDetail_(parameters));
+        case "getEvents":
+          return createJsonResponse_(getEvents_(parameters));
+        case "getEventDetail":
+          return createJsonResponse_(getEventDetail_(parameters));
+        case "getGallery":
+          return createJsonResponse_(getGallery_(parameters));
       }
     }
 
