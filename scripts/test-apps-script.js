@@ -26,7 +26,7 @@ for (const { name, source } of sources) {
 const router = sources.find(({ name }) => name === "Router.gs").source;
 const cases = [...router.matchAll(/case\s+"([^"]+)"\s*:/g)].map((match) => match[1]);
 assert.equal(new Set(cases).size, cases.length, "Router must not contain duplicate action cases");
-assert.deepEqual(cases.sort(), ["getEventDetail", "getEvents", "getGallery", "getMapPlaces", "getPlaceDetail", "getPlaces", "getProductDetail", "getProducts", "getReviews", "getRouteDetail", "getRoutes", "getTripTemplates"]);
+assert.deepEqual(cases.sort(), ["getCategories", "getEventDetail", "getEvents", "getGallery", "getMapPlaces", "getPlaceDetail", "getPlaces", "getProductDetail", "getProducts", "getReviews", "getRouteDetail", "getRoutes", "getSettings", "getTripTemplates"]);
 assert.match(router, /action\s*===\s*"submitReview"/);
 assert.match(router, /createJsonResponse_\(/);
 assert.match(router, /UNKNOWN_ACTION/);

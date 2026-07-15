@@ -86,6 +86,49 @@ async function run() {
   }
 
   {
+    const calls = [];
+    const api = loadApi({
+      apiUrl: "https://api.example/exec?token=kept",
+      fetchImpl: async (url) => {
+        calls.push(url);
+        return response({ body: { ok: true, data: { items: [] } } });
+      }
+    });
+    assert.equal(typeof api.getCategories, "function");
+    await api.getCategories();
+    await api.getCategories({ type: "route style & nature", lang: "en", status: "published", unknown: "ignored" });
+    const first = new URL(calls[0]);
+    const second = new URL(calls[1]);
+    assert.equal(first.searchParams.get("action"), "getCategories");
+    assert.deepEqual([...first.searchParams.keys()].sort(), ["action", "token"]);
+    assert.equal(second.searchParams.get("action"), "getCategories");
+    assert.equal(second.searchParams.get("type"), "route style & nature");
+    assert.equal(second.searchParams.get("lang"), "en");
+    assert.equal(second.searchParams.has("status"), false);
+    assert.equal(second.searchParams.has("unknown"), false);
+    assert.match(calls[1], /type=route(?:\+|%20)style(?:\+|%20)%26(?:\+|%20)nature/);
+  }
+
+  {
+    const api = loadApi({ apiUrl: "" });
+    const params = { type: "place", lang: "th", ignored: "x" };
+    const snapshot = JSON.stringify(params);
+    const result = await api.getCategories(params, { mock: (allowed) => ({ items: [allowed] }) });
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), { items: [{ type: "place", lang: "th" }] });
+    assert.equal(JSON.stringify(params), snapshot);
+  }
+
+  {
+    let mockCalls = 0;
+    const api = loadApi({
+      apiUrl: "https://api.example/exec",
+      fetchImpl: async () => { throw new Error("category network failure"); }
+    });
+    await expectReject(api.getCategories({ type: "place" }, { mock: () => { mockCalls += 1; return {}; } }), "NETWORK_ERROR");
+    assert.equal(mockCalls, 0);
+  }
+
+  {
     let mockCalls = 0;
     const api = loadApi({
       apiUrl: "https://api.example/exec",

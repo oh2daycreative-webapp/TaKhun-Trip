@@ -104,6 +104,14 @@
     return get("getSettings", {}, options);
   }
 
+  function getCategories(params = {}, options = {}) {
+    const allowed = {};
+    for (const key of ["type", "lang"]) {
+      if (params?.[key] !== undefined) allowed[key] = params[key];
+    }
+    return get("getCategories", allowed, options);
+  }
+
   function getRoutes(params = {}, options = {}) {
     return get("getRoutes", params, options);
   }
@@ -162,6 +170,7 @@
     get,
     post,
     getSettings,
+    getCategories,
     getRoutes,
     getRouteDetail,
     getPlaceDetail,

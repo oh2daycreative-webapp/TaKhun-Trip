@@ -46,6 +46,8 @@ $required = @(
   "apps-script/Router.gs",
   "apps-script/ApiResponse.gs",
   "apps-script/SheetService.gs",
+  "apps-script/SettingsService.gs",
+  "apps-script/CategoryService.gs",
   "apps-script/PlaceService.gs",
   "apps-script/RouteService.gs",
   "apps-script/ProductService.gs",
@@ -110,6 +112,10 @@ foreach ($html in $htmlFiles) {
 if ($LASTEXITCODE -ne 0) { throw "i18n behavior verification failed." }
 & node (Join-Path $PSScriptRoot "test-api.js")
 if ($LASTEXITCODE -ne 0) { throw "Public API client behavior verification failed." }
+& node (Join-Path $PSScriptRoot "test-settings-service.js")
+if ($LASTEXITCODE -ne 0) { throw "SettingsService verification failed." }
+& node (Join-Path $PSScriptRoot "test-category-service.js")
+if ($LASTEXITCODE -ne 0) { throw "CategoryService verification failed." }
 & node (Join-Path $PSScriptRoot "test-place-service.js")
 if ($LASTEXITCODE -ne 0) { throw "PlaceService and public place API verification failed." }
 & node (Join-Path $PSScriptRoot "test-route-service.js")
