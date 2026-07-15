@@ -164,6 +164,12 @@
     return get("getReviews", allowed, options);
   }
 
+  function searchAll(params = {}, options = {}) {
+    const allowed = { lang: params?.lang === "en" ? "en" : "th" };
+    if (params?.keyword !== undefined) allowed.keyword = params.keyword;
+    return get("searchAll", allowed, options);
+  }
+
   function submitReview(payload = {}, options = {}) {
     const allowed = {};
     for (const key of ["place_id", "reviewer_name", "is_anonymous", "rating", "comment"]) {
@@ -188,6 +194,7 @@
     getEventDetail,
     getGallery,
     getReviews,
+    searchAll,
     submitReview,
     buildUrl,
     validateEnvelope,

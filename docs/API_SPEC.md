@@ -1044,9 +1044,79 @@ GET ?action=searchAll&keyword=น้ำผึ้ง&lang=th
 
 ### Rules
 
-- ค้นจากเฉพาะข้อมูล `published`
-- จำกัดผลลัพธ์แต่ละประเภท เช่น 5–10 รายการ
-- ถ้า keyword ว่าง ให้ส่ง empty result
+- ค้นเฉพาะ `places`, `products`, `events` และ `routes`
+- ไม่ค้น `gallery`, `reviews`, `categories`, `settings` หรือ `trip_templates`
+- ใช้เฉพาะข้อมูล `status = published` ผ่าน public builder ของแต่ละ domain
+- ไม่รองรับ pagination, domain/type filter, partial response, warning, `type` หรือ `detail_url`
+- จำกัดผลลัพธ์สูงสุด 10 รายการต่อ domain หลัง matching และ deduplication
+- `total` คือจำนวน valid unique matches จากทุก domain ก่อนจำกัด 10 รายการ
+
+### Keyword Normalization
+
+- `keyword` ที่ missing, ว่าง หรือมีเฉพาะ whitespace ต้องคืน empty success โดยไม่อ่าน Sheets
+- แปลงค่าเป็น string อย่างปลอดภัย แล้ว normalize เป็น Unicode NFC
+- trim และ collapse whitespace ต่อเนื่องเป็นช่องว่างเดียว
+- ความยาวสูงสุด 100 Unicode code points; ห้ามนับด้วย UTF-16 `length`
+- keyword ตั้งแต่ 101 Unicode code points ต้องคืน `VALIDATION_ERROR`
+- ห้ามสร้าง regular expression จาก user input
+
+### Language
+
+- `lang=en` ใช้ภาษาอังกฤษ
+- `lang` ที่ missing, `th` หรือค่าอื่นใช้ภาษาไทย
+- cache key ใช้ effective language เท่านั้น
+
+### Matching and Ordering
+
+- ใช้ normalized substring matching เท่านั้น
+- ภาษาอังกฤษค้นแบบ case-insensitive; ภาษาไทยค้นแบบ substring
+- normalize Unicode NFC และ whitespace ทั้ง query และ searchable text
+- ไม่มี scoring, weighting, boost หรือ cross-domain ranking
+- รักษาลำดับ public builder เดิมของแต่ละ domain เพื่อให้ผล deterministic และ stable
+
+Searchable fields ต้องมาจาก public builder projection ที่มีอยู่เท่านั้น:
+
+- Places: `name`, `name_th`, `name_en`, `short_description`, `district`, `category`, `route_group`
+- Routes: `name`, `short_description`, `duration`, `travel_style`
+- Products: `name`, `description`, `producer_name`, `category`
+- Events: `title`, `location`, `event_type`
+
+ถ้า field optional ไม่มีใน item ให้ข้าม และ flatten `travel_style` เฉพาะเมื่อเป็น array ของ strings
+
+### Exact Result Projections
+
+| Section | Exact fields |
+|---|---|
+| `places` | `place_id`, `name`, `short_description`, `category`, `district`, `cover_image_url` |
+| `products` | `product_id`, `name`, `description`, `category`, `producer_name`, `image_url` |
+| `events` | `event_id`, `title`, `event_type`, `event_date`, `start_time`, `end_time`, `location`, `image_url` |
+| `routes` | `route_id`, `name`, `short_description`, `duration`, `travel_style`, `cover_image_url` |
+
+- ห้ามส่ง status, timestamp หรือ internal fields
+- Event รวม past, current และ upcoming เมื่อ `event_date` ถูกต้อง; event วันที่ไม่ถูกต้องต้องถูกตัดออก
+- malformed public projection ต้องถูกตัดออกหรือทำให้ builder validation fail อย่างปลอดภัย
+- duplicate ID ภายใน domain ใช้ valid item แรก; ID ข้าม domain แยก namespace
+- deduplication ต้องปลอดภัยกับ prototype-like IDs และห้าม mutate source
+
+### Builder and Failure Rules
+
+- ต้อง reuse `buildPlacesResponse_`, `RouteService_buildRoutesResponse_`, `ProductService_buildProductsResponse_` และ `EventService_buildEventsResponse_`
+- ห้ามเรียก cached public endpoint functions
+- อ่านแต่ละ Sheet เพียงครั้งเดียวต่อ cache miss
+- Places และ Products ต้องรวบรวม builder pages ทั้งหมดจาก rows เดิม โดยใช้ `page_size` ไม่เกิน 100 และมี infinite-loop guard
+- read, build หรือ shape validation ของ domain ใดล้มเหลว ต้องคืน safe `SERVER_ERROR` ทั้ง request
+- ห้ามคืน partial response, warning หรือ cache error response
+
+### Cache
+
+- ใช้ Cache Service TTL 300 วินาที
+- key คือ `public:searchAll:keyword=<canonical-query>:lang=<th|en>`
+- canonical query ใช้ NFC, collapsed whitespace และ deterministic lowercase ที่ไม่ขึ้นกับ locale
+- cached response ต้องมี exact envelope/data keys, exact four arrays และ exact item fields/types
+- แต่ละ section ต้องมีไม่เกิน 10 items และ unique IDs
+- `total` ต้องเป็น non-negative integerและไม่น้อยกว่าจำนวน items ที่คืน
+- malformed JSON, missing/extra fields หรือ invalid values ต้อง reload จาก source
+- Cache Service failure ต้อง fallback ไป source และ error response ต้องไม่ถูก cache
 
 ---
 
