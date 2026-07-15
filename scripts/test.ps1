@@ -47,7 +47,10 @@ $required = @(
   "apps-script/ApiResponse.gs",
   "apps-script/SheetService.gs",
   "apps-script/PlaceService.gs",
-  "apps-script/RouteService.gs"
+  "apps-script/RouteService.gs",
+  "apps-script/ProductService.gs",
+  "apps-script/EventService.gs",
+  "apps-script/GalleryService.gs"
 )
 
 $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root $_)) })
@@ -110,6 +113,12 @@ if ($LASTEXITCODE -ne 0) { throw "Public API client behavior verification failed
 if ($LASTEXITCODE -ne 0) { throw "PlaceService and public place API verification failed." }
 & node (Join-Path $PSScriptRoot "test-route-service.js")
 if ($LASTEXITCODE -ne 0) { throw "RouteService and public route/trip API verification failed." }
+& node (Join-Path $PSScriptRoot "test-product-service.js")
+if ($LASTEXITCODE -ne 0) { throw "ProductService verification failed." }
+& node (Join-Path $PSScriptRoot "test-event-service.js")
+if ($LASTEXITCODE -ne 0) { throw "EventService verification failed." }
+& node (Join-Path $PSScriptRoot "test-gallery-service.js")
+if ($LASTEXITCODE -ne 0) { throw "GalleryService verification failed." }
 & node (Join-Path $PSScriptRoot "test-apps-script.js")
 if ($LASTEXITCODE -ne 0) { throw "Apps Script static verification failed." }
 & node (Join-Path $PSScriptRoot "test-routes.js")
