@@ -5,6 +5,10 @@ function routeRequest_(method, event) {
   try {
     if (method === "GET") {
       switch (action) {
+        case "getSettings":
+          return createJsonResponse_(getSettings_(parameters));
+        case "getCategories":
+          return createJsonResponse_(getCategories_(parameters));
         case "getPlaces":
           return createJsonResponse_(getPlaces_(parameters));
         case "getPlaceDetail":
