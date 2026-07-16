@@ -11,6 +11,7 @@
   .hero-section{min-height:680px}.hero-section__content{padding-block:4.5rem 6rem}.hero-section h1{font-size:clamp(2.8rem,10vw,4.6rem)}.hero-mountain{left:0;width:100%;max-width:100%}.hero-section__overlay{background:linear-gradient(90deg,rgba(2,36,32,.85),rgba(3,56,50,.4)),linear-gradient(0deg,rgba(3,45,40,.52),transparent 55%)}
   .quick-actions__grid{grid-template-columns:repeat(2,1fr)}.place-grid{grid-template-columns:repeat(2,1fr)}.home-page .place-card:last-child{display:block}.route-grid{grid-template-columns:1fr}.inspiration-grid{grid-template-columns:repeat(3,1fr)}.inspiration-card:nth-last-child(-n+2){grid-column:span 1}.site-footer__grid{grid-template-columns:2fr 1fr 1fr}.site-footer__grid>div:last-child{grid-column:1/-1}
   .places-page .toast-container{bottom:calc(86px + env(safe-area-inset-bottom))}
+  .search-page__grid{grid-template-columns:repeat(2,minmax(0,1fr))}.search-page__results-heading{align-items:flex-start;flex-direction:column}
 }
 
 @media (max-width: 599px) {
@@ -20,6 +21,7 @@
   .place-grid{grid-template-columns:1fr}.place-card__media{min-height:210px}.route-card{grid-template-columns:1fr}.route-card__media{min-height:190px}.route-card__content>p{min-height:auto}.route-card__meta{margin-top:.5rem}.button--outline{width:100%}
   .inspiration{padding-top:1rem}.inspiration__panel{width:calc(100% - 1rem);padding:2.4rem .7rem;border-radius:28px}.inspiration-grid{grid-template-columns:1fr;gap:.55rem}.inspiration-card{grid-template-columns:auto 1fr auto;min-height:78px;align-content:center;align-items:center;justify-items:start;padding:.7rem 1rem;text-align:left}.inspiration-card__icon{width:47px;height:47px}.inspiration-card__arrow{display:block;width:19px;fill:none;stroke:currentColor;stroke-width:2}
   .site-footer{padding-top:3rem}.site-footer__grid{grid-template-columns:1fr 1fr;gap:2rem 1rem}.site-footer__brand,.site-footer__grid>div:last-child{grid-column:1/-1}.site-footer__bottom{flex-direction:column}.editable-note{font-size:.62rem}
+  .search-page__main{width:min(calc(100% - 1.25rem),var(--container));padding-block:2.5rem}.search-page__form-row{grid-template-columns:1fr}.search-page__form button{width:100%}.search-page__grid{grid-template-columns:1fr}
 }
 
 @media (min-width: 900px) {
@@ -28,5 +30,5 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hero-scroll span{animation:none}.mobile-drawer,.drawer-backdrop,.quick-action,.place-card,.inspiration-card{transition:none}
+  .hero-scroll span{animation:none}.mobile-drawer,.drawer-backdrop,.quick-action,.place-card,.inspiration-card,.search-card{transition:none}
 }

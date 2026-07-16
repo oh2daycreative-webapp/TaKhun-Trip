@@ -19,6 +19,7 @@ $required = @(
   "public/gallery.html",
   "public/favorites.html",
   "public/about.html",
+  "public/search.html",
   "public/404.html",
   "public/admin/login.html",
   "public/admin/dashboard.html",
@@ -40,6 +41,7 @@ $required = @(
   "public/js/i18n.js",
   "public/js/app.js",
   "public/js/home.js",
+  "public/js/search.js",
   "public/js/gallery.js",
   "public/js/favorites.js",
   "apps-script/Code.gs",
@@ -101,6 +103,9 @@ foreach ($html in $htmlFiles) {
 & node (Join-Path $PSScriptRoot "test-home.js")
 if ($LASTEXITCODE -ne 0) { throw "Home behavior verification failed." }
 & (Join-Path $PSScriptRoot "test-public-shell.ps1")
+& (Join-Path $PSScriptRoot "test-search.ps1")
+& node (Join-Path $PSScriptRoot "test-search.js")
+if ($LASTEXITCODE -ne 0) { throw "Search behavior verification failed." }
 & (Join-Path $PSScriptRoot "test-foundation.ps1")
 & (Join-Path $PSScriptRoot "test-places.ps1")
 & (Join-Path $PSScriptRoot "test-place-detail.ps1")

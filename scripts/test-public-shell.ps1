@@ -16,7 +16,7 @@ function Assert-Match {
 $shellPages = @(
   "index.html", "map.html", "routes.html", "route-detail.html", "places.html",
   "place-detail.html", "trip-planner.html", "products.html", "product-detail.html",
-  "events.html", "event-detail.html", "gallery.html", "favorites.html", "about.html"
+  "events.html", "event-detail.html", "gallery.html", "favorites.html", "about.html", "search.html"
 )
 
 foreach ($page in $shellPages) {
@@ -56,13 +56,13 @@ foreach ($required in @(
   'PUBLIC_NAVIGATION', 'renderPublicShell', 'resolvePublicNavigation',
   'index\.html', 'map\.html', 'trip-planner\.html', 'favorites\.html',
   'routes\.html', 'places\.html', 'products\.html', 'events\.html',
-  'gallery\.html', 'about\.html', 'aria-expanded', 'aria-current',
+  'gallery\.html', 'about\.html', 'search\.html', 'aria-expanded', 'aria-current',
   'trapDrawerFocus', 'lastDrawerTrigger', 'Escape'
 )) {
   Assert-Match $app $required "app.js is missing public shell behavior: $required"
 }
 
-if ($app -match 'search\.html') { throw "Prompt 1.2 must not create or link to search.html." }
+Assert-Match $app 'search\.html' "The shared shell must link to search.html."
 if ($app -match 'localStorage') { throw "Prompt 1.2 shell must not write language state to Local Storage." }
 if ($app -match 'TAKHUN_LANG') { throw "app.js must not own the language storage contract." }
 Assert-Match $i18n 'LANG_STORAGE_KEY\s*=\s*"TAKHUN_LANG"' "i18n.js must own the TAKHUN_LANG contract."

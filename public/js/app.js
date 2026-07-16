@@ -10,6 +10,7 @@ const PUBLIC_NAVIGATION = Object.freeze({
     { key: "saved", label: "บันทึกไว้", href: "favorites.html", icon: "saved" }
   ],
   secondary: [
+    { key: "search", label: "ค้นหา", detail: "ค้นหาทั่ว Takhun Trip", href: "search.html", tone: "blue", icon: "search" },
     { key: "routes", label: "เส้นทาง", detail: "ทริปพร้อมออกเดินทาง", href: "routes.html", tone: "orange", icon: "routes" },
     { key: "places", label: "สถานที่", detail: "ธรรมชาติและชุมชน", href: "places.html", tone: "", icon: "pin" },
     { key: "products", label: "สินค้าและชุมชน", detail: "ของดีจากคนในพื้นที่", href: "products.html", tone: "gold", icon: "products" },
@@ -24,6 +25,7 @@ const PUBLIC_PAGE_MAP = Object.freeze({
   "map.html": { primary: "map" },
   "trip-planner.html": { primary: "plan" },
   "favorites.html": { primary: "saved" },
+  "search.html": { more: true, secondary: "search" },
   "places.html": { more: true, secondary: "places" },
   "place-detail.html": { more: true, secondary: "places" },
   "routes.html": { more: true, secondary: "routes" },
@@ -42,6 +44,7 @@ const SHELL_ICONS = Object.freeze({
   plan: '<path d="M5 3v3m14-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z"/><path d="m9 14 2 2 4-4"/>',
   saved: '<path d="M6 3h12v18l-6-4-6 4Z"/>',
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
   routes: '<circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M8 18h3a3 3 0 0 0 3-3V9a3 3 0 0 1 3-3"/>',
   pin: '<path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/>',
   products: '<path d="M4 8h16v12H4Z"/><path d="M2 8l2-5h16l2 5M9 8v12m6-12v12"/>',
@@ -73,13 +76,14 @@ function renderPublicShell() {
   const current = resolvePublicNavigation(mount.dataset.page || window.location.pathname);
   const desktopLinks = [
     ...PUBLIC_NAVIGATION.primary.slice(0, 1),
+    ...PUBLIC_NAVIGATION.secondary.slice(2, 3),
     ...PUBLIC_NAVIGATION.secondary.slice(1, 2),
-    ...PUBLIC_NAVIGATION.secondary.slice(0, 1),
-    ...PUBLIC_NAVIGATION.primary.slice(1, 3)
-  ].map((item) => `<a${activeAttributes(current.primary === item.key || current.secondary === item.key)} href="${item.href}"><span data-i18n="nav.${item.key}">${item.label}</span></a>`).join("");
+    ...PUBLIC_NAVIGATION.primary.slice(1, 3),
+    ...PUBLIC_NAVIGATION.secondary.slice(0, 1)
+  ].map((item) => `<a${activeAttributes(current.primary === item.key || current.secondary === item.key)} href="${item.href}"><span data-i18n="${item.key === "search" ? "search.nav_label" : `nav.${item.key}`}">${item.label}</span></a>`).join("");
   const drawerLinks = PUBLIC_NAVIGATION.secondary.map((item) => {
     const tone = item.tone ? ` drawer-link__icon--${item.tone}` : "";
-    return `<a${activeAttributes(current.secondary === item.key)} href="${item.href}"><span class="drawer-link__icon${tone}">${shellSvg(item.icon)}</span><span><span data-i18n="nav.${item.key}">${item.label}</span><small data-i18n="nav_detail.${item.key}">${item.detail}</small></span></a>`;
+    return `<a${activeAttributes(current.secondary === item.key)} href="${item.href}"><span class="drawer-link__icon${tone}">${shellSvg(item.icon)}</span><span><span data-i18n="${item.key === "search" ? "search.nav_label" : `nav.${item.key}`}">${item.label}</span><small data-i18n="nav_detail.${item.key}">${item.detail}</small></span></a>`;
   }).join("");
   const bottomLinks = PUBLIC_NAVIGATION.primary.map((item) => `<a class="bottom-nav__item${current.primary === item.key ? " is-active" : ""}" href="${item.href}"${current.primary === item.key ? ' aria-current="page"' : ""} aria-label="${item.label}" data-i18n-attr="aria-label:nav.${item.key}">${shellSvg(item.icon)}<span data-i18n="nav.${item.key}">${item.label}</span></a>`).join("");
   const template = document.createElement("template");
