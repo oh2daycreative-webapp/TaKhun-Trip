@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title data-i18n="pages.search.title">ค้นหาทั่วทั้งเว็บไซต์ | Takhun Trip</title>
+  <meta name="description" content="ค้นหาสถานที่ เส้นทาง สินค้า และกิจกรรมในบ้านตาขุน" data-i18n-attr="content:pages.search.description">
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/mobile.css">
+</head>
+<body class="public-page search-page">
+  <a class="skip-link" href="#main-content" data-i18n="shell.skip">ข้ามไปยังเนื้อหาหลัก</a>
+  <div class="public-shell" data-public-shell data-page="search.html"><a class="shell-fallback" href="index.html" data-i18n="shell.fallback_home">Takhun Trip — หน้าแรก</a></div>
+
+  <main class="search-page__main bottom-nav-space" id="main-content">
+    <header class="search-page__hero">
+      <h1 data-i18n="search.heading">ค้นหาทั่วทั้งเว็บไซต์</h1>
+      <p data-i18n="search.intro">ค้นหาสถานที่ เส้นทาง สินค้าชุมชน และกิจกรรมในบ้านตาขุน</p>
+    </header>
+
+    <form class="search-page__form" method="get" action="search.html" role="search" data-search-form>
+      <label for="search-query" data-i18n="search.label">คำค้นหา</label>
+      <div class="search-page__form-row">
+        <input id="search-query" name="q" type="search" autocomplete="off" data-search-input data-i18n-attr="placeholder:search.placeholder">
+        <button class="button button--primary" type="submit" data-i18n="search.submit">ค้นหา</button>
+      </div>
+    </form>
+
+    <section class="search-page__state search-page__state--idle" data-search-state="idle">
+      <h2 data-i18n="search.idle_title">เริ่มค้นหาสิ่งที่คุณสนใจ</h2>
+      <p data-i18n="search.idle_description">พิมพ์คำค้นหาแล้วกดค้นหาเพื่อดูผลลัพธ์จากทุกหมวด</p>
+    </section>
+
+    <section class="search-page__state loading-state" data-search-state="loading" role="status" aria-live="polite" hidden>
+      <span class="loading-spinner" aria-hidden="true"></span>
+      <p data-i18n="search.loading">กำลังค้นหา…</p>
+    </section>
+
+    <section class="search-page__state error-state" data-search-state="validation-error" role="alert" hidden>
+      <span class="error-state__icon" aria-hidden="true">!</span>
+      <h2 class="error-state__title" tabindex="-1" data-search-error-heading data-i18n="search.validation.required">กรุณากรอกคำค้นหา</h2>
+      <p data-search-validation-message data-i18n="search.validation.required">กรุณากรอกคำค้นหา</p>
+    </section>
+
+    <section class="search-page__state error-state" data-search-state="request-error" role="alert" hidden>
+      <span class="error-state__icon" aria-hidden="true">!</span>
+      <h2 class="error-state__title" tabindex="-1" data-search-request-error-heading data-i18n="search.error_title">ค้นหาไม่สำเร็จ</h2>
+      <p class="error-state__description" data-i18n="search.error_description">ไม่สามารถโหลดผลการค้นหาได้ในขณะนี้</p>
+      <button class="button button--secondary error-state__action" type="button" data-search-retry data-i18n="search.retry">ลองอีกครั้ง</button>
+    </section>
+
+    <section class="search-page__state empty-state" data-search-state="empty" hidden>
+      <span class="empty-state__icon" aria-hidden="true">⌕</span>
+      <h2 class="empty-state__title" tabindex="-1" data-search-empty-heading data-i18n="search.empty_title">ไม่พบผลการค้นหา</h2>
+      <p class="empty-state__description" data-i18n="search.empty_description">ลองใช้คำค้นหาอื่นที่สั้นหรือกว้างขึ้น</p>
+    </section>
+
+    <section class="search-page__state search-page__results" data-search-state="ready" aria-labelledby="search-results-title" hidden>
+      <div class="search-page__results-heading">
+        <h2 id="search-results-title" tabindex="-1" data-search-results-heading data-i18n="search.results_heading">ผลการค้นหา</h2>
+        <p data-search-summary aria-live="polite"></p>
+      </div>
+
+      <section class="search-page__section" data-search-section="places" aria-labelledby="search-places-title">
+        <div class="search-page__section-heading"><h2 id="search-places-title"><span data-i18n="search.sections.places">สถานที่</span> <span data-search-count="places">(0)</span></h2></div>
+        <div class="search-page__grid" data-search-grid="places"></div>
+        <p class="search-page__section-empty" data-search-section-empty="places" data-i18n="search.section_empty.places" hidden>ไม่พบสถานที่</p>
+      </section>
+
+      <section class="search-page__section" data-search-section="routes" aria-labelledby="search-routes-title">
+        <div class="search-page__section-heading"><h2 id="search-routes-title"><span data-i18n="search.sections.routes">เส้นทาง</span> <span data-search-count="routes">(0)</span></h2></div>
+        <div class="search-page__grid" data-search-grid="routes"></div>
+        <p class="search-page__section-empty" data-search-section-empty="routes" data-i18n="search.section_empty.routes" hidden>ไม่พบเส้นทาง</p>
+      </section>
+
+      <section class="search-page__section" data-search-section="products" aria-labelledby="search-products-title">
+        <div class="search-page__section-heading"><h2 id="search-products-title"><span data-i18n="search.sections.products">สินค้า</span> <span data-search-count="products">(0)</span></h2></div>
+        <div class="search-page__grid" data-search-grid="products"></div>
+        <p class="search-page__section-empty" data-search-section-empty="products" data-i18n="search.section_empty.products" hidden>ไม่พบสินค้า</p>
+      </section>
+
+      <section class="search-page__section" data-search-section="events" aria-labelledby="search-events-title">
+        <div class="search-page__section-heading"><h2 id="search-events-title"><span data-i18n="search.sections.events">กิจกรรม</span> <span data-search-count="events">(0)</span></h2></div>
+        <div class="search-page__grid" data-search-grid="events"></div>
+        <p class="search-page__section-empty" data-search-section-empty="events" data-i18n="search.section_empty.events" hidden>ไม่พบกิจกรรม</p>
+      </section>
+    </section>
+
+    <noscript><section class="error-state" role="alert"><h2>โปรดเปิด JavaScript เพื่อใช้การค้นหา</h2></section></noscript>
+  </main>
+
+  <script src="js/config.js"></script>
+  <script src="js/i18n.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/search.js"></script>
+</body>
+</html>
