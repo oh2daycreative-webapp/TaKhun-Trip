@@ -108,6 +108,9 @@ if ($LASTEXITCODE -ne 0) { throw "Home behavior verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Search behavior verification failed." }
 & (Join-Path $PSScriptRoot "test-foundation.ps1")
 & (Join-Path $PSScriptRoot "test-places.ps1")
+& node (Join-Path $PSScriptRoot "test-reviews.js")
+if ($LASTEXITCODE -ne 0) { throw "Public Reviews behavior verification failed." }
+& (Join-Path $PSScriptRoot "test-reviews.ps1")
 & (Join-Path $PSScriptRoot "test-place-detail.ps1")
 & (Join-Path $PSScriptRoot "test-map.ps1")
 & (Join-Path $PSScriptRoot "test-routes.ps1")
