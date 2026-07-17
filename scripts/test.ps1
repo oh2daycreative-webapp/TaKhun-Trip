@@ -41,10 +41,17 @@ $required = @(
   "public/js/i18n.js",
   "public/js/app.js",
   "public/js/content-data.js",
+  "public/js/media.js",
   "public/js/home.js",
   "public/js/search.js",
   "public/js/gallery.js",
   "public/js/favorites.js",
+  "public/favicon.svg",
+  "public/assets/media/placeholders/hero.svg",
+  "public/assets/media/placeholders/cover.svg",
+  "public/assets/media/placeholders/product.svg",
+  "public/assets/media/placeholders/gallery.svg",
+  "public/assets/media/manifest/media-manifest.json",
   "apps-script/Code.gs",
   "apps-script/Config.gs",
   "apps-script/Router.gs",
@@ -102,6 +109,8 @@ foreach ($html in $htmlFiles) {
 
 & (Join-Path $PSScriptRoot "test-home.ps1")
 & (Join-Path $PSScriptRoot "test-content-safety.ps1")
+& node (Join-Path $PSScriptRoot "test-media.js")
+if ($LASTEXITCODE -ne 0) { throw "Media pipeline verification failed." }
 & node (Join-Path $PSScriptRoot "test-content-data.js")
 if ($LASTEXITCODE -ne 0) { throw "Canonical content data verification failed." }
 & node (Join-Path $PSScriptRoot "test-content-integration.js")

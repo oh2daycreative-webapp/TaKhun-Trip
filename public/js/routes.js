@@ -124,21 +124,15 @@
     const label = t(key);
     return label === key ? String(style || "").replaceAll("_", " ") : label;
   }
-  function appendImage(mount, source, name, className) {
-    const fallback = () => {
+  function appendImage(mount, type, id, name, className, role = "cover") {
+    const fallbackFactory = () => {
       const panel = make("span", `${className}-fallback`, t("routes_page.image_fallback"));
       panel.setAttribute("role", "img");
       panel.setAttribute("aria-label", format("routes_page.image_alt", { name }));
-      mount.replaceChildren(panel);
+      return panel;
     };
-    if (!isAllowedImageUrl(source)) { fallback(); return; }
-    const image = global.document.createElement("img");
-    image.className = className;
-    image.src = source;
-    image.alt = format("routes_page.image_alt", { name });
-    image.loading = "lazy";
-    image.addEventListener("error", fallback, { once: true });
-    mount.append(image);
+    if (global.TakhunMedia?.renderImage) global.TakhunMedia.renderImage(mount, { mediaId: global.TakhunMedia.mediaIdFor(type, id), type, role, className, alt: format("routes_page.image_alt", { name }), loading: "lazy", sizes: "(min-width: 768px) 50vw, 100vw", lang: global.TakhunI18n?.getCurrentLang?.(), fallbackFactory });
+    else mount.append(fallbackFactory());
   }
   function renderStyles(route, className = "route-explorer-card__styles") {
     const styles = make("ul", className);
@@ -153,7 +147,7 @@
     const mediaLink = make("a", "route-explorer-card__media");
     mediaLink.href = detailUrl(route.route_id);
     mediaLink.setAttribute("aria-label", format("routes_page.view_route_named", { name }));
-    appendImage(mediaLink, route.cover_image_url, name, "route-explorer-card__image");
+    appendImage(mediaLink, "route", route.route_id, name, "route-explorer-card__image", "card");
     if (featured) mediaLink.append(make("span", "route-explorer-card__featured-label", t("routes_page.featured_label")));
     const body = make("div", "route-explorer-card__body");
     const title = make("h3", "route-explorer-card__title");
@@ -230,9 +224,8 @@
       panel.setAttribute("role", "img"); panel.setAttribute("aria-label", format("route_detail.image_alt", { name }));
       mount.replaceChildren(panel);
     };
-    if (!isAllowedImageUrl(route.cover_image_url)) { fallback(); return; }
-    const image = global.document.createElement("img"); image.className = "route-detail-page__image"; image.src = route.cover_image_url; image.alt = format("route_detail.image_alt", { name });
-    image.addEventListener("error", fallback, { once: true }); mount.append(image);
+    if (global.TakhunMedia?.renderImage) global.TakhunMedia.renderImage(mount, { mediaId: global.TakhunMedia.mediaIdFor("route", route.route_id), type: "route", role: "card", className: "route-detail-page__image", alt: format("route_detail.image_alt", { name }), loading: "eager", sizes: "100vw", lang: global.TakhunI18n?.getCurrentLang?.(), fallbackFactory: () => { const panel = make("div", "route-detail-page__image-fallback", t("route_detail.image_fallback")); panel.setAttribute("role", "img"); panel.setAttribute("aria-label", format("route_detail.image_alt", { name })); return panel; } });
+    else fallback();
   }
   function renderRouteDetail(route) {
     const lang = global.TakhunI18n?.getCurrentLang?.() || "th";
@@ -260,7 +253,7 @@
       const card = make("div", "route-stop__card");
       const mediaMount = make("div", "route-stop__media");
       const imageFallback = () => { const fallback = make("span", "route-stop__image-fallback", t("routes_page.image_fallback")); fallback.setAttribute("role", "img"); fallback.setAttribute("aria-label", format("route_detail.stop_image_alt", { name: stopName })); mediaMount.replaceChildren(fallback); };
-      if (isAllowedImageUrl(stop.cover_image_url)) { const image = global.document.createElement("img"); image.src = stop.cover_image_url; image.alt = format("route_detail.stop_image_alt", { name: stopName }); image.loading = "lazy"; image.addEventListener("error", imageFallback, { once: true }); mediaMount.append(image); } else imageFallback();
+      if (global.TakhunMedia?.renderImage) global.TakhunMedia.renderImage(mediaMount, { mediaId: global.TakhunMedia.mediaIdFor("place", stop.place_id), type: "place", role: "cover", alt: format("route_detail.stop_image_alt", { name: stopName }), loading: "lazy", sizes: "20rem", lang, fallbackFactory: () => { const fallback = make("span", "route-stop__image-fallback", t("routes_page.image_fallback")); fallback.setAttribute("role", "img"); fallback.setAttribute("aria-label", format("route_detail.stop_image_alt", { name: stopName })); return fallback; } }); else imageFallback();
       const body = make("div", "route-stop__body"); body.append(make("p", "route-stop__eyebrow", format("route_detail.stop_number", { number: index + 1 })), make("h3", "route-stop__title", stopName));
       const copy = localized(stop, "short_description", lang); if (copy) body.append(make("p", "route-stop__description", copy));
       const actions = make("div", "route-stop__actions");

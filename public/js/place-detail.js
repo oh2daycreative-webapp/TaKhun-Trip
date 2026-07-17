@@ -129,16 +129,10 @@
     fallback.setAttribute("aria-label", format("place_detail.image_alt", { name }));
     return fallback;
   }
-  function appendImage(mount, source, name, options = {}) {
-    if (!source) { mount.append(fallbackMedia(name, options.hero)); return null; }
-    const image = global.document.createElement("img");
-    image.className = options.className || "";
-    image.src = source;
-    image.alt = format("place_detail.image_alt", { name });
-    if (options.lazy) image.loading = "lazy";
-    image.addEventListener("error", () => mount.replaceChildren(fallbackMedia(name, options.hero)), { once: true });
-    mount.append(image);
-    return image;
+  function appendImage(mount, mediaId, name, options = {}) {
+    const fallbackFactory = () => fallbackMedia(name, options.hero);
+    if (!global.TakhunMedia?.renderImage) { const fallback = fallbackFactory(); mount.append(fallback); return fallback; }
+    return global.TakhunMedia.renderImage(mount, { mediaId, type: options.type || "place", role: options.hero ? "hero" : options.gallery ? "gallery" : "cover", className: options.className || "", alt: format("place_detail.image_alt", { name }), loading: options.lazy ? "lazy" : "eager", sizes: options.hero ? "100vw" : "(min-width: 768px) 33vw, 100vw", lang: global.TakhunI18n?.getCurrentLang?.(), fallbackFactory });
   }
 
   function renderSummary(place, lang, mount, reviewSummary) {
@@ -219,10 +213,11 @@
     mount.hidden = !urls.length; mount.replaceChildren();
     if (!urls.length) return;
     const name = localized(place, "name", lang); const grid = make("div", "detail-gallery-grid");
-    urls.forEach((source, index) => {
+    urls.forEach((_source, index) => {
       const button = make("button", "detail-gallery__button"); button.type = "button"; button.setAttribute("aria-label", format("place_detail.open_gallery_image", { number: index + 1, name }));
-      const media = make("span", "detail-gallery__media"); appendImage(media, source, name, { className: "detail-gallery__image", lazy: true }); button.append(media);
-      button.addEventListener("click", () => openLightbox(source, name, button)); grid.append(button);
+      const mediaId = `place-${String(place.place_id || "").toLowerCase()}-gallery-${String(index + 1).padStart(2, "0")}`;
+      const media = make("span", "detail-gallery__media"); appendImage(media, mediaId, name, { className: "detail-gallery__image", lazy: true, gallery: true }); button.append(media);
+      button.addEventListener("click", () => openLightbox(mediaId, name, button)); grid.append(button);
     });
     mount.append(heading("detail-gallery-title", t("place_detail.gallery")), grid);
   }
@@ -235,7 +230,7 @@
     const grid = make("div", "detail-nearby-grid");
     nearby.forEach((item) => {
       const name = localized(item, "name", lang); const card = make("article", "place-card detail-nearby-card");
-      const media = make("div", "detail-nearby-card__media"); appendImage(media, item.cover_image_url, name, { className: "detail-nearby-card__image", lazy: true });
+      const media = make("div", "detail-nearby-card__media"); appendImage(media, global.TakhunMedia?.mediaIdFor?.("place", item.place_id) || "", name, { className: "detail-nearby-card__image", lazy: true });
       const content = make("div", "detail-nearby-card__content"); content.append(make("span", "badge", labelFor("category", item.category)), make("h3", "detail-nearby-card__title", name), make("p", "detail-nearby-card__copy", localized(item, "short_description", lang)));
       const link = make("a", "button button--secondary", t("places.view_details")); link.href = `place-detail.html?id=${encodeURIComponent(item.place_id)}`; content.append(link); card.append(media, content); grid.append(card);
     });
@@ -282,7 +277,7 @@
       if (!currentPlace) return;
       const lang = global.TakhunI18n?.getCurrentLang?.() || "th"; const name = localized(currentPlace, "name", lang);
       global.document.title = format("place_detail.page_title", { name });
-      const heroMedia = global.document.querySelector("[data-detail-hero-media]"); heroMedia.replaceChildren(); appendImage(heroMedia, currentPlace.cover_image_url, name, { className: "detail-hero__image", hero: true });
+      const heroMedia = global.document.querySelector("[data-detail-hero-media]"); heroMedia.replaceChildren(); appendImage(heroMedia, global.TakhunMedia?.mediaIdFor?.("place", currentPlace.place_id) || "", name, { className: "detail-hero__image", hero: true });
       renderSummary(currentPlace, lang, global.document.querySelector("[data-detail-summary]"), currentReviewSummary); renderTextSections(currentPlace, lang); renderVisitor(currentPlace, lang); renderGallery(currentPlace, lang); renderNearby(currentPlace, lang); renderMap(currentPlace);
       const favorite = global.document.querySelector("[data-detail-favorite]"); const saved = readFavorites().includes(currentPlace.place_id); favorite.classList.toggle("is-active", saved); favorite.setAttribute("aria-pressed", String(saved)); favorite.setAttribute("aria-label", format(saved ? "place_detail.favorite_remove" : "place_detail.favorite_add", { name })); favorite.querySelector("span").textContent = saved ? "♥" : "♡";
       setPageState(mounts, "ready", root);

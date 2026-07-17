@@ -210,21 +210,15 @@
     return element;
   }
   function appendImage(mount, section, item, name) {
-    const fallback = () => {
+    const fallbackFactory = () => {
       const panel = make("span", "search-card__image-fallback", t("search.image_fallback"));
       panel.setAttribute("role", "img");
       panel.setAttribute("aria-label", format("search.image_alt", { name }));
-      mount.replaceChildren(panel);
+      return panel;
     };
-    const imageUrl = safeImageUrl(item[IMAGE_FIELDS[section]]);
-    if (!imageUrl) { fallback(); return; }
-    const image = global.document.createElement("img");
-    image.className = "search-card__image";
-    image.src = imageUrl;
-    image.alt = format("search.image_alt", { name });
-    image.loading = "lazy";
-    image.addEventListener("error", fallback, { once: true });
-    mount.append(image);
+    const type = section.replace(/s$/, "");
+    if (global.TakhunMedia?.renderImage) global.TakhunMedia.renderImage(mount, { mediaId: global.TakhunMedia.mediaIdFor(type, item[ID_FIELDS[section]]), type, role: type === "product" ? "product" : type === "route" ? "card" : "cover", className: "search-card__image", alt: format("search.image_alt", { name }), loading: "lazy", sizes: "(min-width: 1024px) 33vw, 100vw", lang: global.TakhunI18n?.getCurrentLang?.(), fallbackFactory });
+    else mount.append(fallbackFactory());
   }
 
   function appendMeta(body, labelKey, value) {

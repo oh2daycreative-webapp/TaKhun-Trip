@@ -185,21 +185,14 @@
   }
 
   function appendProductImage(mount, product, name, detail = false) {
-    const fallback = () => {
+    const fallbackFactory = () => {
       const panel = make("span", detail ? "product-detail-page__image-fallback" : "product-card__image-fallback", t("products.image_fallback"));
       panel.setAttribute("role", "img");
       panel.setAttribute("aria-label", format("products.image_alt", { name }));
-      mount.replaceChildren(panel);
+      return panel;
     };
-    const imageUrl = safeExternalUrl(product.image_url);
-    if (!imageUrl) { fallback(); return; }
-    const image = global.document.createElement("img");
-    image.className = detail ? "product-detail-page__image" : "product-card__image";
-    image.src = imageUrl;
-    image.alt = format("products.image_alt", { name });
-    image.loading = detail ? "eager" : "lazy";
-    image.addEventListener("error", fallback, { once: true });
-    mount.append(image);
+    if (global.TakhunMedia?.renderImage) global.TakhunMedia.renderImage(mount, { mediaId: global.TakhunMedia.mediaIdFor("product", product.product_id), type: "product", role: "product", className: detail ? "product-detail-page__image" : "product-card__image", alt: format("products.image_alt", { name }), loading: detail ? "eager" : "lazy", sizes: detail ? "100vw" : "(min-width: 768px) 33vw, 100vw", lang: global.TakhunI18n?.getCurrentLang?.(), fallbackFactory });
+    else mount.append(fallbackFactory());
   }
 
   function categoryLabel(value) { return t(`products.categories.${value}`); }

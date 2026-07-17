@@ -5,6 +5,7 @@ $html = Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $root "public/ma
 $controllerPath = Join-Path $root "public/js/map.js"
 if (-not (Test-Path -LiteralPath $controllerPath)) { throw "Map controller is missing." }
 $controller = Get-Content -Raw -Encoding utf8 -LiteralPath $controllerPath
+$mediaRuntime = Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $root "public/js/media.js")
 $css = Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $root "public/css/map.css")
 $i18n = Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $root "public/js/i18n.js")
 
@@ -35,7 +36,7 @@ Assert-Match $html 'integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM\+kNiyxNV1lvTlZ
 Assert-Match $html 'crossorigin=""' "Leaflet CDN assets need crossorigin."
 Assert-Match ($html + $controller) '© OpenStreetMap contributors|&copy; OpenStreetMap contributors' "OSM attribution is missing."
 
-$scripts = @('js/config.js','js/i18n.js','js/api.js','js/place-data.js','js/app.js','https://unpkg.com/leaflet@1.9.4/dist/leaflet.js','js/map.js')
+$scripts = @('js/config.js','js/i18n.js','js/api.js','js/place-data.js','js/media.js','js/app.js','https://unpkg.com/leaflet@1.9.4/dist/leaflet.js','js/map.js')
 $last = -1
 foreach ($script in $scripts) {
   $position = $html.IndexOf(('src="{0}"' -f $script))
@@ -49,9 +50,10 @@ foreach ($page in $otherPages) {
   if ((Get-Content -Raw -Encoding utf8 -LiteralPath $page.FullName) -match 'src="js/map\.js"') { throw "map.js must load only on map.html; found in $($page.Name)." }
 }
 
-foreach ($contract in @('normalizeCoordinate','isValidCoordinatePair','getPublishedPlaces','getMarkerPlaces','filterPlaces','parseQuery','resolveFocus','reconcileFocusFilters','getActionModel','TAKHUN_FAVORITES','setPrimaryState','tileerror','takhun:languagechange','popstate','keydown','Escape','replaceChildren','textContent','aria-pressed','addEventListener\("error"')) {
+foreach ($contract in @('normalizeCoordinate','isValidCoordinatePair','getPublishedPlaces','getMarkerPlaces','filterPlaces','parseQuery','resolveFocus','reconcileFocusFilters','getActionModel','TAKHUN_FAVORITES','setPrimaryState','tileerror','takhun:languagechange','popstate','keydown','Escape','replaceChildren','textContent','aria-pressed')) {
   Assert-Match $controller $contract "Missing Map behavior contract: $contract"
 }
+Assert-Match ($controller + $mediaRuntime) 'addEventListener\("error"' "Map media needs a load-error fallback contract."
 foreach ($contract in @('getCurrentPosition','enableHighAccuracy:\s*true','timeout:\s*12000','maximumAge:\s*60000','locationRequestPending','locationStatus','userLocationMarker','haversineDistanceKm','deriveDistanceSortedPlaces','map-preview__distance','map-list-card__distance','updateUserLocationMarkerAccessibility')) {
   Assert-Match $controller $contract "Missing Current Location behavior contract: $contract"
 }
