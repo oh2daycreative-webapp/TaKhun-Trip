@@ -1,3 +1,12 @@
 
 # Local Google Apps Script connection
 .clasp.json
+
+# Local dependencies
+node_modules/
+
+# Owner-provided source media never leaves the workstation. Keep structure/docs.
+media-source/**
+!media-source/**/
+!media-source/**/.gitkeep
+!media-source/README.md

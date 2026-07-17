@@ -145,9 +145,9 @@
       const description = localized(place, "short_description", lang);
       const card = make("article", "favorite-place-card place-card");
       const media = make("div", "favorite-place-card__media");
-      const imageUrl = safeImageUrl(place?.cover_image_url);
-      if (imageUrl) { const image = make("img", "favorite-place-card__image"); image.src = imageUrl; image.alt = format("favorites.image_alt", { name }); image.loading = "lazy"; image.addEventListener("error", () => media.replaceChildren(fallbackMedia(name)), { once: true }); media.append(image); }
-      else media.append(fallbackMedia(name));
+      const fallbackFactory = () => fallbackMedia(name);
+      if (global.TakhunMedia?.renderImage) global.TakhunMedia.renderImage(media, { mediaId: global.TakhunMedia.mediaIdFor("place", place.place_id), type: "place", role: "cover", className: "favorite-place-card__image", alt: format("favorites.image_alt", { name }), loading: "lazy", sizes: "(min-width: 768px) 50vw, 100vw", lang, fallbackFactory });
+      else media.append(fallbackFactory());
       const content = make("div", "favorite-place-card__content");
       content.append(make("h2", "favorite-place-card__title", name));
       if (place?.category) content.append(make("span", "badge badge--primary", String(place.category).replaceAll("_", " ")));

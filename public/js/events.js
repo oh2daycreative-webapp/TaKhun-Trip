@@ -253,20 +253,14 @@
   }
 
   function appendEventImage(mount, event, name, detail = false) {
-    const fallback = () => {
+    const fallbackFactory = () => {
       const panel = make("span", detail ? "event-detail-page__image-fallback" : "event-card__image-fallback", t("events.image_fallback"));
       panel.setAttribute("role", "img");
       panel.setAttribute("aria-label", format("events.image_alt", { name }));
-      mount.replaceChildren(panel);
+      return panel;
     };
-    const imageUrl = safeExternalUrl(event?.image_url);
-    if (!imageUrl) { fallback(); return; }
-    const image = make("img", detail ? "event-detail-page__image" : "event-card__image");
-    image.src = imageUrl;
-    image.alt = format("events.image_alt", { name });
-    image.loading = detail ? "eager" : "lazy";
-    image.addEventListener("error", fallback, { once: true });
-    mount.append(image);
+    if (global.TakhunMedia?.renderImage) global.TakhunMedia.renderImage(mount, { mediaId: global.TakhunMedia.mediaIdFor("event", event.event_id), type: "event", role: "cover", className: detail ? "event-detail-page__image" : "event-card__image", alt: format("events.image_alt", { name }), loading: detail ? "eager" : "lazy", sizes: detail ? "100vw" : "(min-width: 768px) 50vw, 100vw", lang: global.TakhunI18n?.getCurrentLang?.(), fallbackFactory });
+    else mount.append(fallbackFactory());
   }
 
   function appendMetaLine(mount, className, label, value, timeValue = "") {

@@ -172,6 +172,7 @@
     const slogan = root.querySelector("[data-about-slogan]");
     const heroImage = root.querySelector("[data-about-hero-image]");
     const heroFallback = root.querySelector("[data-about-hero-fallback]");
+    const heroMedia = root.querySelector(".about-page__hero-media");
     const logo = root.querySelector("[data-about-logo]");
     const logoWrap = root.querySelector("[data-about-logo-wrap]");
     const contactSection = root.querySelector("[data-about-contact-section]");
@@ -184,21 +185,11 @@
       root.setAttribute("aria-busy", normalized === "loading" ? "true" : "false");
     }
 
-    function setImage(image, fallback, value, altKey) {
-      const url = safeImageUrl(value);
-      image.removeAttribute("src");
-      image.hidden = true;
-      if (fallback) fallback.hidden = false;
-      if (!url) return;
-      image.alt = t(altKey);
-      image.src = url;
+    function setImage(image, fallback, _value, altKey) {
+      const mount = heroMedia;
       image.hidden = false;
-      if (fallback) fallback.hidden = true;
-      image.addEventListener("error", () => {
-        image.removeAttribute("src");
-        image.hidden = true;
-        if (fallback) fallback.hidden = false;
-      }, { once: true });
+      if (!global.TakhunMedia?.renderImage || !mount) { image.hidden = true; if (fallback) fallback.hidden = false; return; }
+      global.TakhunMedia.renderImage(mount, { mediaId: global.TakhunMedia.mediaIdFor("shared", "shared-about-project"), type: "shared", role: "hero", className: "about-page__hero-image", alt: t(altKey), loading: "eager", sizes: "100vw", lang: global.TakhunI18n?.getCurrentLang?.(), fallbackFactory: () => { fallback.hidden = false; return fallback; } });
     }
 
     function setContact(type, href, value = "") {
@@ -219,8 +210,8 @@
       slogan.hidden = !slogan.textContent;
       setImage(heroImage, heroFallback, settings.hero_image_url, "about_page.hero_alt");
 
-      const logoUrl = safeImageUrl(settings.logo_url);
-      logoWrap.hidden = !logoUrl;
+      const logoUrl = "";
+      logoWrap.hidden = true;
       logo.removeAttribute("src");
       if (logoUrl) {
         logo.alt = t("about_page.logo_alt");

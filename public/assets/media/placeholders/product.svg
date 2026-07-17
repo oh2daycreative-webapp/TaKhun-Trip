@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" role="img" aria-label="Neutral product placeholder">
+  <rect width="800" height="800" fill="#fff3d4"/>
+  <circle cx="400" cy="400" r="245" fill="#fdba2d" opacity=".34"/>
+  <path d="M252 320h296l-28 300H280Zm70-105h156l48 105H274Z" fill="#d9772b" opacity=".82"/>
+  <path d="M335 385h130v130H335Z" fill="#fff8e8" opacity=".92"/>
+</svg>

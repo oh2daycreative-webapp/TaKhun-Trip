@@ -1,0 +1,19 @@
+{
+  "name": "takhun-trip-media-pipeline",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "test": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/test.ps1",
+    "build": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build.ps1",
+    "media:check": "node scripts/media-check.js",
+    "media:build": "node scripts/media-build.js --strict",
+    "media:test": "node scripts/test-media.js",
+    "media:clean": "node scripts/media-build.js --clean"
+  },
+  "dependencies": {
+    "sharp": "0.35.3"
+  }
+}
