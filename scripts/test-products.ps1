@@ -35,6 +35,10 @@ foreach ($filter in @("category", "district", "related_place_id")) {
 foreach ($mount in @("product-detail-loading", "product-detail-ready", "product-detail-invalid", "product-detail-not-found", "product-detail-error")) {
   if ($detail -notmatch "data-$mount") { throw "product-detail.html missing data-$mount" }
 }
+foreach ($state in @("loading", "ready", "invalid", "not-found", "error")) {
+  if ($detail -notmatch ("data-product-{0}" -f $state)) { throw "product-detail.html missing Browser QA state hook data-product-$state" }
+}
+if ($detail -notmatch 'data-product-contact[^>]*\bhidden\b') { throw "Product contact card must be hidden until a verified contact action is rendered." }
 
 foreach ($html in @($list, $detail)) {
   foreach ($script in @("js/config.js", "js/i18n.js", "js/api.js", "js/app.js", "js/products.js")) {
@@ -65,8 +69,10 @@ foreach ($namespace in @("products", "product_detail")) {
 foreach ($selector in @(".products-page", ".product-detail-page", ".product-card")) {
   if ($components -notmatch [regex]::Escape($selector)) { throw "Missing scoped product CSS $selector" }
 }
-if ($components -notmatch '(?s)\.products-page\s+\[hidden\]\s*\{[^}]*display\s*:\s*none\s*!important\s*;?[^}]*\}') {
-  throw "Products hidden elements need a page-scoped !important display override so component display rules cannot reveal inactive states."
+foreach ($scope in @('products-page', 'product-detail-page')) {
+  if ($components -notmatch ("(?s)\.{0}\s+\[hidden\]\s*\{{[^}}]*display\s*:\s*none\s*!important\s*;?[^}}]*\}}" -f $scope)) {
+    throw "$scope hidden elements need a page-scoped !important display override so component display rules cannot reveal inactive states."
+  }
 }
 if ($components -match '(?m)^\s*\[hidden\]\s*\{') { throw "Products visibility fix must not add a global hidden override." }
 foreach ($forbidden in @("React", "Vue", "Tailwind", "Bootstrap", "jQuery")) {

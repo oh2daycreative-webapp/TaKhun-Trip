@@ -3,7 +3,7 @@
 (function createPublicMap(global) {
   const FAVORITES_KEY = "TAKHUN_FAVORITES";
   const PRIMARY_STATES = Object.freeze(["loading", "ready", "empty", "error", "leaflet-unavailable"]);
-  const CATEGORY_SYMBOLS = Object.freeze({ nature: "♧", community_tourism: "⌂", viewpoint: "◉", food_cafe: "☕", activity: "✦" });
+  const CATEGORY_SYMBOLS = Object.freeze({ nature: "♧", community_tourism: "⌂", viewpoint: "◉", temple_culture: "◇", food_cafe: "☕", activity: "✦" });
   let memoryFavorites = [];
   let tileFailed = false;
 

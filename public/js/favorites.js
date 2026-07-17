@@ -28,6 +28,10 @@
   }
 
   function serializeFavorites(value) { return JSON.stringify(sanitizeFavorites(value)); }
+  function filterCanonicalFavorites(value, records = global.TakhunContentData?.listPlaces?.() || []) {
+    const canonical = new Set((Array.isArray(records) ? records : []).map((item) => String(item?.place_id || "").trim()).filter(Boolean));
+    return sanitizeFavorites(value).filter((id) => !id.startsWith("MOCK-") && (!canonical.size || canonical.has(id)));
+  }
   function removeFavorite(value, placeId) { const id = String(placeId || "").trim(); return sanitizeFavorites(value).filter((item) => item !== id); }
   const encoded = (value) => encodeURIComponent(String(value || ""));
   function detailUrl(placeId) { return `place-detail.html?id=${encoded(placeId)}`; }
@@ -175,10 +179,13 @@
     }
 
     async function loadIds(nextIds, recovered = false) {
-      ids = sanitizeFavorites(nextIds);
+      const sanitized = sanitizeFavorites(nextIds);
+      ids = filterCanonicalFavorites(sanitized);
+      const staleRecovered = recovered || ids.length !== sanitized.length;
+      if (ids.length !== sanitized.length) writeStorage(ids);
       updateCount();
       const generation = gate.next();
-      if (!ids.length) { results = []; places = []; setPrimaryState(recovered ? "malformed-storage-recovered" : "empty"); return; }
+      if (!ids.length) { results = []; places = []; setPrimaryState(staleRecovered ? "malformed-storage-recovered" : "empty"); return; }
       setPrimaryState("loading");
       const loaded = await loadPlaceDetailsLimited(ids, (placeId) => global.TakhunApi.getPlaceDetail(placeId, {}, { mock: () => mockPlace(placeId) }), 4);
       if (!gate.isCurrent(generation)) return;
@@ -209,7 +216,7 @@
   }
 
   global.TakhunFavorites = Object.freeze({
-    STORAGE_KEY, validatePlaceId, sanitizeFavorites, parseFavoritesStorage, serializeFavorites,
+    STORAGE_KEY, validatePlaceId, sanitizeFavorites, parseFavoritesStorage, serializeFavorites, filterCanonicalFavorites,
     removeFavorite, detailUrl, mapUrl, tripPlannerUrl, loadPlaceDetailsLimited,
     mergeLoadedPlaces, classifyLoadResults, createGenerationGate, parseStorageEvent,
     resolveState, setPageState

@@ -8,55 +8,17 @@
   const DISTRICTS = Object.freeze(["ban_ta_khun", "khiri_rat_nikhom", "phanom"]);
   const PRODUCT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/;
 
-  const MOCK_PRODUCTS = Object.freeze([
-    Object.freeze({
-      product_id: "MOCK-PROD-001", name_th: "น้ำผึ้งป่าชุมชน", name_en: "Community Forest Honey",
-      category: "honey", producer_name: "กลุ่มตัวอย่างพรุไทย", related_place_id: "BTK-003",
-      district: "ban_ta_khun", description_th: "ข้อมูลสาธิตของน้ำผึ้งจากกลุ่มผู้ผลิตในชุมชน สำหรับทดสอบการแสดงผลเท่านั้น",
-      description_en: "Demo honey from a community producer group, shown for interface testing only.",
-      price_range: "เริ่มต้น 180 บาท", phone: "081 234 5678", contact_url: "https://example.com/community-honey",
-      google_maps_url: "https://maps.example/community-honey", image_url: "", is_featured: true, sort_order: 1, status: "published"
-    }),
-    Object.freeze({
-      product_id: "MOCK-PROD-002", name_th: "ผ้าทอสีธรรมชาติ", name_en: "Natural-dyed Handwoven Textile",
-      category: "handicraft", producer_name: "กลุ่มทอผ้าตัวอย่างบ้านเชี่ยวหลาน", related_place_id: "BTK-002",
-      district: "ban_ta_khun", description_th: "ผ้าทอข้อมูลสาธิตที่เล่าแรงบันดาลใจจากสายน้ำและภูเขา",
-      description_en: "A demo textile inspired by Ban Ta Khun's water and mountains.",
-      price_range: "", phone: "087 270 0774", contact_url: "", google_maps_url: "", image_url: "",
-      is_featured: "true", sort_order: 2, status: "published"
-    }),
-    Object.freeze({
-      product_id: "MOCK-PROD-003", name_th: "ชุดเรียนรู้สมุนไพร", name_en: "Herbal Learning Kit",
-      category: "herbal", producer_name: "ชุมชนตัวอย่างคีรีรัฐนิคม", related_place_id: "",
-      district: "khiri_rat_nikhom", description_th: "ข้อมูลสาธิตสำหรับกิจกรรมเรียนรู้สมุนไพรพื้นบ้าน",
-      description_en: "Demo content for a local herbal learning activity.",
-      price_range: null, phone: "", contact_url: "https://example.com/herbal-learning", google_maps_url: "",
-      image_url: "", is_featured: false, sort_order: 3, status: "published"
-    }),
-    Object.freeze({
-      product_id: "MOCK-PROD-004", name_th: "ผลไม้ตามฤดูกาล", name_en: "Seasonal Fruit Selection",
-      category: "fruit", producer_name: "สวนตัวอย่างอำเภอพนม", related_place_id: "PNM-001",
-      district: "phanom", description_th: "ข้อมูลสาธิตสำหรับผลผลิตตามฤดูกาลจากสวนชุมชน",
-      description_en: "Demo seasonal produce from a community orchard.",
-      price_range: "สอบถามตามฤดูกาล", phone: "", contact_url: "", google_maps_url: "", image_url: "",
-      is_featured: false, sort_order: 4, status: "published"
-    }),
-    Object.freeze({
-      product_id: "MOCK-PROD-005", name_th: "กิจกรรมทำของฝากชุมชน", name_en: "Community Souvenir Workshop",
-      category: "community_activity", producer_name: "กลุ่มกิจกรรมตัวอย่างบ้านตาขุน", related_place_id: "",
-      district: "ban_ta_khun", description_th: "ข้อมูลสาธิตของกิจกรรมลงมือทำของฝากกับคนในชุมชน",
-      description_en: "A demo hands-on souvenir workshop with a local community group.",
-      price_range: 0, phone: "", contact_url: "", google_maps_url: "", image_url: "",
-      is_featured: "false", sort_order: 5, status: "published"
-    })
-  ]);
-
   function parseProductId(search = global.location?.search || "") {
     return String(new URLSearchParams(search).get("id") || "").trim();
   }
 
   function validateProductId(value) {
     return PRODUCT_ID_PATTERN.test(String(value || "").trim());
+  }
+
+  function validateDetailRequestId(value, hasConfiguredApi = Boolean(String(global.APP_CONFIG?.API_URL || "").trim())) {
+    const id = String(value || "").trim();
+    return validateProductId(id) && (hasConfiguredApi || /^PROD-[A-Za-z0-9_-]+$/.test(id));
   }
 
   function parseProductFilters(search = global.location?.search || "") {
@@ -146,6 +108,16 @@
     }
   }
 
+  function productContactModel(product) {
+    const phone = String(product?.phone || "").trim();
+    const phoneHref = safePhoneHref(phone);
+    const contactHref = safeExternalUrl(product?.contact_url);
+    const actions = [];
+    if (phoneHref) actions.push({ kind: "phone", href: phoneHref, value: phone });
+    if (contactHref) actions.push({ kind: "contact", href: contactHref, value: "" });
+    return { visible: actions.length > 0, actions };
+  }
+
   function encoded(value) { return encodeURIComponent(String(value || "").trim()); }
   function detailUrl(productId) { return `product-detail.html?id=${encoded(productId)}`; }
   function relatedPlaceUrl(placeId) { return `place-detail.html?id=${encoded(placeId)}`; }
@@ -189,12 +161,12 @@
   function mockGetProducts(params = {}) {
     const filters = {};
     for (const key of ["category", "district", "related_place_id"]) if (params[key]) filters[key] = params[key];
-    const items = sortProducts(filterProducts(MOCK_PRODUCTS.map((item) => ({ ...item })), filters));
+    const items = sortProducts(filterProducts(global.TakhunContentData.listProducts(), filters));
     return { items, total: items.length };
   }
 
   function mockGetProductDetail(productId) {
-    const product = MOCK_PRODUCTS.find((item) => item.product_id === String(productId || "").trim());
+    const product = global.TakhunContentData.getProductById(productId);
     if (!product) return null;
     const detail = { ...product };
     if (detail.related_place_id) detail.related_place = { place_id: detail.related_place_id, name: "" };
@@ -253,7 +225,7 @@
     if (product.producer_name) body.append(make("p", "product-card__producer", `${t("products.producer")}: ${product.producer_name}`));
     if (description) body.append(make("p", "product-card__description", description));
     const price = priceState(product);
-    body.append(make("p", `product-card__price product-card__price--${price.kind}`, price.kind === "value" ? price.value : t("products.contact_price")));
+    if (price.kind === "value") body.append(make("p", "product-card__price product-card__price--value", price.value));
     const actions = make("div", "product-card__actions");
     const detail = make("a", "button button--primary", t("products.view_details")); detail.href = detailUrl(product.product_id); actions.append(detail);
     const phone = safePhoneHref(product.phone);
@@ -369,15 +341,14 @@
     if (product.category) summary.append(make("span", "product-detail-page__badge", categoryLabel(product.category)));
     summary.append(make("h1", "product-detail-page__title", name));
     if (product.producer_name) summary.append(make("p", "product-detail-page__producer", `${t("products.producer")}: ${product.producer_name}`));
-    const price = priceState(product); summary.append(make("p", `product-detail-page__price product-detail-page__price--${price.kind}`, price.kind === "value" ? price.value : t("products.contact_price")));
+    const price = priceState(product); if (price.kind === "value") summary.append(make("p", "product-detail-page__price product-detail-page__price--value", price.value));
     const description = global.document.querySelector("[data-product-detail-description]");
     const descriptionTitle = make("h2", "", t("product_detail.description")); descriptionTitle.id = "product-description-title";
     description.replaceChildren(descriptionTitle, make("p", "", localized(product, "description", lang) || t("product_detail.description_empty")));
     const actions = global.document.querySelector("[data-product-contact-actions]"); actions.replaceChildren();
-    appendExternalAction(actions, product.phone ? `${t("products.call")} ${String(product.phone).trim()}` : t("products.call"), safePhoneHref(product.phone));
-    appendExternalAction(actions, t("products.contact"), safeExternalUrl(product.contact_url));
-    appendExternalAction(actions, t("products.navigate"), mapUrl(product));
-    global.document.querySelector("[data-product-no-contact]").hidden = actions.children.length > 0;
+    const contactModel = productContactModel(product);
+    contactModel.actions.forEach((action) => appendExternalAction(actions, action.kind === "phone" ? `${t("products.call")} ${action.value}` : t("products.contact"), action.href));
+    global.document.querySelector("[data-product-contact]").hidden = !contactModel.visible;
     const related = global.document.querySelector("[data-product-related]"); related.replaceChildren();
     const relatedId = String(product.related_place?.place_id || product.related_place_id || "").trim();
     if (validateProductId(relatedId)) {
@@ -408,7 +379,7 @@
     let product = null;
 
     async function fetchDetail() {
-      if (!validateProductId(productId)) { setPageState(states, "invalid-id"); return; }
+      if (!validateDetailRequestId(productId)) { setPageState(states, "invalid-id"); return; }
       setPageState(states, "loading");
       try {
         const data = await global.TakhunApi.getProductDetail(productId, { lang: currentLang() }, { mock: ({ product_id: id }) => mockGetProductDetail(id) });
@@ -430,7 +401,7 @@
     parseProductId, validateProductId, parseProductFilters, filterProducts, normalizeProductList,
     normalizeProductDetail, localized, normalizeBoolean, sortProducts, priceState, safePhoneHref,
     safeExternalUrl, detailUrl, relatedPlaceUrl, mapUrl, resolveListState, resolveDetailState,
-    mockGetProducts, mockGetProductDetail, setPageState
+    mockGetProducts, mockGetProductDetail, setPageState, productContactModel, validateDetailRequestId
   });
 
   if (global.document?.readyState === "loading") {

@@ -6,10 +6,12 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const source = fs.readFileSync(path.join(__dirname, "../public/js/trip-planner.js"), "utf8");
+const canonicalSource = fs.readFileSync(path.join(__dirname, "../public/js/content-data.js"), "utf8");
 
 function loadPlanner(overrides = {}) {
   const context = { URLSearchParams, window: null, ...overrides };
   context.window = context;
+  vm.runInNewContext(canonicalSource, context, { filename: "content-data.js" });
   vm.runInNewContext(source, context, { filename: "trip-planner.js" });
   return context.TakhunTripPlanner;
 }
@@ -74,9 +76,17 @@ test("normalizes enums, identifiers, duplicates, and storage shape", () => {
   assert.equal(plan.route_id, "");
   assert.deepEqual(plain(plan.places), [{ place_id: "A", name_th: "A" }]);
   const record = api.toStorageRecord(plan, "2026-07-13T00:00:00.000Z");
-  assert.equal(record.version, 1);
+  assert.equal(record.version, 2);
   assert.deepEqual(plain(record.place_ids), ["A"]);
   assert.equal(record.updated_at, "2026-07-13T00:00:00.000Z");
+});
+
+test("migrates version 1 storage and removes stale or mock relations", () => {
+  const storage = { getItem() { return JSON.stringify({ version: 1, route_id: "MOCK-ROUTE-001", places: [{ place_id: "MOCK-PLACE-001" }, { place_id: "BTK-004" }, { place_id: "STALE" }] }); } };
+  const result = api.readStoredPlan(storage);
+  assert.equal(result.migrated, true);
+  assert.equal(result.plan.route_id, "");
+  assert.deepEqual(plain(result.plan.places.map((place) => place.place_id)), ["BTK-004"]);
 });
 
 test("survives malformed or blocked storage and persists the existing key", () => {

@@ -301,7 +301,7 @@
     }
 
     const controller = createSearchController({
-      request: (params) => global.TakhunApi.searchAll(params),
+      request: (params) => global.TakhunApi.searchAll(params, { mock: (allowed) => global.TakhunContentData.searchAll(allowed) }),
       getLanguage: currentLang,
       onChange: render
     });

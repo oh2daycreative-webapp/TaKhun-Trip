@@ -6,6 +6,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const source = fs.readFileSync(path.join(__dirname, "../public/js/gallery.js"), "utf8");
+const canonicalSource = fs.readFileSync(path.join(__dirname, "../public/js/content-data.js"), "utf8");
 
 function loadGallery(search = "") {
   const context = {
@@ -15,6 +16,7 @@ function loadGallery(search = "") {
     window: null
   };
   context.window = context;
+  vm.runInNewContext(canonicalSource, context, { filename: "content-data.js" });
   vm.runInNewContext(source, context, { filename: "gallery.js" });
   return context.TakhunGallery;
 }
@@ -31,9 +33,31 @@ for (const name of [
   "createViewerState", "openViewerState", "closeViewerState"
 ]) assert.equal(typeof api[name], "function", `missing helper ${name}`);
 
+assert.equal(typeof api.galleryCategoryOptions, "function", "galleryCategoryOptions must build the filter from canonical content");
+assert.deepEqual(plain(api.galleryCategoryOptions("th")), [
+  { value: "dam_lake", label: "เขื่อนและทะเลสาบ" },
+  { value: "mountain_nature", label: "ขุนเขาและธรรมชาติ" },
+  { value: "community_life", label: "ชุมชนและวิถีชีวิต" },
+  { value: "food_fruit", label: "อาหารและผลไม้" },
+  { value: "activity_tradition", label: "กิจกรรมและงานประเพณี" }
+]);
+assert.deepEqual(plain(api.galleryCategoryOptions("en")), [
+  { value: "dam_lake", label: "Dam and Lake" },
+  { value: "mountain_nature", label: "Mountains and Nature" },
+  { value: "community_life", label: "Community and Local Life" },
+  { value: "food_fruit", label: "Food and Fruit" },
+  { value: "activity_tradition", label: "Activities and Traditions" }
+]);
+for (const lang of ["th", "en"]) {
+  const options = api.galleryCategoryOptions(lang);
+  assert.equal(options.length, 5);
+  assert.ok(options.every((option) => !option.label.startsWith("gallery.categories.")));
+  assert.ok(options.every((option) => !["place", "route", "event", "product", "community", "hero", "other"].includes(option.value)));
+}
+
 for (const id of ["GAL-001", "media_2", "A1"]) assert.equal(api.validateMediaId(id), true);
 for (const id of ["", "bad id", "../bad", "A/B", "javascript:bad"]) assert.equal(api.validateMediaId(id), false);
-for (const category of ["place", "route", "event", "product", "community", "hero", "other"]) assert.equal(api.validateCategory(category), true);
+for (const category of ["dam_lake", "mountain_nature", "community_life", "food_fruit", "activity_tradition"]) assert.equal(api.validateCategory(category), true);
 assert.equal(api.validateCategory("unknown"), false);
 assert.equal(api.validateMediaType("image"), true);
 assert.equal(api.validateMediaType("video"), true);
@@ -42,8 +66,8 @@ assert.equal(api.normalizeMediaType(" IMAGE "), "image");
 assert.equal(api.normalizeMediaType("movie"), "");
 
 {
-  const parsed = api.parseGalleryFilters("?category=place&media_type=video&related_place_id=BTK-001&ignored=x");
-  assert.deepEqual(plain(parsed.filters), { category: "place", media_type: "video", related_place_id: "BTK-001" });
+  const parsed = api.parseGalleryFilters("?category=dam_lake&media_type=video&related_place_id=BTK-001&ignored=x");
+  assert.deepEqual(plain(parsed.filters), { category: "dam_lake", media_type: "video", related_place_id: "BTK-001" });
   assert.deepEqual(plain(parsed.invalid), []);
   const invalid = api.parseGalleryFilters("?category=bad&media_type=audio&related_place_id=bad%20id");
   assert.deepEqual(plain(invalid.filters), {});
@@ -150,3 +174,5 @@ for (const [input, expected] of [
 }
 
 process.stdout.write("Gallery behavior verification passed.\n");
+
+assert.equal(api.mockGallery({}).items.length, 0, "gallery must remain an intentional empty state until the Media Pipeline milestone");

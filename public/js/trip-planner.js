@@ -2,7 +2,7 @@
 
 (function createTripPlanner(global) {
   const STORAGE_KEY = "TAKHUN_TRIP_PLAN";
-  const VERSION = 1;
+  const VERSION = 2;
   const DURATIONS = Object.freeze(["half_day", "one_day", "two_days_one_night"]);
   const STYLES = Object.freeze(["nature", "community", "photo", "family", "activity", "food_cafe", "product", "adventure", "learning"]);
   const PLACE_FIELDS = Object.freeze(["place_id", "name_th", "name_en", "short_description_th", "short_description_en", "cover_image_url", "stop_order"]);
@@ -89,13 +89,28 @@
   function clearPlan() { return createPlan(); }
   function toStorageRecord(plan, now = new Date().toISOString()) { const clean = normalizePlan(plan); return { version: VERSION, duration_type: clean.duration_type, travel_style: clean.travel_style, route_id: clean.route_id, place_ids: clean.places.map((place) => place.place_id), places: clean.places, updated_at: now }; }
 
+  function canonicalIds(listMethod, idField) {
+    try { return new Set((global.TakhunContentData?.[listMethod]?.() || []).map((item) => String(item?.[idField] || "").trim()).filter(Boolean)); }
+    catch (_error) { return new Set(); }
+  }
+
+  function migrateStoredPlan(value) {
+    const clean = normalizePlan(value);
+    const placeIds = canonicalIds("listPlaces", "place_id");
+    const routeIds = canonicalIds("listRoutes", "route_id");
+    const canonicalPlaces = clean.places.filter((place) => !place.place_id.startsWith("MOCK-") && (!placeIds.size || placeIds.has(place.place_id)));
+    const canonicalRoute = !clean.route_id.startsWith("MOCK-") && (!routeIds.size || routeIds.has(clean.route_id)) ? clean.route_id : "";
+    return { ...clean, route_id: canonicalRoute, places: canonicalPlaces };
+  }
+
   function readStoredPlan(storage = global.localStorage) {
     try {
       const raw = storage?.getItem(STORAGE_KEY);
       if (!raw) return { plan: createPlan(), malformed: false };
       const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { plan: createPlan(), malformed: true };
-      return { plan: normalizePlan(parsed), malformed: false };
+      const stale = parsed.version !== VERSION || JSON.stringify(parsed).includes("MOCK-");
+      return { plan: migrateStoredPlan(parsed), malformed: false, migrated: stale };
     } catch (_error) { return { plan: createPlan(), malformed: true }; }
   }
 
@@ -111,12 +126,13 @@
   function resolveState({ loading = false, places = [], error = null } = {}) { if (loading) return "loading"; if (error) return "error"; return Array.isArray(places) && places.length ? "ready" : "empty"; }
 
   function mockTemplates() {
-    const places = global.TakhunPlaceData?.listPlaces?.().filter((place) => place.status === "published") || [];
-    return { items: [
-      { template_id: "MOCK-TRIP-001", name_th: "วันสบาย ๆ กลางธรรมชาติ", name_en: "An Easy Day in Nature", description_th: "เริ่มจากธรรมชาติ แล้วแวะชมชุมชนในจังหวะที่ไม่เร่งรีบ", description_en: "A relaxed nature-first day with a community stop.", duration_type: "one_day", travel_style: ["nature", "community"], places: places.slice(0, 4) },
-      { template_id: "MOCK-TRIP-002", name_th: "ครึ่งวันเก็บภาพบ้านตาขุน", name_en: "Half-day Photo Trail", description_th: "ทริปสั้นสำหรับจุดชมวิวและมุมถ่ายภาพ", description_en: "A short route for viewpoints and photo stops.", duration_type: "half_day", travel_style: ["photo", "nature"], places: places.slice(4, 7) },
-      { template_id: "MOCK-TRIP-003", name_th: "สองวันกับครอบครัว", name_en: "Two Family Days", description_th: "เที่ยวแบบยืดหยุ่นสำหรับทุกวัย", description_en: "A flexible plan for travelers of all ages.", duration_type: "two_days_one_night", travel_style: ["family", "activity"], places: places.slice(7, 12) }
-    ], total: 3 };
+    const items = (global.TakhunContentData?.listRoutes?.() || []).map((route) => ({
+      template_id: `TRIP-${route.route_id}`, route_id: route.route_id,
+      name_th: route.name_th, name_en: route.name_en,
+      description_th: route.short_description_th, description_en: route.short_description_en,
+      duration_type: "", travel_style: route.travel_style, places: route.places
+    }));
+    return { items, total: items.length };
   }
 
   function t(key) { return global.TakhunI18n?.t?.(`trip_planner.${key}`) || `trip_planner.${key}`; }
@@ -188,6 +204,6 @@
     })();
   }
 
-  global.TakhunTripPlanner = Object.freeze({ parseQuery, validateRouteId, validatePlaceId, sortRoutePlaces, templatePlaceIds, createPlan, normalizePlan, applyRoute, addPlace, removePlace, clearPlan, toStorageRecord, readStoredPlan, writeStoredPlan, mapUrl, placeDetailUrl, sharePayload, resolveState });
+  global.TakhunTripPlanner = Object.freeze({ parseQuery, validateRouteId, validatePlaceId, sortRoutePlaces, templatePlaceIds, createPlan, normalizePlan, applyRoute, addPlace, removePlace, clearPlan, toStorageRecord, migrateStoredPlan, readStoredPlan, writeStoredPlan, mapUrl, placeDetailUrl, sharePayload, resolveState });
   if (global.document?.readyState === "loading") global.document.addEventListener("DOMContentLoaded", initialize, { once: true }); else initialize();
 })(window);

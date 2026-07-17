@@ -67,7 +67,8 @@ foreach ($token in @('URLSearchParams', 'normalize\("NFC"\)', 'Array\.from', 'pu
   Assert-Match $script $token "search.js is missing required behavior: $token"
 }
 if ($script -match '(?:\.innerHTML|insertAdjacentHTML|document\.write)') { throw "search.js must not use HTML string injection." }
-if ($script -match '\{\s*mock\s*:') { throw "Search API failures must not use a silent mock fallback." }
+Assert-Match $script 'searchAll\(params,\s*\{\s*mock:' "Search must provide the approved local canonical fallback when API_URL is empty."
+Assert-Match $script 'TakhunContentData\.searchAll' "Search fallback must use the canonical content repository."
 
 Assert-Match $app 'search\.html' "The public shell must link to search.html."
 Assert-Match $app '"search\.nav_label"' "Search navigation must use search.nav_label."

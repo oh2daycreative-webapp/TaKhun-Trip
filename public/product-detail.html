@@ -14,21 +14,21 @@
   <div class="public-shell" data-public-shell data-page="product-detail.html"><a class="shell-fallback" href="index.html" data-i18n="shell.fallback_home">Takhun Trip — หน้าแรก</a></div>
 
   <main class="product-detail-page__main bottom-nav-space" id="main-content">
-    <section class="product-detail-page__state loading-state" data-product-detail-loading role="status" aria-live="polite">
+    <section class="product-detail-page__state loading-state" data-product-detail-loading data-product-loading role="status" aria-live="polite">
       <span class="loading-spinner" aria-hidden="true"></span><p data-i18n="product_detail.loading">กำลังโหลดรายละเอียดสินค้า…</p>
     </section>
-    <section class="product-detail-page__state empty-state" data-product-detail-invalid role="alert" hidden>
+    <section class="product-detail-page__state empty-state" data-product-detail-invalid data-product-invalid role="alert" hidden>
       <span class="empty-state__icon" aria-hidden="true">?</span><h1 class="empty-state__title" data-i18n="product_detail.invalid_title">ID สินค้าไม่ถูกต้อง</h1><p class="empty-state__description" data-i18n="product_detail.invalid_text">โปรดกลับไปเลือกสินค้าจากหน้ารายการ</p><a class="button button--secondary empty-state__action" href="products.html" data-i18n="product_detail.back_to_products">กลับไปดูสินค้า</a>
     </section>
-    <section class="product-detail-page__state empty-state" data-product-detail-not-found role="status" aria-live="polite" hidden>
+    <section class="product-detail-page__state empty-state" data-product-detail-not-found data-product-not-found role="status" aria-live="polite" hidden>
       <span class="empty-state__icon" aria-hidden="true">◇</span><h1 class="empty-state__title" data-i18n="product_detail.not_found_title">ไม่พบสินค้า</h1><p class="empty-state__description" data-i18n="product_detail.not_found_text">สินค้านี้อาจถูกย้าย ซ่อน หรือยังไม่พร้อมเผยแพร่</p><a class="button button--secondary empty-state__action" href="products.html" data-i18n="product_detail.back_to_products">กลับไปดูสินค้า</a>
     </section>
-    <section class="product-detail-page__state error-state" data-product-detail-error role="alert" aria-live="assertive" hidden>
+    <section class="product-detail-page__state error-state" data-product-detail-error data-product-error role="alert" aria-live="assertive" hidden>
       <span class="error-state__icon" aria-hidden="true">!</span><h1 class="error-state__title" data-i18n="product_detail.error_title">โหลดข้อมูลไม่สำเร็จ</h1><p class="error-state__description" data-i18n="product_detail.error_text">ไม่สามารถเชื่อมต่อข้อมูลสินค้าได้ในขณะนี้</p><button class="button button--secondary error-state__action" type="button" data-product-detail-retry data-i18n="product_detail.retry">ลองใหม่</button>
     </section>
 
-    <article data-product-detail-ready hidden>
-      <p class="product-detail-page__demo-notice" data-product-detail-demo-notice data-i18n="product_detail.demo_notice" hidden>ข้อมูลสินค้านี้เป็นข้อมูลสาธิตที่ยังไม่ได้รับการยืนยัน</p>
+    <article data-product-detail-ready data-product-ready hidden>
+      <p class="product-detail-page__demo-notice" data-product-detail-demo-notice data-i18n="product_detail.demo_notice" hidden>ข้อมูลราคาและช่องทางติดต่อที่ยังไม่ยืนยันจะไม่แสดง</p>
       <a class="product-detail-page__back" href="products.html" data-i18n="product_detail.back_to_products">← กลับไปดูสินค้า</a>
       <header class="product-detail-page__hero">
         <div class="product-detail-page__media" data-product-detail-media></div>
@@ -39,10 +39,9 @@
           <section class="product-detail-page__section" data-product-detail-description aria-labelledby="product-description-title"><h2 id="product-description-title" data-i18n="product_detail.description">เรื่องราวสินค้า</h2></section>
           <section class="product-detail-page__section" data-product-related aria-labelledby="product-related-title"><h2 id="product-related-title" data-i18n="product_detail.related_place">สถานที่เกี่ยวข้อง</h2></section>
         </div>
-        <aside class="product-detail-page__contact" aria-labelledby="product-contact-title">
+        <aside class="product-detail-page__contact" data-product-contact aria-labelledby="product-contact-title" hidden>
           <p class="eyebrow" data-i18n="product_detail.contact_eyebrow">คุยกับผู้ผลิตโดยตรง</p><h2 id="product-contact-title" data-i18n="product_detail.contact">ติดต่อ</h2>
           <div class="product-detail-page__contact-actions" data-product-contact-actions></div>
-          <p class="product-detail-page__no-contact" data-product-no-contact data-i18n="product_detail.no_contact">ยังไม่มีช่องทางติดต่อสำหรับสินค้านี้</p>
         </aside>
       </div>
     </article>
@@ -52,6 +51,7 @@
   <script src="js/config.js"></script>
   <script src="js/i18n.js"></script>
   <script src="js/api.js"></script>
+  <script src="js/content-data.js"></script>
   <script src="js/app.js"></script>
   <script src="js/products.js"></script>
 </body>

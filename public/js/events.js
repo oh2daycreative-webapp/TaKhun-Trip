@@ -2,58 +2,10 @@
 
 (function createEventsFeature(global) {
   const EVENT_TYPES = Object.freeze([
-    "launch", "festival", "community_market", "learning", "seasonal", "otop", "tourism", "other"
+    "launch", "festival", "community_market", "community_tourism", "learning", "seasonal", "otop", "tourism", "other"
   ]);
   const EVENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/;
   const MONTH_PATTERN = /^(\d{4})-(0[1-9]|1[0-2])$/;
-
-  function localIso(date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  }
-
-  function dateOffset(days) {
-    const date = new Date();
-    date.setHours(12, 0, 0, 0);
-    date.setDate(date.getDate() + days);
-    return localIso(date);
-  }
-
-  function mockEvent(id, days, overrides = {}) {
-    return Object.freeze({
-      event_id: id,
-      title_th: "กิจกรรมตัวอย่างบ้านตาขุน",
-      title_en: "Ban Ta Khun Demo Event",
-      event_type: "tourism",
-      event_date: dateOffset(days),
-      start_time: "09:00",
-      end_time: "15:00",
-      location_th: "บ้านตาขุน สุราษฎร์ธานี",
-      location_en: "Ban Ta Khun, Surat Thani",
-      related_place_id: "BTK-001",
-      description_th: "ข้อมูลกิจกรรมสาธิตสำหรับตรวจสอบหน้าจอเท่านั้น",
-      description_en: "Demo event content for interface verification only.",
-      image_url: "",
-      contact_name: "ศูนย์ประสานงานท่องเที่ยวชุมชน",
-      contact_phone: "081 234 5678",
-      register_url: "https://example.com/events/register",
-      google_maps_url: "",
-      latitude: "",
-      longitude: "",
-      is_featured: false,
-      status: "published",
-      ...overrides
-    });
-  }
-
-  const MOCK_EVENTS = Object.freeze([
-    mockEvent("MOCK-EVT-TODAY", 0, { event_type: "community_market", title_th: "ตลาดชุมชนวันนี้", title_en: "Community Market Today" }),
-    mockEvent("MOCK-EVT-UPCOMING", 7, { event_type: "festival", title_th: "เทศกาลท่องเที่ยวบ้านตาขุน", title_en: "Ban Ta Khun Tourism Festival", is_featured: true }),
-    mockEvent("MOCK-EVT-NO-TIME", 14, { event_type: "learning", start_time: "", end_time: "", register_url: "", related_place_id: "" }),
-    mockEvent("MOCK-EVT-PAST", -14, { event_type: "otop", title_th: "กิจกรรมของดีชุมชน", title_en: "Community Products Event", contact_name: "", contact_phone: "", register_url: "", related_place_id: "" })
-  ]);
 
   function parseEventId(search = global.location?.search || "") {
     return String(new URLSearchParams(search).get("id") || "").trim();
@@ -262,7 +214,7 @@
   }
 
   function mockGetEvents(params = {}) {
-    let items = MOCK_EVENTS.map((event) => ({ ...event }));
+    let items = global.TakhunContentData.listEvents();
     if (params.status === "upcoming") items = items.filter((event) => ["current", "upcoming"].includes(classifyEvent(event)));
     if (params.status === "past") items = items.filter((event) => classifyEvent(event) === "past");
     items = filterEvents(items, { type: params.type, month: params.month });
@@ -270,8 +222,7 @@
   }
 
   function mockGetEventDetail(eventId) {
-    const event = MOCK_EVENTS.find((item) => item.event_id === String(eventId || "").trim());
-    return event ? { ...event } : null;
+    return global.TakhunContentData.getEventById(eventId);
   }
 
   function t(key) { return global.TakhunI18n?.t?.(key) || key; }

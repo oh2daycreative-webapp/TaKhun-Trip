@@ -6,6 +6,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const source = fs.readFileSync(path.join(__dirname, "../public/js/events.js"), "utf8");
+const canonicalSource = fs.readFileSync(path.join(__dirname, "../public/js/content-data.js"), "utf8");
 const i18nSource = fs.readFileSync(path.join(__dirname, "../public/js/i18n.js"), "utf8");
 
 function loadEvents(search = "") {
@@ -16,6 +17,7 @@ function loadEvents(search = "") {
     window: null
   };
   context.window = context;
+  vm.runInNewContext(canonicalSource, context, { filename: "content-data.js" });
   vm.runInNewContext(source, context, { filename: "events.js" });
   return context.TakhunEvents;
 }
@@ -243,13 +245,18 @@ for (const [input, expected] of [
 
 {
   const all = api.mockGetEvents({ status: "all" }).items;
-  assert.ok(all.some((event) => api.classifyEvent(event, new Date()) === "current"));
-  assert.ok(all.some((event) => api.classifyEvent(event, new Date()) === "upcoming"));
-  assert.ok(all.some((event) => !event.start_time && !event.end_time));
-  assert.ok(all.some((event) => api.safeExternalUrl(event.register_url)));
-  assert.ok(all.some((event) => !api.safeExternalUrl(event.register_url)));
-  assert.ok(all.some((event) => event.related_place_id));
-  assert.ok(all.some((event) => !event.related_place_id));
+  assert.equal(all.length, 1);
+  const event = all[0];
+  assert.equal(event.event_id, "EVENT-HEART-OF-HILLS-2026");
+  assert.equal(event.event_date, "2026-07-18");
+  assert.equal(event.related_place_id, "BTK-004");
+  assert.equal(event.end_time, "");
+  assert.equal(api.classifyEvent(event, new Date(2026, 6, 17, 12)), "upcoming");
+  assert.equal(api.classifyEvent(event, new Date(2026, 6, 18, 12)), "current");
+  assert.equal(api.classifyEvent(event, new Date(2026, 6, 19, 12)), "past");
+  assert.equal(api.safePhoneHref(event.contact_phone), "tel:0848437924");
+  assert.equal(api.safeExternalUrl(event.register_url), "");
+  assert.equal(api.mockGetEventDetail(event.event_id).title_en, "Heart of the Hills");
   assert.equal(api.mockGetEventDetail("MOCK-EVT-404"), null);
 }
 

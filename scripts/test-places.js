@@ -6,6 +6,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const root = path.resolve(__dirname, "..");
+const canonicalSource = fs.readFileSync(path.join(root, "public/js/content-data.js"), "utf8");
 const dataSource = fs.readFileSync(path.join(root, "public/js/place-data.js"), "utf8");
 const source = fs.readFileSync(path.join(root, "public/js/places.js"), "utf8");
 
@@ -26,6 +27,7 @@ function loadModule(storageSeed = null, storageThrows = false) {
     window: null
   };
   context.window = context;
+  vm.runInNewContext(canonicalSource, context, { filename: "content-data.js" });
   vm.runInNewContext(dataSource, context, { filename: "place-data.js" });
   vm.runInNewContext(source, context, { filename: "places.js" });
   return { api: context.TakhunPlaces, values };
@@ -52,14 +54,15 @@ test("exposes isolated data, filter, pagination, URL and storage helpers", () =>
   }
 });
 
-test("loads at least twelve demo records and excludes drafts from public results", async () => {
+test("loads the ten canonical published places without mock identifiers", async () => {
   const { api } = loadModule();
   const all = await api.loadPlaces();
-  assert.ok(all.length >= 14, "fixture must include more than one page of published records plus a draft");
+  assert.equal(all.length, 10);
   const published = api.filterPlaces(all, api.createPageState().filters, "th");
-  assert.ok(published.length > 12, "published demo records must exercise Load More at page size 12");
+  assert.equal(published.length, 10);
   assert.ok(published.every((place) => place.status === "published"));
-  assert.ok(all.every((place) => place.place_id.startsWith("MOCK-PLACE-")));
+  assert.ok(all.every((place) => !place.place_id.startsWith("MOCK-")));
+  assert.equal(all.find((place) => place.place_id === "BTK-005")?.name_th, "วัดเขาพัง");
 });
 
 test("parses all supported query parameters and ignores unknown enum values", () => {

@@ -6,6 +6,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const source = fs.readFileSync(path.join(__dirname, "../public/js/products.js"), "utf8");
+const canonicalSource = fs.readFileSync(path.join(__dirname, "../public/js/content-data.js"), "utf8");
 const i18nSource = fs.readFileSync(path.join(__dirname, "../public/js/i18n.js"), "utf8");
 
 function loadProducts() {
@@ -22,6 +23,7 @@ function loadProducts() {
     window: null
   };
   context.window = context;
+  vm.runInNewContext(canonicalSource, context, { filename: "content-data.js" });
   vm.runInNewContext(source, context, { filename: "products.js" });
   return context.TakhunProducts;
 }
@@ -44,7 +46,7 @@ for (const name of [
   "normalizeProductList", "normalizeProductDetail", "localized", "normalizeBoolean",
   "sortProducts", "priceState", "safePhoneHref", "safeExternalUrl", "detailUrl",
   "relatedPlaceUrl", "mapUrl", "resolveListState", "resolveDetailState", "mockGetProducts",
-  "mockGetProductDetail", "setPageState"
+  "mockGetProductDetail", "setPageState", "productContactModel", "validateDetailRequestId"
 ]) {
   assert.equal(typeof api[name], "function", `missing helper ${name}`);
 }
@@ -55,6 +57,9 @@ for (const id of ["PROD-001", "mock_product-2", "A1"]) assert.equal(api.validate
 for (const id of ["", "   ", "bad id", "../bad", "<script>", "javascript:alert(1)", "A/B"]) {
   assert.equal(api.validateProductId(id), false, id);
 }
+assert.equal(api.validateDetailRequestId("INVALID", false), false, "local canonical mode must reject non-PROD detail IDs without an API request");
+assert.equal(api.validateDetailRequestId("PROD-NOT-FOUND", false), true);
+assert.equal(api.validateDetailRequestId("INVALID", true), true, "configured API mode must preserve the existing generic ID contract");
 
 {
   const parsed = api.parseProductFilters("?category=honey&district=ban_ta_khun&related_place_id=BTK-003&ignored=x");
@@ -85,6 +90,7 @@ for (const id of ["", "   ", "bad id", "../bad", "<script>", "javascript:alert(1
   assert.throws(() => api.normalizeProductList({ items: "bad" }), /MALFORMED_RESPONSE/);
   assert.throws(() => api.normalizeProductList({ items: [{}] }), /MALFORMED_RESPONSE/);
   assert.equal(api.normalizeProductDetail({ product_id: "PROD-001" }).product_id, "PROD-001");
+  assert.equal(api.normalizeProductDetail(null), null, "local fallback not-found must resolve to the not-found state");
   assert.throws(() => api.normalizeProductDetail({ name: "Missing ID" }), /MALFORMED_RESPONSE/);
 }
 
@@ -159,17 +165,40 @@ assert.equal(api.resolveDetailState({ validId: true, product: null }), "not-foun
 assert.equal(api.resolveDetailState({ validId: true, product: { product_id: "P-1" } }), "ready");
 
 {
+  const stateNames = ["loading", "ready", "invalid-id", "not-found", "error"];
+  const states = Object.fromEntries(stateNames.map((name) => [name, { hidden: false }]));
+  for (const active of stateNames) {
+    assert.equal(api.setPageState(states, active), true);
+    assert.deepEqual(stateNames.filter((name) => !states[name].hidden), [active], `${active} must be exclusive`);
+  }
+  const durian = api.mockGetProductDetail("PROD-BTK-DURIAN");
+  assert.equal(api.resolveDetailState({ validId: true, product: durian }), "ready");
+  api.setPageState(states, "ready");
+  assert.deepEqual(stateNames.filter((name) => !states[name].hidden), ["ready"]);
+  api.setPageState(states, "not-found");
+  assert.equal(states.ready.hidden, true);
+  api.setPageState(states, "error");
+  assert.equal(states.ready.hidden, true);
+}
+
+{
+  const durian = api.mockGetProductDetail("PROD-BTK-DURIAN");
+  const contact = api.productContactModel(durian);
+  assert.equal(contact.visible, false, "canonical durian must not show an unverified contact card");
+  assert.deepEqual(plain(contact.actions), []);
+  assert.equal(durian.related_place_id, "BTK-002");
+  assert.equal(api.relatedPlaceUrl(durian.related_place_id), "place-detail.html?id=BTK-002");
+}
+
+{
   const mocks = api.mockGetProducts({ category: "honey", district: "ban_ta_khun" });
   assert.ok(mocks.items.length >= 1);
   assert.ok(mocks.items.every((item) => item.category === "honey" && item.district === "ban_ta_khun"));
   const all = api.mockGetProducts({}).items;
-  assert.ok(all.some((item) => api.priceState(item).kind === "value"));
-  assert.ok(all.some((item) => api.priceState(item).kind === "contact"));
+  assert.equal(all.length, 7);
+  assert.ok(all.every((item) => api.priceState(item).kind === "contact"), "unverified product prices must remain hidden");
   assert.ok(all.some((item) => item.related_place_id));
-  assert.ok(all.some((item) => !item.related_place_id));
-  assert.ok(all.some((item) => api.safePhoneHref(item.phone)));
-  assert.ok(all.some((item) => api.safeExternalUrl(item.contact_url)));
-  assert.ok(all.some((item) => !api.safePhoneHref(item.phone) && !api.safeExternalUrl(item.contact_url)));
+  assert.ok(all.every((item) => !api.safePhoneHref(item.phone) && !api.safeExternalUrl(item.contact_url)), "placeholder product contacts must be absent");
   assert.equal(api.mockGetProductDetail("MOCK-PROD-404"), null);
 }
 

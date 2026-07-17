@@ -258,6 +258,7 @@
 
 /* Community products */
 .products-page [hidden] { display: none !important; }
+.product-detail-page [hidden] { display: none !important; }
 .products-page .products-page__main,
 .product-detail-page .product-detail-page__main { width: min(1180px, calc(100% - 2rem)); margin-inline: auto; padding-block: clamp(1.25rem, 5vw, 4rem) 7rem; }
 .products-page .products-page__hero { position: relative; display: grid; min-height: 28rem; align-items: end; overflow: hidden; padding: clamp(1.5rem, 6vw, 4.5rem); border-radius: var(--radius-xl); background: linear-gradient(135deg, #053e36 0%, #00796b 56%, #18b7b5 100%); box-shadow: var(--shadow-floating); color: #fff; isolation: isolate; }
