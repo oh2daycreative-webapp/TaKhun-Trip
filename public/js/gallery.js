@@ -1,7 +1,7 @@
 "use strict";
 
 (function createGalleryPage(global) {
-  const CATEGORIES = Object.freeze(["place", "route", "event", "product", "community", "hero", "other"]);
+  const CATEGORIES = Object.freeze(["dam_lake", "mountain_nature", "community_life", "food_fruit", "activity_tradition"]);
   const MEDIA_TYPES = Object.freeze(["image", "video"]);
   const FILTER_KEYS = Object.freeze(["category", "media_type", "related_place_id"]);
   const STATE_NAMES = Object.freeze(["initial", "loading", "ready", "empty", "filtered-empty", "error", "invalid-filter", "malformed-response", "media-load-error"]);
@@ -44,6 +44,13 @@
     if (!item || !field) return "";
     const language = lang === "en" ? "en" : "th";
     return String(item[`${field}_${language}`] || item[`${field}_th`] || item[field] || "").trim();
+  }
+
+  function galleryCategoryOptions(lang = "th") {
+    const language = lang === "en" ? "en" : "th";
+    return (global.TakhunContentData?.listGalleryCategories?.() || [])
+      .filter((category) => CATEGORIES.includes(String(category?.category_id || "")))
+      .map((category) => ({ value: category.category_id, label: String(category[`name_${language}`] || category.name_th || "").trim() }));
   }
 
   function safeHttpUrl(value) {
@@ -131,12 +138,7 @@
   function closeViewerState(state) { return { ...createViewerState(), returnFocus: state?.returnFocus || null }; }
 
   function mockGallery(params = {}) {
-    const items = [
-      { media_id: "MOCK-GAL-001", title_th: "แสงเช้าที่ทะเลสาบเชี่ยวหลาน", title_en: "Morning at Cheow Lan Lake", caption_th: "ผืนน้ำสีมรกตในเช้าวันใหม่", caption_en: "Emerald water at the start of a new day.", media_type: "image", image_url: "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1200&q=80", thumbnail_url: "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=720&q=80", category: "place", related_place_id: "BTK-001", credit: "Takhun Trip Demo", is_featured: true, sort_order: 1, status: "published" },
-      { media_id: "MOCK-GAL-002", title_th: "ธรรมชาติที่เคลื่อนไหว", title_en: "Nature in Motion", caption_th: "วิดีโอตัวอย่างสำหรับทดสอบตัวแสดงสื่อ", caption_en: "A sample direct video for the media viewer.", media_type: "video", video_url: "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4", thumbnail_url: "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=720&q=80", category: "community", credit: "MDN Demo Media", is_featured: "false", sort_order: 2, status: "published" },
-      { media_id: "MOCK-GAL-003", title_th: "เรื่องเล่าจากกิจกรรมชุมชน", title_en: "A Community Event Story", caption_th: "วิดีโอจากเว็บไซต์ต้นทาง", caption_en: "Video hosted on its source website.", media_type: "video", video_url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", category: "event", related_place_id: "BTK-004", photographer_name: "Takhun Trip", sort_order: 3, status: "published" },
-      { media_id: "MOCK-GAL-004", title_th: "สื่อที่ไม่ปลอดภัย", title_en: "Unsafe Media Example", media_type: "image", image_url: "javascript:alert(1)", category: "other", sort_order: 4, status: "published" }
-    ];
+    const items = global.TakhunContentData.listGallery();
     const filtered = filterGallery(items, params);
     return { items: sortGalleryItems(filtered).map((item) => ({ ...item })), total: filtered.length };
   }
@@ -145,11 +147,25 @@
   function format(key, values) { return String(t(key)).replace(/\{(\w+)\}/g, (_match, name) => String(values?.[name] ?? "")); }
   function make(tag, className, text) { const element = global.document.createElement(tag); if (className) element.className = className; if (text !== undefined) element.textContent = text; return element; }
 
+  function renderGalleryCategoryOptions(select, lang, selectedValue = "") {
+    if (!select?.replaceChildren) return;
+    const all = make("option", "", t("gallery.all_media"));
+    all.value = "";
+    const options = galleryCategoryOptions(lang).map((item) => {
+      const option = make("option", "", item.label);
+      option.value = item.value;
+      return option;
+    });
+    select.replaceChildren(all, ...options);
+    select.value = CATEGORIES.includes(selectedValue) ? selectedValue : "";
+  }
+
   function initializePage() {
     const root = global.document?.querySelector?.(".gallery-page");
     if (!root || !global.TakhunApi?.getGallery) return;
     const main = global.document.querySelector("#main-content");
     const form = global.document.querySelector("[data-gallery-filters]");
+    const categorySelect = form?.querySelector?.('[data-gallery-filter="category"]');
     const grid = global.document.querySelector("[data-gallery-grid]");
     const summary = global.document.querySelector("[data-gallery-summary]");
     const viewer = global.document.querySelector("[data-gallery-viewer]");
@@ -306,7 +322,8 @@
     global.document.querySelector("[data-gallery-next]")?.addEventListener("click", () => moveViewer(1));
     global.document.addEventListener("keydown", (event) => { if (!viewerState.isOpen) return; if (event.key === "Escape") closeViewer(); if (event.key === "ArrowLeft") moveViewer(-1); if (event.key === "ArrowRight") moveViewer(1); });
     global.addEventListener?.("popstate", fetchRecords);
-    global.document.addEventListener("takhun:languagechange", () => { global.TakhunI18n?.applyTranslations?.(global.document); if (records.length) renderRecords(); if (viewerState.isOpen) openViewer(viewerIndex, viewerState.returnFocus); });
+    global.document.addEventListener("takhun:languagechange", () => { global.TakhunI18n?.applyTranslations?.(global.document); renderGalleryCategoryOptions(categorySelect, currentLang(), filters.category); if (records.length) renderRecords(); if (viewerState.isOpen) openViewer(viewerIndex, viewerState.returnFocus); });
+    renderGalleryCategoryOptions(categorySelect, currentLang(), filters.category);
     fetchRecords();
   }
 
@@ -315,7 +332,7 @@
     filterGallery, clearFilters, localized, safeMediaUrl, safeThumbnailUrl, safeExternalUrl,
     isDirectVideoUrl, normalizeBoolean, normalizeSortOrder, sortGalleryItems, relatedPlaceUrl,
     mapUrl, normalizeGalleryResponse, resolveState, setPageState, createRequestGate,
-    createViewerState, openViewerState, closeViewerState, mockGallery
+    createViewerState, openViewerState, closeViewerState, galleryCategoryOptions, mockGallery
   });
   if (global.document?.readyState === "loading") global.document.addEventListener("DOMContentLoaded", initializePage, { once: true }); else initializePage();
 })(window);

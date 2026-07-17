@@ -40,6 +40,7 @@ $required = @(
   "public/js/api.js",
   "public/js/i18n.js",
   "public/js/app.js",
+  "public/js/content-data.js",
   "public/js/home.js",
   "public/js/search.js",
   "public/js/gallery.js",
@@ -100,6 +101,11 @@ foreach ($html in $htmlFiles) {
 }
 
 & (Join-Path $PSScriptRoot "test-home.ps1")
+& (Join-Path $PSScriptRoot "test-content-safety.ps1")
+& node (Join-Path $PSScriptRoot "test-content-data.js")
+if ($LASTEXITCODE -ne 0) { throw "Canonical content data verification failed." }
+& node (Join-Path $PSScriptRoot "test-content-integration.js")
+if ($LASTEXITCODE -ne 0) { throw "Public content integration verification failed." }
 & node (Join-Path $PSScriptRoot "test-home.js")
 if ($LASTEXITCODE -ne 0) { throw "Home behavior verification failed." }
 & (Join-Path $PSScriptRoot "test-public-shell.ps1")

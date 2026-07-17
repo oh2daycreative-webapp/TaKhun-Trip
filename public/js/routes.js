@@ -1,53 +1,6 @@
 "use strict";
 
 (function createRoutesPages(global) {
-  const MOCK_ROUTES = Object.freeze([
-    Object.freeze({
-      route_id: "MOCK-ROUTE-002",
-      name_th: "เส้นทางตัวอย่างธรรมชาติและภาพถ่าย",
-      name_en: "Sample Nature and Photo Route",
-      short_description_th: "ข้อมูลสาธิตสำหรับทดสอบการ์ดเส้นทางทั่วไป",
-      short_description_en: "Demo content for testing a standard route card.",
-      description_th: "รายละเอียดตัวอย่างสำหรับทดสอบโครงสร้างหน้าเส้นทางเท่านั้น",
-      description_en: "Sample content used only to test the route page structure.",
-      duration: "ครึ่งวัน",
-      travel_style: Object.freeze(["nature", "photo"]),
-      cover_image_url: "",
-      is_featured: false
-    }),
-    Object.freeze({
-      route_id: "MOCK-ROUTE-001",
-      name_th: "เส้นทางตัวอย่างบ้านตาขุน",
-      name_en: "Sample Ban Ta Khun Route",
-      short_description_th: "เส้นทางสาธิตสำหรับตรวจการเรียงจุดแวะและการแสดงผลสองภาษา",
-      short_description_en: "A demo route for testing stop order and bilingual rendering.",
-      description_th: "ข้อมูลทั้งหมดในเส้นทางนี้เป็นข้อมูลสาธิตและยังไม่ได้รับการยืนยัน",
-      description_en: "All information on this route is demo content and has not been verified.",
-      duration: "1 วัน",
-      travel_style: Object.freeze(["nature", "community", "photo"]),
-      cover_image_url: "",
-      is_featured: true,
-      places: Object.freeze([
-        Object.freeze({ place_id: "MOCK-PLACE-010", stop_order: "10", name_th: "จุดแวะตัวอย่างลำดับสิบ", name_en: "Sample Stop Ten", short_description_th: "จุดแวะสาธิตสำหรับทดสอบลำดับแบบตัวเลข", short_description_en: "A demo stop for numeric ordering tests.", cover_image_url: "", phone: "", google_maps_url: "" }),
-        Object.freeze({ place_id: "MOCK-PLACE-INVALID", stop_order: "later", name_th: "จุดแวะตัวอย่างไม่มีลำดับ", name_en: "Sample Unordered Stop", short_description_th: "รายการนี้ตั้งใจใช้ลำดับไม่ถูกต้องเพื่อทดสอบการวางไว้ท้ายรายการ", short_description_en: "This intentionally invalid order tests stable placement at the end.", cover_image_url: "", phone: "", google_maps_url: "" }),
-        Object.freeze({ place_id: "MOCK-PLACE-002", stop_order: "2", name_th: "จุดแวะตัวอย่างลำดับสอง", name_en: "Sample Stop Two", short_description_th: "จุดแวะสาธิตที่ต้องแสดงก่อนลำดับสิบ", short_description_en: "A demo stop that must appear before stop ten.", cover_image_url: "", phone: "", google_maps_url: "" })
-      ])
-    }),
-    Object.freeze({
-      route_id: "MOCK-ROUTE-EMPTY",
-      name_th: "เส้นทางตัวอย่างที่ยังไม่มีจุดแวะ",
-      name_en: "Sample Route Without Stops",
-      short_description_th: "ใช้ทดสอบสถานะเส้นทางที่ยังไม่มีจุดแวะ",
-      short_description_en: "Used to test a route without stops.",
-      description_th: "ข้อมูลสาธิตสำหรับทดสอบ Empty State ของ Timeline",
-      description_en: "Demo content for the empty timeline state.",
-      duration: "",
-      travel_style: Object.freeze([]),
-      cover_image_url: "",
-      is_featured: false,
-      places: Object.freeze([])
-    })
-  ]);
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -118,13 +71,12 @@
   }
 
   function mockGetRoutes() {
-    const items = MOCK_ROUTES.map(({ places: _places, ...route }) => route);
+    const items = global.TakhunContentData.listRoutes().map(({ places: _places, ...route }) => route);
     return { items: clone(items), total: items.length };
   }
 
   function mockGetRouteDetail(routeId) {
-    const found = MOCK_ROUTES.find((route) => route.route_id === String(routeId || "").trim());
-    return found ? clone(found) : null;
+    return global.TakhunContentData.getRouteById(routeId);
   }
 
   async function loadRoutes(lang) {

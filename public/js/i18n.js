@@ -101,6 +101,108 @@
     }
   });
 
+  const MVP_CONTENT_COPY = Object.freeze({
+    th: Object.freeze({ travel_notice: "โปรดตรวจสอบข้อมูลก่อนเดินทาง" }),
+    en: Object.freeze({ travel_notice: "Please check current information before traveling." })
+  });
+
+  Object.assign(I18N_MESSAGES.th.home, {
+    events_eyebrow: "กิจกรรมที่ยืนยันแล้ว", events_title: "กิจกรรมในบ้านตาขุน",
+    events_text: "ติดตามกิจกรรมชุมชนและตรวจสอบรายละเอียดก่อนเดินทาง", view_all_events: "ดูกิจกรรมทั้งหมด",
+    events_empty: "ยังไม่มีกิจกรรมที่กำลังจะมาถึง", event_featured: "กิจกรรมเด่น", event_start: "เริ่มเวลา {time} น.",
+    view_event: "ดูรายละเอียดกิจกรรม", view_event_named: "ดูรายละเอียด {name}", travel_notice: MVP_CONTENT_COPY.th.travel_notice,
+    footer_contact: "ติดต่อโครงการ"
+  });
+  Object.assign(I18N_MESSAGES.en.home, {
+    events_eyebrow: "Verified Event", events_title: "Events in Ban Ta Khun",
+    events_text: "Follow community events and check the details before traveling.", view_all_events: "View All Events",
+    events_empty: "No upcoming events right now.", event_featured: "Featured Event", event_start: "Starts at {time}",
+    view_event: "View Event", view_event_named: "View details for {name}", travel_notice: MVP_CONTENT_COPY.en.travel_notice,
+    footer_contact: "Project Contact"
+  });
+
+  Object.assign(I18N_MESSAGES.th.places, {
+    header_description: "สำรวจสถานที่ในบ้านตาขุน คีรีรัฐนิคม และพนมตามอำเภอ หมวดหมู่ และกลุ่มเส้นทาง",
+    demo_notice: MVP_CONTENT_COPY.th.travel_notice, search_placeholder: "ค้นหาชื่อหรือคำอธิบายสถานที่", results_title: "รายการสถานที่",
+    loading: "กำลังโหลดข้อมูลสถานที่…", empty_all: "ยังไม่มีสถานที่ที่เผยแพร่", empty_filtered: "ไม่พบสถานที่ที่ตรงกับตัวกรอง",
+    error: "โหลดข้อมูลสถานที่ไม่สำเร็จ", favorite_added: "บันทึกสถานที่แล้ว", image_alt: "ภาพของ {name}", image_fallback: "ยังไม่มีภาพ",
+    no_script: "ไม่สามารถโหลดรายการได้ โปรดเปิดใช้งาน JavaScript เพื่อดูข้อมูลสถานที่",
+    categories: { ...I18N_MESSAGES.th.places.categories, temple_culture: "วัด / วัฒนธรรม" },
+    route_groups: { main_point_1: "จุดหลักบ้านตาขุน 1", main_point_2: "จุดหลักบ้านตาขุน 2", main_point_3: "จุดหลักบ้านตาขุน 3", main_point_4: "จุดหลักบ้านตาขุน 4", nearby_khiri_rat_nikhom: "เที่ยวต่อคีรีรัฐนิคม", nearby_phanom: "เที่ยวต่อพนม" }
+  });
+  Object.assign(I18N_MESSAGES.en.places, {
+    header_description: "Explore places in Ban Ta Khun, Khiri Rat Nikhom, and Phanom by district, category, and route group.",
+    demo_notice: MVP_CONTENT_COPY.en.travel_notice, search_placeholder: "Search place names or descriptions", results_title: "Places",
+    loading: "Loading places…", empty_all: "No published places yet.", empty_filtered: "No places match these filters.",
+    error: "Unable to load places.", favorite_added: "Place saved.", image_alt: "Image of {name}", image_fallback: "No image yet",
+    no_script: "Enable JavaScript to view places.",
+    categories: { ...I18N_MESSAGES.en.places.categories, temple_culture: "Temple / Culture" },
+    route_groups: { main_point_1: "Ban Ta Khun Main Point 1", main_point_2: "Ban Ta Khun Main Point 2", main_point_3: "Ban Ta Khun Main Point 3", main_point_4: "Ban Ta Khun Main Point 4", nearby_khiri_rat_nikhom: "Continue to Khiri Rat Nikhom", nearby_phanom: "Continue to Phanom" }
+  });
+
+  Object.assign(I18N_MESSAGES.th.place_detail, {
+    not_found_page_title: "ไม่พบสถานที่ | Takhun Trip", demo_notice: MVP_CONTENT_COPY.th.travel_notice,
+    favorite_added: "บันทึกสถานที่แล้ว", share_text: "ดูข้อมูล {name} ใน Takhun Trip", visitor_unavailable: "ยังไม่มีข้อมูลที่ยืนยันในส่วนนี้",
+    open_gallery_image: "เปิดภาพที่ {number} ของ {name}", map_unavailable: "ยังไม่มีข้อมูลแผนที่ที่ยืนยัน", nearby: "สถานที่ใกล้เคียง",
+    reviews: "รีวิว", no_reviews: "ยังไม่มีรีวิวที่ผ่านการอนุมัติ", mock_review_notice: "แสดงเฉพาะรีวิวที่ผ่านการอนุมัติ",
+    anonymous_reviewer: "นักท่องเที่ยว", demo_reviewer: "นักท่องเที่ยว", review_unavailable: "ยังไม่เปิดรับรีวิวสำหรับข้อมูลชุดนี้",
+    loading: "กำลังโหลดรายละเอียด…", not_found_title: "ไม่พบสถานที่", image_alt: "ภาพของ {name}", image_fallback: "ยังไม่มีภาพ"
+  });
+  Object.assign(I18N_MESSAGES.en.place_detail, {
+    not_found_page_title: "Place Not Found | Takhun Trip", demo_notice: MVP_CONTENT_COPY.en.travel_notice,
+    favorite_added: "Place saved.", share_text: "View information about {name} in Takhun Trip.", visitor_unavailable: "No verified information is available in this section.",
+    open_gallery_image: "Open image {number} of {name}", map_unavailable: "No verified map information is available.", nearby: "Nearby Places",
+    reviews: "Reviews", no_reviews: "No approved reviews yet.", mock_review_notice: "Only approved reviews are shown.",
+    anonymous_reviewer: "Traveler", demo_reviewer: "Traveler", review_unavailable: "Reviews are not open for this content yet.",
+    loading: "Loading details…", not_found_title: "Place Not Found", image_alt: "Image of {name}", image_fallback: "No image yet"
+  });
+
+  Object.assign(I18N_MESSAGES.th.map, {
+    intro: "ค้นหาและสำรวจสถานที่ในโครงการ โดยแสดงหมุดเฉพาะพิกัดที่ได้รับการยืนยัน",
+    demo_notice: "ยังไม่มีพิกัดที่ยืนยันสำหรับปักหมุด โปรดใช้รายการสถานที่และลิงก์นำทางที่มีอยู่",
+    map_label: "แผนที่สถานที่ท่องเที่ยว", map_description: "แผนที่แสดงเฉพาะหมุดที่มีพิกัดยืนยัน",
+    coordinate_approximate: "พิกัดโดยประมาณ", has_coordinate: "มีพิกัด", image_fallback: "ยังไม่มีภาพ"
+  });
+  Object.assign(I18N_MESSAGES.en.map, {
+    intro: "Explore project places. Markers appear only for verified coordinates.",
+    demo_notice: "No verified marker coordinates are available yet. Use the place list and available navigation links.",
+    map_label: "Travel place map", map_description: "The map shows only places with verified coordinates.",
+    coordinate_approximate: "Approximate coordinates", has_coordinate: "Coordinates available", image_fallback: "No image yet"
+  });
+
+  Object.assign(I18N_MESSAGES.th.routes_page, { demo_notice: MVP_CONTENT_COPY.th.travel_notice });
+  Object.assign(I18N_MESSAGES.en.routes_page, { demo_notice: MVP_CONTENT_COPY.en.travel_notice });
+  Object.assign(I18N_MESSAGES.th.route_detail, { demo_notice: MVP_CONTENT_COPY.th.travel_notice, timeline_intro: "จุดหมายเรียงตามลำดับนำเสนอ โปรดตรวจสอบเส้นทางและความพร้อมก่อนเดินทาง" });
+  Object.assign(I18N_MESSAGES.en.route_detail, { demo_notice: MVP_CONTENT_COPY.en.travel_notice, timeline_intro: "Stops follow the presentation order. Check routes and availability before traveling." });
+
+  Object.assign(I18N_MESSAGES.th.products, { demo_notice: "ข้อมูลราคาและช่องทางติดต่อที่ยังไม่ยืนยันจะไม่แสดง", contact_price: "ยังไม่มีราคาที่ยืนยัน" });
+  Object.assign(I18N_MESSAGES.en.products, { demo_notice: "Unverified prices and contact channels are not shown.", contact_price: "No verified price" });
+  Object.assign(I18N_MESSAGES.th.product_detail, { demo_notice: "ข้อมูลราคาและช่องทางติดต่อที่ยังไม่ยืนยันจะไม่แสดง" });
+  Object.assign(I18N_MESSAGES.en.product_detail, { demo_notice: "Unverified prices and contact channels are not shown." });
+
+  Object.assign(I18N_MESSAGES.th.events, {
+    demo_notice: MVP_CONTENT_COPY.th.travel_notice,
+    types: { ...I18N_MESSAGES.th.events.types, community_tourism: "ท่องเที่ยวชุมชน" }
+  });
+  Object.assign(I18N_MESSAGES.en.events, {
+    demo_notice: MVP_CONTENT_COPY.en.travel_notice,
+    types: { ...I18N_MESSAGES.en.events.types, community_tourism: "Community Tourism" }
+  });
+
+  Object.assign(I18N_MESSAGES.th.gallery, {
+    intro: "เตรียมพื้นที่สำหรับภาพเขื่อน ธรรมชาติ ชุมชน อาหาร และกิจกรรม โดยไม่ใช้สื่อภายนอก",
+    no_media: "ยังไม่มีสื่อที่ได้รับอนุมัติสำหรับเผยแพร่ในขณะนี้", no_media_filtered: "ยังไม่มีสื่อที่ได้รับอนุมัติในหมวดนี้",
+    categories: { dam_lake: "เขื่อนและทะเลสาบ", mountain_nature: "ขุนเขาและธรรมชาติ", community_life: "ชุมชนและวิถีชีวิต", food_fruit: "อาหารและผลไม้", activity_tradition: "กิจกรรมและงานประเพณี" }
+  });
+  Object.assign(I18N_MESSAGES.en.gallery, {
+    intro: "A space for approved stories of the dam, nature, communities, food, and activities, without external media.",
+    no_media: "No approved media is available yet.", no_media_filtered: "No approved media is available in this category.",
+    categories: { dam_lake: "Dam and Lake", mountain_nature: "Mountains and Nature", community_life: "Community and Local Life", food_fruit: "Food and Fruit", activity_tradition: "Activities and Traditions" }
+  });
+
+  Object.assign(I18N_MESSAGES.th.about_page, { mock_notice: MVP_CONTENT_COPY.th.travel_notice });
+  Object.assign(I18N_MESSAGES.en.about_page, { mock_notice: MVP_CONTENT_COPY.en.travel_notice });
+
   Object.assign(I18N_MESSAGES.th.place_detail, {
     reviews: "รีวิว", anonymous_reviewer: "นักท่องเที่ยว",
     review_loading: "กำลังโหลดรีวิว…", review_empty: "ยังไม่มีรีวิวที่เผยแพร่", review_error: "โหลดรีวิวไม่สำเร็จ", review_retry: "ลองอีกครั้ง",

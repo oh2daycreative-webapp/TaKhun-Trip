@@ -9,7 +9,7 @@
   }
 
   async function loadPlaces() {
-    if (!global.TakhunPlaceData?.listPlaces) throw new Error("Shared mock place data is unavailable.");
+    if (!global.TakhunPlaceData?.listPlaces) throw new Error("Canonical place content is unavailable.");
     return global.TakhunPlaceData.listPlaces();
   }
 

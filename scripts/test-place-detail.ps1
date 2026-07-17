@@ -15,7 +15,7 @@ function Assert-Match([string]$Content, [string]$Pattern, [string]$Message) {
 
 if ($html -match 'class="placeholder"') { throw "Place Detail must not retain the placeholder." }
 Assert-Match $html 'class="[^"]*place-detail-page' "Place Detail must expose its scoped body class."
-Assert-Match $html 'data-i18n="place_detail\.demo_notice"' "Place Detail must identify demo data."
+Assert-Match $html 'data-i18n="place_detail\.demo_notice"' "Place Detail must expose its travel-information notice."
 $loadingTag = [regex]::Match($html, '<section[^>]*data-detail-loading[^>]*>').Value
 if (-not $loadingTag) { throw "Loading state markup is missing." }
 if ($loadingTag -match '\shidden(?:\s|>)') { throw "Loading must be initially visible." }
@@ -78,8 +78,8 @@ Assert-Match $components '\.place-detail-page[^\r\n]*\.detail-lightbox' "Lightbo
 Assert-Match ($components + $mobile) 'prefers-reduced-motion' "Place Detail must respect reduced motion."
 if (($components + $mobile) -match '(?:html|body)\s*\{[^}]*overflow-x\s*:\s*hidden') { throw "Place Detail must not hide global horizontal overflow." }
 
-Assert-Match $data 'is_demo:\s*true' "Shared records must be visibly marked as demo data."
-Assert-Match $data 'MOCK-REVIEW-' "Mock reviews must use mock identifiers."
+Assert-Match $data 'TakhunContentData' "Shared place data must use the canonical content repository."
+if ($data -match 'MOCK-REVIEW-|is_demo:\s*true') { throw "Shared place data must not retain mock review or demo markers." }
 
 & node (Join-Path $PSScriptRoot "test-place-detail.js")
 if ($LASTEXITCODE -ne 0) { throw "Place Detail behavior verification failed." }

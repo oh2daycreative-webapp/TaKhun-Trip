@@ -22,25 +22,6 @@
     ])
   });
 
-  const MOCK_HOME_RESPONSE = Object.freeze({
-    ok: true,
-    data: Object.freeze({
-      featured_routes: Object.freeze([
-        Object.freeze({ route_id: "MOCK-ROUTE-001", name: "เชี่ยวหลานในหนึ่งวัน", short_description: "ทะเลสาบ เขาสามเกลอ และสันเขื่อน", duration: "1 วัน", travel_style: Object.freeze(["nature", "photo"]), cover_image_url: "", is_featured: true }),
-        Object.freeze({ route_id: "MOCK-ROUTE-002", name: "หัวใจแห่งเขาเทพพิทักษ์", short_description: "สะพานแขวน ภูเขารูปหัวใจ และชุมชน", duration: "ครึ่งวัน", travel_style: Object.freeze(["community", "photo"]), cover_image_url: "", is_featured: true })
-      ]),
-      featured_places: Object.freeze([
-        Object.freeze({ place_id: "MOCK-PLACE-001", name: "ทะเลสาบเชี่ยวหลาน", category: "nature", short_description: "ล่องเรือผ่านผืนน้ำสีมรกตและแนวภูเขาหินปูน", cover_image_url: "", is_featured: true }),
-        Object.freeze({ place_id: "MOCK-PLACE-002", name: "ภูเขารูปหัวใจ", category: "viewpoint", short_description: "จุดชมวิวโดดเด่นใกล้ชุมชนบ้านเขาเทพพิทักษ์", cover_image_url: "", is_featured: true }),
-        Object.freeze({ place_id: "MOCK-PLACE-003", name: "เขื่อนรัชชประภา", category: "nature", short_description: "ชมวิวกว้างจากสันเขื่อนและรับลมเย็น", cover_image_url: "", is_featured: true })
-      ]),
-      featured_products: Object.freeze([]),
-      upcoming_events: Object.freeze([]),
-      gallery_preview: Object.freeze([])
-    }),
-    message: "success"
-  });
-
   function malformedResponse() {
     const error = new Error("MALFORMED_RESPONSE");
     error.code = "MALFORMED_RESPONSE";
@@ -111,6 +92,7 @@
   function encoded(value) { return encodeURIComponent(String(value || "")); }
   function placeDetailUrl(placeId) { return `place-detail.html?id=${encoded(placeId)}`; }
   function routeDetailUrl(routeId) { return `route-detail.html?id=${encoded(routeId)}`; }
+  function eventDetailUrl(eventId) { return `event-detail.html?id=${encoded(eventId)}`; }
   function translatedOrRaw(key, raw, translate) {
     const label = String(translate(key));
     return label === key ? String(raw || "") : label;
@@ -148,6 +130,19 @@
     };
   }
 
+  function mapEvent(event) {
+    return {
+      id: event.event_id,
+      title: event.title,
+      date: event.event_date,
+      time: event.start_time,
+      location: event.location,
+      href: eventDetailUrl(event.event_id),
+      imageUrl: safeImageUrl(event.image_url),
+      featured: event.is_featured === true
+    };
+  }
+
   function localizedInspiration(lang) {
     const language = normalizeLang(lang);
     return HOME_DATA.tripInspiration.map((item) => ({
@@ -160,21 +155,7 @@
   }
 
   function mockHomeResponse(lang) {
-    const response = cloneValue(MOCK_HOME_RESPONSE);
-    if (normalizeLang(lang) === "en") {
-      const placeCopy = [
-        ["Cheow Lan Lake", "Cruise across emerald water framed by limestone mountains"],
-        ["Heart-shaped Mountain", "A distinctive viewpoint near the Khao Thep Phithak community"],
-        ["Ratchaprapha Dam", "Enjoy wide dam views and a refreshing breeze"]
-      ];
-      const routeCopy = [
-        ["Cheow Lan in One Day", "The lake, limestone formations, and the dam viewpoint"],
-        ["The Heart of Khao Thep Phithak", "The suspension bridge, heart-shaped mountain, and community"]
-      ];
-      response.data.featured_places.forEach((item, index) => { [item.name, item.short_description] = placeCopy[index]; });
-      response.data.featured_routes.forEach((item, index) => { [item.name, item.short_description] = routeCopy[index]; });
-    }
-    return response;
+    return global.TakhunContentData.getHomeData(normalizeLang(lang));
   }
 
   function createHomeController({ loadHome, onChange = () => {}, initialLang = "th" } = {}) {
@@ -193,6 +174,7 @@
         lang,
         places: response ? response.data.featured_places : [],
         routes: response ? response.data.featured_routes : [],
+        events: response ? response.data.upcoming_events : [],
         pending: Boolean(active)
       });
     }
@@ -345,6 +327,32 @@
     return card;
   }
 
+  function formatEventDate(value) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
+    if (!match) return "";
+    const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+    return new Intl.DateTimeFormat(global.TakhunI18n?.getCurrentLang?.() === "en" ? "en-GB" : "th-TH", { dateStyle: "medium", timeZone: "UTC" }).format(date);
+  }
+
+  function renderEventCard(item) {
+    const event = mapEvent(item);
+    const card = make("article", "event-card");
+    const media = make("div", "event-card__media home-card__media");
+    appendImage(media, event.imageUrl, event.title);
+    if (event.featured) media.append(make("span", "event-card__badge", t("home.event_featured")));
+    const content = make("div", "event-card__content");
+    content.append(make("p", "event-card__date", formatEventDate(event.date)), make("h3", "", event.title));
+    if (event.location) content.append(make("p", "event-card__meta", event.location));
+    if (event.time) content.append(make("p", "event-card__meta", format("home.event_start", { time: event.time })));
+    const link = make("a", "text-link", t("home.view_event"));
+    link.href = event.href;
+    link.setAttribute("aria-label", format("home.view_event_named", { name: event.title }));
+    link.append(createIcon("arrow"));
+    content.append(link);
+    card.append(media, content);
+    return card;
+  }
+
   function renderInspiration(lang) {
     const mount = global.document.querySelector("#trip-inspiration");
     if (!mount) return;
@@ -366,8 +374,10 @@
     const mounts = Object.fromEntries(PRIMARY_STATES.map((state) => [state, [...global.document.querySelectorAll(`[data-home-state="${state}"]`)]]));
     const placesMount = global.document.querySelector("#featured-places");
     const routesMount = global.document.querySelector("#recommended-routes");
+    const eventsMount = global.document.querySelector("#upcoming-events");
     const placesEmpty = global.document.querySelector("[data-home-places-empty]");
     const routesEmpty = global.document.querySelector("[data-home-routes-empty]");
+    const eventsEmpty = global.document.querySelector("[data-home-events-empty]");
     const retryButtons = [...global.document.querySelectorAll("[data-home-retry]")];
 
     function render(snapshot) {
@@ -376,11 +386,14 @@
       if (snapshot.state === "ready") {
         placesMount.replaceChildren(...snapshot.places.map(renderPlaceCard));
         routesMount.replaceChildren(...snapshot.routes.map(renderRouteCard));
+        eventsMount?.replaceChildren(...snapshot.events.map(renderEventCard));
         placesEmpty.hidden = snapshot.places.length > 0;
         routesEmpty.hidden = snapshot.routes.length > 0;
+        if (eventsEmpty) eventsEmpty.hidden = snapshot.events.length > 0;
       } else if (snapshot.state === "empty" || snapshot.state === "error") {
         placesMount.replaceChildren();
         routesMount.replaceChildren();
+        eventsMount?.replaceChildren();
       }
     }
 
@@ -406,9 +419,9 @@
   }
 
   global.TakhunHome = Object.freeze({
-    HOME_DATA, MOCK_HOME_RESPONSE, normalizeLang, normalizeHomeResponse, resolveHomeState,
+    HOME_DATA, normalizeLang, normalizeHomeResponse, resolveHomeState,
     setPrimaryState, safeImageUrl, placeDetailUrl, routeDetailUrl, categoryLabel,
-    durationLabel, styleLabel, mapPlace, mapRoute, localizedInspiration, mockHomeResponse, createHomeController
+    durationLabel, styleLabel, mapPlace, mapRoute, mapEvent, localizedInspiration, mockHomeResponse, createHomeController, renderEventCard
   });
   if (global.document?.readyState === "loading") global.document.addEventListener("DOMContentLoaded", initializePage, { once: true });
   else if (global.document) initializePage();

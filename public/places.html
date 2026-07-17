@@ -16,8 +16,8 @@
     <header class="places-header" aria-labelledby="page-title">
       <p class="eyebrow" data-i18n="places.eyebrow">สำรวจบ้านตาขุน</p>
       <h1 id="page-title" data-i18n="places.header_title">ค้นหาสถานที่ในแบบของคุณ</h1>
-      <p class="places-header__description" data-i18n="places.header_description">ค้นหาข้อมูลตัวอย่างตามอำเภอ หมวดหมู่ และกลุ่มเส้นทาง เพื่อทดลองวางแผนการเดินทาง</p>
-      <p class="places-demo-notice" data-i18n="places.demo_notice">ข้อมูลตัวอย่าง — รายละเอียดทั้งหมดเป็น Demo data ที่ยังไม่ได้รับการยืนยัน</p>
+      <p class="places-header__description" data-i18n="places.header_description">ค้นหาสถานที่ตามอำเภอ หมวดหมู่ และกลุ่มเส้นทางเพื่อวางแผนการเดินทาง</p>
+      <p class="places-demo-notice" data-i18n="places.demo_notice">โปรดตรวจสอบข้อมูลก่อนเดินทาง</p>
     </header>
     <section class="places-controls" aria-label="ค้นหาและกรองสถานที่" data-i18n-attr="aria-label:places.controls_label">
       <div class="places-search">
@@ -34,8 +34,8 @@
       </div>
     </section>
     <section class="places-results" aria-labelledby="places-results-title">
-      <div class="places-results__header"><h2 id="places-results-title" data-i18n="places.results_title">รายการสถานที่ตัวอย่าง</h2><p data-results-summary aria-live="polite">กำลังโหลดข้อมูลตัวอย่าง…</p></div>
-      <div class="places-state" data-places-state role="status" aria-live="polite"><p data-i18n="places.no_script">ไม่สามารถโหลดรายการได้ โปรดเปิดใช้งาน JavaScript เพื่อดูข้อมูลตัวอย่าง</p></div>
+      <div class="places-results__header"><h2 id="places-results-title" data-i18n="places.results_title">รายการสถานที่</h2><p data-results-summary aria-live="polite">กำลังโหลดข้อมูล…</p></div>
+      <div class="places-state" data-places-state role="status" aria-live="polite"><p data-i18n="places.no_script">ไม่สามารถโหลดรายการได้ โปรดเปิดใช้งาน JavaScript</p></div>
       <div class="place-grid places-grid" data-places-grid></div>
       <div class="places-load-more"><button class="button button--secondary" type="button" data-load-more hidden data-i18n="places.load_more">แสดงเพิ่มเติม</button></div>
     </section>
@@ -43,6 +43,7 @@
   <script src="js/config.js"></script>
   <script src="js/i18n.js"></script>
   <script src="js/api.js"></script>
+  <script src="js/content-data.js"></script>
   <script src="js/place-data.js"></script>
   <script src="js/app.js"></script>
   <script src="js/places.js"></script>

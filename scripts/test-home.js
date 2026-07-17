@@ -8,10 +8,12 @@ const vm = require("node:vm");
 const homeFile = path.join(__dirname, "../public/js/home.js");
 assert.ok(fs.existsSync(homeFile), "public/js/home.js must exist");
 const source = fs.readFileSync(homeFile, "utf8");
+const contentSource = fs.readFileSync(path.join(__dirname, "../public/js/content-data.js"), "utf8");
 
 function loadHomeModule() {
-  const context = { URL, console, setTimeout, clearTimeout, window: null };
+  const context = { URL, console, setTimeout, clearTimeout, Date, Intl, window: null };
   context.window = context;
+  vm.runInNewContext(contentSource, context, { filename: "content-data.js" });
   vm.runInNewContext(source, context, { filename: "home.js" });
   return context.TakhunHome;
 }
@@ -44,7 +46,7 @@ async function run() {
   for (const name of [
     "normalizeLang", "normalizeHomeResponse", "resolveHomeState", "setPrimaryState",
     "safeImageUrl", "placeDetailUrl", "routeDetailUrl", "categoryLabel", "durationLabel",
-    "styleLabel", "mapPlace", "mapRoute", "localizedInspiration", "mockHomeResponse", "createHomeController"
+    "styleLabel", "mapPlace", "mapRoute", "mapEvent", "localizedInspiration", "mockHomeResponse", "createHomeController"
   ]) assert.equal(typeof home?.[name], "function", `missing helper ${name}`);
 
   {
@@ -209,12 +211,11 @@ async function run() {
     assert.equal(en.length, 5);
     assert.notEqual(th[0].name, en[0].name);
     assert.deepEqual(th.map(({ href, tone, icon }) => ({ href, tone, icon })), en.map(({ href, tone, icon }) => ({ href, tone, icon })));
-    assert.equal(home.MOCK_HOME_RESPONSE.ok, true);
-    assert.deepEqual(Object.keys(plain(home.MOCK_HOME_RESPONSE.data)).sort(), ["featured_places", "featured_products", "featured_routes", "gallery_preview", "upcoming_events"]);
     const mockTh = home.mockHomeResponse("th");
     const mockEn = home.mockHomeResponse("en");
     assert.notEqual(mockTh.data.featured_places[0].name, mockEn.data.featured_places[0].name);
     assert.notEqual(mockTh.data.featured_routes[0].name, mockEn.data.featured_routes[0].name);
+    assert.equal(mockTh.data.upcoming_events[0].event_id, "EVENT-HEART-OF-HILLS-2026");
     assert.equal(home.normalizeHomeResponse(mockEn).ok, true);
   }
 

@@ -141,6 +141,19 @@ test("initializes only once", () => {
   assert.equal(environment.listeners.size, 1);
 });
 
+test("provides exact Thai and English labels for the five canonical Gallery categories", () => {
+  const environment = createEnvironment();
+  const expected = {
+    th: ["เขื่อนและทะเลสาบ", "ขุนเขาและธรรมชาติ", "ชุมชนและวิถีชีวิต", "อาหารและผลไม้", "กิจกรรมและงานประเพณี"],
+    en: ["Dam and Lake", "Mountains and Nature", "Community and Local Life", "Food and Fruit", "Activities and Traditions"]
+  };
+  const keys = ["dam_lake", "mountain_nature", "community_life", "food_fruit", "activity_tradition"];
+  for (const lang of ["th", "en"]) {
+    environment.api.setCurrentLang(lang);
+    assert.deepEqual(keys.map((key) => environment.api.t(`gallery.categories.${key}`)), expected[lang]);
+  }
+});
+
 process.on("exit", () => {
   if (process.exitCode) return;
   process.stdout.write("i18n behavior verification passed.\n");

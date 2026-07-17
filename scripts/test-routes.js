@@ -6,11 +6,13 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const source = fs.readFileSync(path.join(__dirname, "../public/js/routes.js"), "utf8");
+const canonicalSource = fs.readFileSync(path.join(__dirname, "../public/js/content-data.js"), "utf8");
 const i18nSource = fs.readFileSync(path.join(__dirname, "../public/js/i18n.js"), "utf8");
 
 function loadRoutes() {
   const context = { URLSearchParams, window: null };
   context.window = context;
+  vm.runInNewContext(canonicalSource, context, { filename: "content-data.js" });
   vm.runInNewContext(source, context, { filename: "routes.js" });
   return context.TakhunRoutes;
 }
@@ -92,9 +94,9 @@ assert.equal(api.placeDetailUrl("PLACE A/B"), "place-detail.html?id=PLACE%20A%2F
 {
   const list = api.mockGetRoutes();
   assert.ok(list.items.some((route) => route.is_featured === true));
-  const detail = api.mockGetRouteDetail("MOCK-ROUTE-001");
-  assert.notDeepEqual(plain(detail.places.map((stop) => stop.stop_order)), plain(api.sortRouteStops(detail.places).map((stop) => stop.stop_order)));
-  assert.deepEqual(plain(api.sortRouteStops(detail.places).slice(0, 2).map((stop) => stop.stop_order)), ["2", "10"]);
+  assert.equal(list.items.length, 4);
+  const detail = api.mockGetRouteDetail("ROUTE-BTK-CORE");
+  assert.deepEqual(plain(api.sortRouteStops(detail.places).map((stop) => stop.stop_order)), [1, 2, 3, 4]);
   assert.equal(api.mockGetRouteDetail("MOCK-ROUTE-404"), null);
 }
 
