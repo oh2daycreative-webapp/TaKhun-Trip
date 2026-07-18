@@ -1,4 +1,694 @@
 {
   "version": 1,
-  "items": []
+  "items": [
+    {
+      "media_id": "event-heart-of-hills-2026-cover",
+      "entity_type": "event",
+      "entity_id": "EVENT-HEART-OF-HILLS-2026",
+      "role": "cover",
+      "ratio": "3:2",
+      "required": true,
+      "alt_th": "ภาพกิจกรรม Heart of the Hills ที่เจ้าของโครงการยืนยัน",
+      "alt_en": "Project-owner photograph of the Heart of the Hills event",
+      "fallback": "assets/media/placeholders/cover.svg",
+      "outputs": [
+        {
+          "width": 480,
+          "height": 320,
+          "path": "assets/media/generated/events/event-heart-of-hills-2026-cover-480.webp",
+          "bytes": 52904,
+          "sha256": "6657713a97161ae556574cba658f0d47a4738451f68b2c6b6df6866c22ef4371"
+        },
+        {
+          "width": 800,
+          "height": 533,
+          "path": "assets/media/generated/events/event-heart-of-hills-2026-cover-800.webp",
+          "bytes": 121310,
+          "sha256": "89534d6ecc8342ff731f0213d861624df044a153e0384a8202667b83fbda2758"
+        },
+        {
+          "width": 1200,
+          "height": 800,
+          "path": "assets/media/generated/events/event-heart-of-hills-2026-cover-1200.webp",
+          "bytes": 219352,
+          "sha256": "4acd8ca22c4b1181fd9b53efb0f264a9dae4e651cd8e9edb4538f1bc3cb51d9f"
+        },
+        {
+          "width": 1600,
+          "height": 1067,
+          "path": "assets/media/generated/events/event-heart-of-hills-2026-cover-1600.webp",
+          "bytes": 314504,
+          "sha256": "c547e392245e3eb4446c1204d161f2b6ddd141abe54aefb6431c607042d121a2"
+        }
+      ]
+    },
+    {
+      "media_id": "gallery-dam-lake-001",
+      "entity_type": "gallery",
+      "entity_id": "GALLERY-DAM-LAKE-001",
+      "role": "gallery",
+      "ratio": "3:2",
+      "required": true,
+      "alt_th": "ทิวทัศน์เขื่อนหรือทะเลสาบจากภาพที่เจ้าของโครงการถ่าย",
+      "alt_en": "Dam or lake landscape photographed by the project owner",
+      "fallback": "assets/media/placeholders/gallery.svg",
+      "outputs": [
+        {
+          "width": 640,
+          "height": 427,
+          "path": "assets/media/generated/gallery/gallery-dam-lake-001-640.webp",
+          "bytes": 37800,
+          "sha256": "efae79bc9159c831913237c89c273f9adf852ed1426b0875029cf34cd29e8756"
+        },
+        {
+          "width": 1200,
+          "height": 800,
+          "path": "assets/media/generated/gallery/gallery-dam-lake-001-1200.webp",
+          "bytes": 99822,
+          "sha256": "a61547cd7b54787e7964b86af36f9498e4629dc4492453a9eb378d3aef69c73f"
+        },
+        {
+          "width": 1800,
+          "height": 1200,
+          "path": "assets/media/generated/gallery/gallery-dam-lake-001-1800.webp",
+          "bytes": 191228,
+          "sha256": "5102169d5150ecefca831ffabe3d68f16c42bd369df82e7ac5c2c9e5d9429d33"
+        }
+      ]
+    },
+    {
+      "media_id": "home-hero-heart-mountain",
+      "entity_type": "home",
+      "entity_id": "HOME",
+      "role": "hero",
+      "ratio": "16:9",
+      "required": true,
+      "alt_th": "ภูเขารูปหัวใจและภูมิทัศน์บ้านเขาเทพพิทักษ์",
+      "alt_en": "Heart-shaped mountain and the Khao Thep Phithak landscape",
+      "fallback": "assets/media/placeholders/hero.svg",
+      "outputs": [
+        {
+          "width": 640,
+          "height": 360,
+          "path": "assets/media/generated/home/home-hero-heart-mountain-640.webp",
+          "bytes": 65874,
+          "sha256": "6811022e7ab207656ad808c68fb44facfb3b0867f6a10faa37db8ba9ae91049c"
+        },
+        {
+          "width": 960,
+          "height": 540,
+          "path": "assets/media/generated/home/home-hero-heart-mountain-960.webp",
+          "bytes": 158452,
+          "sha256": "b3b9a10ebec82d3882a7eed0f1052f4a1fde7c91966f0de2344f4fe714240516"
+        },
+        {
+          "width": 1440,
+          "height": 810,
+          "path": "assets/media/generated/home/home-hero-heart-mountain-1440.webp",
+          "bytes": 366908,
+          "sha256": "c017708d40f041f5c2397a3e473d16a740c0c709000e35510549c9ad8dbfed51"
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "path": "assets/media/generated/home/home-hero-heart-mountain-1920.webp",
+          "bytes": 633034,
+          "sha256": "c786344ef37a57c448a3694ede63f8a2e035398c47648de2fd323d79a4110a83"
+        }
+      ]
+    },
+    {
+      "media_id": "home-hero-ratchaprapha",
+      "entity_type": "home",
+      "entity_id": "HOME",
+      "role": "hero",
+      "ratio": "16:9",
+      "required": true,
+      "alt_th": "ทิวทัศน์เขื่อนรัชชประภา ทะเลสาบ และแนวภูเขา",
+      "alt_en": "Ratchaprapha Dam lake and mountain landscape",
+      "fallback": "assets/media/placeholders/hero.svg",
+      "outputs": [
+        {
+          "width": 640,
+          "height": 360,
+          "path": "assets/media/generated/home/home-hero-ratchaprapha-640.webp",
+          "bytes": 12810,
+          "sha256": "52052cf5a3d2d25c37eba1343b7fcc38971af87f40953621fe1db0a58dd9fba0"
+        },
+        {
+          "width": 960,
+          "height": 540,
+          "path": "assets/media/generated/home/home-hero-ratchaprapha-960.webp",
+          "bytes": 25890,
+          "sha256": "dade7fcd314f2c26c03eb6d6da18bd729443532249d9a62edfb4989d468cc805"
+        },
+        {
+          "width": 1440,
+          "height": 810,
+          "path": "assets/media/generated/home/home-hero-ratchaprapha-1440.webp",
+          "bytes": 49182,
+          "sha256": "ff35a7f090e8a3a628f8bb75fcea4fd94d5e031ea3c48a15cb4c2e41c951ec57"
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "path": "assets/media/generated/home/home-hero-ratchaprapha-1920.webp",
+          "bytes": 72604,
+          "sha256": "20762b710a853a18a403979d952877d7a78121ddd22f8caa6613cfea6e19bd28"
+        }
+      ]
+    },
+    {
+      "media_id": "place-btk-001-cover",
+      "entity_type": "place",
+      "entity_id": "BTK-001",
+      "role": "cover",
+      "ratio": "3:2",
+      "required": true,
+      "alt_th": "วิสาหกิจชุมชนท่องเที่ยวเขื่อนรัชชประภา",
+      "alt_en": "Ratchaprapha Dam Community Tourism Enterprise",
+      "fallback": "assets/media/placeholders/cover.svg",
+      "outputs": [
+        {
+          "width": 480,
+          "height": 320,
+          "path": "assets/media/generated/places/place-btk-001-cover-480.webp",
+          "bytes": 38974,
+          "sha256": "d6238d9c6600eafa6571857c037df16bf023d2cdb9245a66a55f59ec35f42912"
+        },
+        {
+          "width": 800,
+          "height": 533,
+          "path": "assets/media/generated/places/place-btk-001-cover-800.webp",
+          "bytes": 104164,
+          "sha256": "712abe8df94745bc19068287161213312a2e0bb564cbc9ebb0391079b8c6aca8"
+        },
+        {
+          "width": 1200,
+          "height": 800,
+          "path": "assets/media/generated/places/place-btk-001-cover-1200.webp",
+          "bytes": 229008,
+          "sha256": "dbf9a1102f12c05e7d8abc968618b21bb19cbf131137083998eb899c8acc8b48"
+        },
+        {
+          "width": 1600,
+          "height": 1067,
+          "path": "assets/media/generated/places/place-btk-001-cover-1600.webp",
+          "bytes": 403376,
+          "sha256": "c29107f0bb2baaa7094a94b3709b97348eb25c754b5059034fcd87dc5fb3dbb3"
+        }
+      ]
+    },
+    {
+      "media_id": "place-btk-002-cover",
+      "entity_type": "place",
+      "entity_id": "BTK-002",
+      "role": "cover",
+      "ratio": "3:2",
+      "required": true,
+      "alt_th": "วิสาหกิจชุมชนท่องเที่ยวบ้านเชี่ยวหลาน",
+      "alt_en": "Ban Chiao Lan Community Tourism Enterprise",
+      "fallback": "assets/media/placeholders/cover.svg",
+      "outputs": [
+        {
+          "width": 480,
+          "height": 320,
+          "path": "assets/media/generated/places/place-btk-002-cover-480.webp",
+          "bytes": 30750,
+          "sha256": "a4ffc1d248e13e5957c3735c722200bfd26ddf3b1a25e4187b6c3ca17b564fc6"
+        },
+        {
+          "width": 800,
+          "height": 533,
+          "path": "assets/media/generated/places/place-btk-002-cover-800.webp",
+          "bytes": 75114,
+          "sha256": "c26a811596080f5cc54806db0889d3a5ae249be49d5776b8ba0c51b3948656d7"
+        },
+        {
+          "width": 1200,
+          "height": 800,
+          "path": "assets/media/generated/places/place-btk-002-cover-1200.webp",
+          "bytes": 146068,
+          "sha256": "86ab484045f07cd16d3a135a5c988893f8002989e9427f28e2ec08cc62ac0bef"
+        },
+        {
+          "width": 1600,
+          "height": 1067,
+          "path": "assets/media/generated/places/place-btk-002-cover-1600.webp",
+          "bytes": 229114,
+          "sha256": "e5f8f372e4fcf5c53296e7151628ea4b57481eff193dcf59555ae996b6895ca2"
+        }
+      ]
+    },
+    {
+      "media_id": "place-btk-003-cover",
+      "entity_type": "place",
+      "entity_id": "BTK-003",
+      "role": "cover",
+      "ratio": "3:2",
+      "required": true,
+      "alt_th": "วิสาหกิจชุมชนพรุไทย ฮันนี่บี",
+      "alt_en": "Phru Thai Honey Bee Community Enterprise",
+      "fallback": "assets/media/placeholders/cover.svg",
+      "outputs": [
+        {
+          "width": 480,
+          "height": 320,
+          "path": "assets/media/generated/places/place-btk-003-cover-480.webp",
+          "bytes": 16934,
+          "sha256": "eeda986d9ecf14581f8ed5971cc6c834697391ca7e57abaaff14611ad4b02881"
+        },
+        {
+          "width": 800,
+          "height": 533,
+          "path": "assets/media/generated/places/place-btk-003-cover-800.webp",
+          "bytes": 36126,
+          "sha256": "7100f32a92ee8654efe225bf9bc75366a5193f71e919687c9664de2fb787d164"
+        },
+        {
+          "width": 1200,
+          "height": 800,
+          "path": "assets/media/generated/places/place-btk-003-cover-1200.webp",
+          "bytes": 65810,
+          "sha256": "a488428f1aebcc944317d3d081fb7daa0d7294903ceeec9da68fa0557e32b160"
+        },
+        {
+          "width": 1600,
+          "height": 1067,
+          "path": "assets/media/generated/places/place-btk-003-cover-1600.webp",
+          "bytes": 99194,
+          "sha256": "d208bbecb8a63f1fc2ce64866f726da0933c9369803c8aec70dc7ab4f8d4fb2b"
+        }
+      ]
+    },
+    {
+      "media_id": "place-btk-004-cover",
+      "entity_type": "place",
+      "entity_id": "BTK-004",
+      "role": "cover",
+      "ratio": "3:2",
+      "required": true,
+      "alt_th": "สะพานแขวนและภูเขารูปหัวใจที่บ้านเขาเทพพิทักษ์",
+      "alt_en": "Suspension bridge and heart-shaped mountain at Khao Thep Phithak",
+      "fallback": "assets/media/placeholders/cover.svg",
+      "outputs": [
+        {
+          "width": 480,
+          "height": 320,
+          "path": "assets/media/generated/places/place-btk-004-cover-480.webp",
+          "bytes": 42908,
+          "sha256": "a82e8b718639904fd381d36a10ebe1718a4bd8ee426f270cb30654ad948eefbf"
+        },
+        {
+          "width": 800,
+          "height": 533,
+          "path": "assets/media/generated/places/place-btk-004-cover-800.webp",
+          "bytes": 92468,
+          "sha256": "e6ca753aa885c1f7a1364469810e91f995eb438a7116f4a447114ef625b9ef95"
+        },
+        {
+          "width": 1200,
+          "height": 800,
+          "path": "assets/media/generated/places/place-btk-004-cover-1200.webp",
+          "bytes": 163246,
+          "sha256": "c51caf67a931c7045477837c72161e05551739aeed324d23742a20bd8398c659"
+        },
+        {
+          "width": 1600,
+          "height": 1067,
+          "path": "assets/media/generated/places/place-btk-004-cover-1600.webp",
+          "bytes": 243258,
+          "sha256": "fa211d983c3c00bfb68b877c4d05b2756c29a102baff67151dba2dcb98b65850"
+        }
+      ]
+    },
+    {
+      "media_id": "place-btk-005-cover",
+      "entity_type": "place",
+      "entity_id": "BTK-005",
+      "role": "cover",
+      "ratio": "3:2",
+      "required": true,
+      "alt_th": "วัดเขาพัง อำเภอบ้านตาขุน",
+      "alt_en": "Wat Khao Phang in Ban Ta Khun",
+      "fallback": "assets/media/placeholders/cover.svg",
+      "outputs": [
+        {
+          "width": 480,
+          "height": 320,
+          "path": "assets/media/generated/places/place-btk-005-cover-480.webp",
+          "bytes": 45104,
+          "sha256": "3fd547ac570e45388a88293405de4e8970f02e8aa287992486f82d63a9259ff7"
+        },
+        {
+          "width": 800,
+          "height": 533,
+          "path": "assets/media/generated/places/place-btk-005-cover-800.webp",
+          "bytes": 121542,
+          "sha256": "08f3ed81f8ff602da80488932235e17df0f79ea22ab6cad485d66a714165dd66"
+        },
+        {
+          "width": 1200,
+          "height": 800,
+          "path": "assets/media/generated/places/place-btk-005-cover-1200.webp",
+          "bytes": 271430,
+          "sha256": "8198ddfc3b78d1e598102e226b1d7e9c15de671ec9ea53060ce897c72b310ae1"
+        },
+        {
+          "width": 1600,
+          "height": 1067,
+          "path": "assets/media/generated/places/place-btk-005-cover-1600.webp",
+          "bytes": 477066,
+          "sha256": "e9dc52967db70662b417185ca423e198c3eab751d38b424e5a1d20d59f5269b6"
+        }
+      ]
+    },
+    {
+      "media_id": "place-krn-002-cover",
+      "entity_type": "place",
+      "entity_id": "KRN-002",
+      "role": "cover",
+      "ratio": "3:2",
+      "required": true,
+      "alt_th": "ป่าต้นน้ำบ้านน้ำราด อำเภอคีรีรัฐนิคม",
+      "alt_en": "Ban Nam Rat Headwaters Forest in Khiri Rat Nikhom",
+      "fallback": "assets/media/placeholders/cover.svg",
+      "outputs": [
+        {
+          "width": 480,
+          "height": 320,
+          "path": "assets/media/generated/places/place-krn-002-cover-480.webp",
+          "bytes": 34754,
+          "sha256": "3144847b765d5169787828948f65d78a5796129289e1deacebc432d9a1cc3e08"
+        },
+        {
+          "width": 800,
+          "height": 533,
+          "path": "assets/media/generated/places/place-krn-002-cover-800.webp",
+          "bytes": 69604,
+          "sha256": "a00beeb119236dfcb296b7efa05f0fa32c915b73960de3715b13a51bfb020686"
+        },
+        {
+          "width": 1200,
+          "height": 800,
+          "path": "assets/media/generated/places/place-krn-002-cover-1200.webp",
+          "bytes": 120394,
+          "sha256": "68648b5c3e44007b5181ac06a8758f2714c7de3701269bf8257c7a047f20fdad"
+        },
+        {
+          "width": 1600,
+          "height": 1067,
+          "path": "assets/media/generated/places/place-krn-002-cover-1600.webp",
+          "bytes": 171814,
+          "sha256": "188b1ff24977f82852a53be5026f68c51b140ff13c1cfba969e54afa2b1e287a"
+        }
+      ]
+    },
+    {
+      "media_id": "place-pnm-001-cover",
+      "entity_type": "place",
+      "entity_id": "PNM-001",
+      "role": "cover",
+      "ratio": "3:2",
+      "required": true,
+      "alt_th": "ธรรมชาติในอุทยานแห่งชาติคลองพนม",
+      "alt_en": "Nature in Khlong Phanom National Park",
+      "fallback": "assets/media/placeholders/cover.svg",
+      "outputs": [
+        {
+          "width": 480,
+          "height": 320,
+          "path": "assets/media/generated/places/place-pnm-001-cover-480.webp",
+          "bytes": 76296,
+          "sha256": "7498bf69171c22286acf939603179d26db580ddf7227e41eba3e8b9e87dfdab0"
+        },
+        {
+          "width": 800,
+          "height": 533,
+          "path": "assets/media/generated/places/place-pnm-001-cover-800.webp",
+          "bytes": 210852,
+          "sha256": "cc34a3a6d643308bb4ce967c1cd5fb6105e68cc52d86c7b632292cce2cda9b0c"
+        },
+        {
+          "width": 1200,
+          "height": 800,
+          "path": "assets/media/generated/places/place-pnm-001-cover-1200.webp",
+          "bytes": 450168,
+          "sha256": "cabe30a685fd99167b09992ea15c01ee0592b12eebaa6b4bb220b2a11e83139d"
+        },
+        {
+          "width": 1600,
+          "height": 1067,
+          "path": "assets/media/generated/places/place-pnm-001-cover-1600.webp",
+          "bytes": 761770,
+          "sha256": "f9ce8bcbf9765bf9bf2b7d71a0b7ebe7e718b5a2be395b0c50851e06731f92bb"
+        }
+      ]
+    },
+    {
+      "media_id": "product-btk-durian-cover",
+      "entity_type": "product",
+      "entity_id": "PROD-BTK-DURIAN",
+      "role": "product",
+      "ratio": "1:1",
+      "required": true,
+      "alt_th": "ทุเรียนคลองแสงจากภาพที่เจ้าของโครงการถ่าย",
+      "alt_en": "Khlong Saeng durian photographed by the project owner",
+      "fallback": "assets/media/placeholders/product.svg",
+      "outputs": [
+        {
+          "width": 400,
+          "height": 400,
+          "path": "assets/media/generated/products/product-btk-durian-cover-400.webp",
+          "bytes": 17752,
+          "sha256": "db27e37027ac7d3f16ba1001563f20d16f2e8ec60f4eea23ef54e7a267a84e9f"
+        },
+        {
+          "width": 800,
+          "height": 800,
+          "path": "assets/media/generated/products/product-btk-durian-cover-800.webp",
+          "bytes": 44114,
+          "sha256": "b83b5db3d2af97b0d6696270f9f2e1df4e46ea934aef82e45e68c449d0edc546"
+        },
+        {
+          "width": 1200,
+          "height": 1200,
+          "path": "assets/media/generated/products/product-btk-durian-cover-1200.webp",
+          "bytes": 93986,
+          "sha256": "4d305b3e7c9e55b12b6cabc8f28cf531d7af53104a1c098733cc94d10943cdf9"
+        }
+      ]
+    },
+    {
+      "media_id": "product-btk-honey-cover",
+      "entity_type": "product",
+      "entity_id": "PROD-BTK-HONEY",
+      "role": "product",
+      "ratio": "1:1",
+      "required": true,
+      "alt_th": "ผลิตภัณฑ์น้ำผึ้งชุมชนจากพรุไทย ฮันนี่บี",
+      "alt_en": "Community honey products from Phru Thai Honey Bee",
+      "fallback": "assets/media/placeholders/product.svg",
+      "outputs": [
+        {
+          "width": 400,
+          "height": 400,
+          "path": "assets/media/generated/products/product-btk-honey-cover-400.webp",
+          "bytes": 51434,
+          "sha256": "bc178d8f40f99175d02089402d5f140580e7960d8da77986d429bda36a9aaf11"
+        },
+        {
+          "width": 800,
+          "height": 800,
+          "path": "assets/media/generated/products/product-btk-honey-cover-800.webp",
+          "bytes": 159934,
+          "sha256": "72b80c7af3cfeeab8600e9195717811685360eb44ed536cdbc002ea7e4018b93"
+        },
+        {
+          "width": 1200,
+          "height": 1200,
+          "path": "assets/media/generated/products/product-btk-honey-cover-1200.webp",
+          "bytes": 301656,
+          "sha256": "3b4cdad4a018b124a2685618557dc37d689f4be4998f7ac5391731d9fce7c796"
+        }
+      ]
+    },
+    {
+      "media_id": "product-btk-textile-cover",
+      "entity_type": "product",
+      "entity_id": "PROD-BTK-TEXTILE",
+      "role": "product",
+      "ratio": "1:1",
+      "required": true,
+      "alt_th": "ผ้าทอมือบ้านเชี่ยวหลาน",
+      "alt_en": "Ban Chiao Lan handwoven textiles",
+      "fallback": "assets/media/placeholders/product.svg",
+      "outputs": [
+        {
+          "width": 400,
+          "height": 400,
+          "path": "assets/media/generated/products/product-btk-textile-cover-400.webp",
+          "bytes": 23356,
+          "sha256": "292559d6a648a936b8f29ea2781a9316a1f5d413e4884cc31170bc499678da0b"
+        },
+        {
+          "width": 800,
+          "height": 800,
+          "path": "assets/media/generated/products/product-btk-textile-cover-800.webp",
+          "bytes": 63912,
+          "sha256": "163c2e8127f258df3205bce4cbd5ae4e62657fbe612bd5f5361ae58e8a57a775"
+        },
+        {
+          "width": 1200,
+          "height": 1200,
+          "path": "assets/media/generated/products/product-btk-textile-cover-1200.webp",
+          "bytes": 120004,
+          "sha256": "640b13c96f0894a2bcd3645f8d3adaf8dd934fa9d660cf72be5b26bfa5de6212"
+        }
+      ]
+    },
+    {
+      "media_id": "route-btk-core-cover",
+      "entity_type": "route",
+      "entity_id": "ROUTE-BTK-CORE",
+      "role": "card",
+      "ratio": "16:9",
+      "required": true,
+      "alt_th": "ภาพแทนเส้นทางสี่ชุมชนหลักบ้านตาขุน",
+      "alt_en": "Representative view of the four Ban Ta Khun community route",
+      "fallback": "assets/media/placeholders/cover.svg",
+      "outputs": [
+        {
+          "width": 480,
+          "height": 270,
+          "path": "assets/media/generated/routes/route-btk-core-cover-480.webp",
+          "bytes": 30782,
+          "sha256": "c521855df203884fc214ba895d9ea45e9e099940d5122f39f475e72a9ce17058"
+        },
+        {
+          "width": 800,
+          "height": 450,
+          "path": "assets/media/generated/routes/route-btk-core-cover-800.webp",
+          "bytes": 79422,
+          "sha256": "71085ddf14382977df206ba83716e3a9e0079f0587ac6b9025e03ef77f6caa2f"
+        },
+        {
+          "width": 1200,
+          "height": 675,
+          "path": "assets/media/generated/routes/route-btk-core-cover-1200.webp",
+          "bytes": 164598,
+          "sha256": "46f73a39dff77c637f2d5288225ff43d05d054e393746c11326d75ae5d1b8309"
+        }
+      ]
+    },
+    {
+      "media_id": "route-btk-heart-cover",
+      "entity_type": "route",
+      "entity_id": "ROUTE-BTK-HEART",
+      "role": "card",
+      "ratio": "16:9",
+      "required": true,
+      "alt_th": "ภูเขารูปหัวใจในเส้นทางบ้านเขาเทพพิทักษ์",
+      "alt_en": "Heart-shaped mountain on the Khao Thep Phithak route",
+      "fallback": "assets/media/placeholders/cover.svg",
+      "outputs": [
+        {
+          "width": 480,
+          "height": 270,
+          "path": "assets/media/generated/routes/route-btk-heart-cover-480.webp",
+          "bytes": 33034,
+          "sha256": "05348c028a153c303065a0a832fffd74c72c892bc7482fcc374077882b3cf3ac"
+        },
+        {
+          "width": 800,
+          "height": 450,
+          "path": "assets/media/generated/routes/route-btk-heart-cover-800.webp",
+          "bytes": 77330,
+          "sha256": "0ff928702c416979bb3c469be085836f8dbb8410ab0d5809bf6c8dee6a0f4650"
+        },
+        {
+          "width": 1200,
+          "height": 675,
+          "path": "assets/media/generated/routes/route-btk-heart-cover-1200.webp",
+          "bytes": 148696,
+          "sha256": "248c6d7d5595e31d1511daac8a819eda32613df39d5e04051129094254539b89"
+        }
+      ]
+    },
+    {
+      "media_id": "route-krn-nature-cover",
+      "entity_type": "route",
+      "entity_id": "ROUTE-KRN-NATURE",
+      "role": "card",
+      "ratio": "16:9",
+      "required": true,
+      "alt_th": "ธรรมชาติในเส้นทางคีรีรัฐนิคม",
+      "alt_en": "Nature along the Khiri Rat Nikhom route",
+      "fallback": "assets/media/placeholders/cover.svg",
+      "outputs": [
+        {
+          "width": 480,
+          "height": 270,
+          "path": "assets/media/generated/routes/route-krn-nature-cover-480.webp",
+          "bytes": 39544,
+          "sha256": "9e80ceaa7ec9fa51d5da3afcaaa8011dc57c34bfd1778f289751ca8cb6d8850d"
+        },
+        {
+          "width": 800,
+          "height": 450,
+          "path": "assets/media/generated/routes/route-krn-nature-cover-800.webp",
+          "bytes": 102356,
+          "sha256": "750b085a1646b72ffc3a0cd7357cce0ffc186f99e94c0bf207815bbf2c4bbaf8"
+        },
+        {
+          "width": 1200,
+          "height": 675,
+          "path": "assets/media/generated/routes/route-krn-nature-cover-1200.webp",
+          "bytes": 206264,
+          "sha256": "97a05bc65c076830bc39ed5cdab80cb82c3605962def8be5d746c79f724c90e7"
+        }
+      ]
+    },
+    {
+      "media_id": "shared-about-project",
+      "entity_type": "shared",
+      "entity_id": "ABOUT",
+      "role": "hero",
+      "ratio": "16:9",
+      "required": true,
+      "alt_th": "ภูมิทัศน์เขื่อนและภูเขาที่ใช้ประกอบเรื่องราวโครงการ Takhun Trip",
+      "alt_en": "Dam and mountain landscape illustrating the Takhun Trip project",
+      "fallback": "assets/media/placeholders/hero.svg",
+      "outputs": [
+        {
+          "width": 640,
+          "height": 360,
+          "path": "assets/media/generated/shared/shared-about-project-640.webp",
+          "bytes": 12002,
+          "sha256": "a78f5fd65a4e5dd3a96f6237aff15ac2d36de519b7651f4d7837b27ecf941bfd"
+        },
+        {
+          "width": 960,
+          "height": 540,
+          "path": "assets/media/generated/shared/shared-about-project-960.webp",
+          "bytes": 21420,
+          "sha256": "4b01305fd600aadbc1b57f04b7a98e75010a4f59f89f16dbdfc6379bf5b6e5ca"
+        },
+        {
+          "width": 1440,
+          "height": 810,
+          "path": "assets/media/generated/shared/shared-about-project-1440.webp",
+          "bytes": 46616,
+          "sha256": "e67ffe439c695d27fc68870b3fdcea683e69def440c02da873972718e7e67b91"
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "path": "assets/media/generated/shared/shared-about-project-1920.webp",
+          "bytes": 87524,
+          "sha256": "9cb7c3f27682a94e71f23c91b583dabc83bd5ac2c4c1b1b258f2061cd4e1b2e2"
+        }
+      ]
+    }
+  ]
 }
