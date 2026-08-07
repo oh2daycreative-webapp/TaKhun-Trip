@@ -8,6 +8,15 @@ const vm = require("node:vm");
 const sourcePath = path.join(__dirname, "../public/js/about.js");
 assert.equal(fs.existsSync(sourcePath), true, "missing public/js/about.js");
 const source = fs.readFileSync(sourcePath, "utf8");
+const html = fs.readFileSync(path.join(__dirname, "../public/about.html"), "utf8");
+
+assert.doesNotMatch(html, /data-about-hero-image/, "About must not keep a competing static hero image");
+assert.match(html, /class="about-page__hero-media" aria-hidden="true"/);
+assert.match(html, /data-about-hero-fallback/);
+assert.equal((source.match(/fetchPriority:\s*"high"/g) || []).length, 1);
+assert.match(source, /mediaIdFor\("shared", "shared-about-project"\)/);
+assert.match(source, /decorative:\s*true[\s\S]*?loading:\s*"eager"[\s\S]*?fetchPriority:\s*"high"[\s\S]*?sizes:\s*"100vw"/);
+assert.doesNotMatch(source, /renderImage\([\s\S]*?hero_image_url/);
 
 function loadAbout() {
   const context = {
