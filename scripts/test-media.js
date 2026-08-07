@@ -27,6 +27,16 @@ function test(name, fn) {
   );
 }
 
+function loadBrowserMedia({ document, fetch } = {}) {
+  const source = fs.readFileSync(path.join(root, "public/js/media.js"), "utf8");
+  const context = { window: {}, URL, console, setTimeout, clearTimeout };
+  context.window.window = context.window;
+  if (document) context.window.document = document;
+  if (fetch) context.window.fetch = fetch;
+  vm.runInNewContext(source, context, { filename: "media.js" });
+  return { api: context.window.TakhunMedia, source, window: context.window };
+}
+
 function sha256(file) {
   return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 }
@@ -208,17 +218,71 @@ async function run() {
     } finally { fs.rmSync(temp, { recursive: true, force: true }); }
   });
 
-  await test("runtime helper rejects external content and resolves local role placeholders", () => {
-    const source = fs.readFileSync(path.join(root, "public/js/media.js"), "utf8");
-    const context = { window: {}, URL, console, setTimeout, clearTimeout };
-    context.window.window = context.window;
-    vm.runInNewContext(source, context, { filename: "media.js" });
-    const api = context.window.TakhunMedia;
+  await test("runtime maps every entity type and validates only local media paths", () => {
+    const { api } = loadBrowserMedia();
     assert.equal(api.mediaIdFor("place", "BTK-001"), "place-btk-001-cover");
     assert.equal(api.mediaIdFor("route", "ROUTE-BTK-CORE"), "route-btk-core-cover");
-    assert.equal(api.placeholderPath("product"), "assets/media/placeholders/product.svg");
-    assert.equal(api.isLocalGeneratedPath("https://example.com/photo.webp"), false);
+    assert.equal(api.mediaIdFor("product", "PROD-BTK-HONEY"), "product-btk-honey-cover");
+    assert.equal(api.mediaIdFor("event", "EVENT-HEART-OF-HILLS-2026"), "event-heart-of-hills-2026-cover");
+    assert.equal(api.mediaIdFor("gallery", "GALLERY-DAM-LAKE-001"), "gallery-dam-lake-001");
+    assert.equal(api.mediaIdFor("shared", "SHARED-ABOUT-PROJECT"), "shared-about-project");
+    assert.equal(api.mediaIdFor("home", "hero-ratchaprapha"), "home-hero-ratchaprapha");
+    assert.equal(api.mediaIdFor("unknown", "BTK-001"), "");
     assert.equal(api.isLocalGeneratedPath("assets/media/generated/places/place-btk-001-cover-800.webp"), true);
+    for (const value of ["https://example.test/a.webp", "/assets/media/generated/a.webp", "assets/media/generated/../a.webp", "media-source/a.webp", "assets/media/generated/a.jpg"]) assert.equal(api.isLocalGeneratedPath(value), false);
+    assert.equal(api.isLocalPlaceholderPath("assets/media/placeholders/hero.svg"), true);
+    for (const value of ["https://example.test/hero.svg", "assets/media/placeholders/../hero.svg", "assets/media/placeholders/custom.svg"]) assert.equal(api.isLocalPlaceholderPath(value), false);
+  });
+
+  await test("runtime rejects malformed outputs and returns localized intrinsic picture metadata", async () => {
+    const manifest = { version: 1, items: [{
+      media_id: "fixture-hero", entity_type: "home", entity_id: "HOME", role: "hero",
+      ratio: "16:9", required: true, alt_th: "Ã Â¸Â Ã Â¸Â²Ã Â¸Å¾Ã Â¹â€žÃ Â¸â€”Ã Â¸Â¢", alt_en: "English image",
+      fallback: "assets/media/placeholders/hero.svg", source_file: "media-source/private.jpg",
+      outputs: [
+        { width: 1440, height: 810, path: "assets/media/generated/home/fixture-hero-1440.webp" },
+        { width: 640, height: 360, path: "assets/media/generated/home/fixture-hero-640.webp" },
+        { width: 0, height: 360, path: "assets/media/generated/home/bad-width.webp" },
+        { width: 960, height: 540, path: "https://example.test/remote.webp" },
+        { width: 800.5, height: 450, path: "assets/media/generated/home/bad-decimal.webp" }
+      ]
+    }, {
+      media_id: "fixture-empty", entity_type: "home", entity_id: "HOME", role: "hero",
+      ratio: "16:9", required: true, alt_th: "Thai fallback", alt_en: "",
+      fallback: "assets/media/placeholders/custom.svg",
+      outputs: [{ width: 640, height: -1, path: "assets/media/generated/home/bad-height.webp" }]
+    }, {
+      media_id: "fixture-alt-fallback", entity_type: "home", entity_id: "HOME", role: "hero",
+      ratio: "16:9", required: true, alt_th: "Thai fallback", alt_en: "",
+      fallback: "assets/media/placeholders/hero.svg",
+      outputs: [{ width: 640, height: 360, path: "assets/media/generated/home/fixture-alt-fallback-640.webp" }]
+    }] };
+    const { api } = loadBrowserMedia({ fetch: async () => ({ ok: true, json: async () => manifest }) });
+    await api.loadManifest();
+    assert.deepEqual(JSON.parse(JSON.stringify(api.pictureModel("fixture-hero", "en"))), {
+      alt: "English image",
+      src: "assets/media/generated/home/fixture-hero-1440.webp",
+      srcset: "assets/media/generated/home/fixture-hero-640.webp 640w, assets/media/generated/home/fixture-hero-1440.webp 1440w",
+      width: 1440,
+      height: 810,
+      fallback: "assets/media/placeholders/hero.svg",
+      outputs: [
+        { width: 640, height: 360, path: "assets/media/generated/home/fixture-hero-640.webp" },
+        { width: 1440, height: 810, path: "assets/media/generated/home/fixture-hero-1440.webp" }
+      ]
+    });
+    assert.equal(api.pictureModel("fixture-hero", "th").alt, "Ã Â¸Â Ã Â¸Â²Ã Â¸Å¾Ã Â¹â€žÃ Â¸â€”Ã Â¸Â¢");
+    assert.equal(api.pictureModel("fixture-empty", "en"), null);
+    assert.equal(api.pictureModel("fixture-alt-fallback", "en").alt, "Thai fallback");
+    const normalized = api.normalizeManifest(manifest);
+    assert.equal(normalized.items[1].fallback, "");
+    assert.equal(api.pictureModel("fixture-hero", "fr").alt, "Ã Â¸Â Ã Â¸Â²Ã Â¸Å¾Ã Â¹â€žÃ Â¸â€”Ã Â¸Â¢");
+    assert.equal(JSON.stringify(normalized).includes("source_file"), false);
+  });
+
+  await test("runtime helper rejects external content and resolves local role placeholders", () => {
+    const { api, source } = loadBrowserMedia();
+    assert.equal(api.placeholderPath("product"), "assets/media/placeholders/product.svg");
     assert.match(source, /replaceWith\(picture\)/, "responsive upgrade must preserve card overlays and controls");
     assert.match(source, /data-media-runtime/, "re-rendering must replace the prior runtime image instead of duplicating it");
   });

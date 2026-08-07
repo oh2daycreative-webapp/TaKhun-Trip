@@ -3,6 +3,7 @@
 (function createMediaRuntime(global) {
   const MANIFEST_PATH = "assets/media/manifest/media-manifest.json";
   const PLACEHOLDERS = Object.freeze({ hero: "hero", cover: "cover", card: "cover", place: "cover", route: "cover", event: "cover", product: "product", gallery: "gallery", shared: "hero" });
+  const PLACEHOLDER_PATTERN = /^assets\/media\/placeholders\/(?:hero|cover|product|gallery)\.svg$/;
   let manifest = Object.freeze({ version: 1, items: Object.freeze([]) });
   let loading = null;
 
@@ -22,9 +23,27 @@
 
   function placeholderPath(role) { return `assets/media/placeholders/${PLACEHOLDERS[role] || "cover"}.svg`; }
   function isLocalGeneratedPath(value) { return /^assets\/media\/generated\/[a-z0-9/_-]+\.webp$/i.test(String(value || "")); }
+  function isLocalPlaceholderPath(value) { return PLACEHOLDER_PATTERN.test(String(value || "")); }
+  function validDimension(value) { return Number.isInteger(value) && value > 0; }
 
   function normalizeManifest(value) {
-    const items = Array.isArray(value?.items) ? value.items.filter((item) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(item?.media_id || "")).map((item) => ({ ...item, outputs: (Array.isArray(item.outputs) ? item.outputs : []).filter((output) => isLocalGeneratedPath(output?.path)).sort((a, b) => Number(a.width) - Number(b.width)) })) : [];
+    const items = Array.isArray(value?.items) ? value.items.filter((item) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(item?.media_id || "")).map((item) => ({
+      media_id: item.media_id,
+      entity_type: String(item.entity_type || ""),
+      entity_id: String(item.entity_id || ""),
+      role: String(item.role || ""),
+      ratio: String(item.ratio || ""),
+      required: item.required === true,
+      alt_th: String(item.alt_th || ""),
+      alt_en: String(item.alt_en || ""),
+      fallback: isLocalPlaceholderPath(item.fallback) ? item.fallback : "",
+      outputs: (Array.isArray(item.outputs) ? item.outputs : []).filter((output) => isLocalGeneratedPath(output?.path) && validDimension(output.width) && validDimension(output.height)).map((output) => {
+        const normalized = { width: output.width, height: output.height, path: output.path };
+        if (validDimension(output.bytes)) normalized.bytes = output.bytes;
+        if (/^[a-f0-9]{64}$/i.test(String(output.sha256 || ""))) normalized.sha256 = output.sha256;
+        return normalized;
+      }).sort((a, b) => a.width - b.width)
+    })) : [];
     return Object.freeze({ version: 1, items: Object.freeze(items) });
   }
 
@@ -42,7 +61,16 @@
   function pictureModel(mediaId, lang = "th") {
     const item = findItem(mediaId);
     if (!item || !item.outputs.length) return null;
-    return { alt: String(item[lang === "en" ? "alt_en" : "alt_th"] || item.alt_th || ""), src: item.outputs.at(-1).path, srcset: item.outputs.map((output) => `${output.path} ${output.width}w`).join(", "), outputs: item.outputs.slice() };
+    const largest = item.outputs.at(-1);
+    return {
+      alt: String(lang === "en" ? item.alt_en || item.alt_th : item.alt_th || ""),
+      src: largest.path,
+      srcset: item.outputs.map((output) => `${output.path} ${output.width}w`).join(", "),
+      width: largest.width,
+      height: largest.height,
+      fallback: item.fallback,
+      outputs: item.outputs.map((output) => ({ ...output }))
+    };
   }
 
   function renderImage(mount, options = {}) {
@@ -93,5 +121,5 @@
     return current;
   }
 
-  global.TakhunMedia = Object.freeze({ mediaIdFor, placeholderPath, isLocalGeneratedPath, normalizeManifest, loadManifest, pictureModel, renderImage });
+  global.TakhunMedia = Object.freeze({ mediaIdFor, placeholderPath, isLocalGeneratedPath, isLocalPlaceholderPath, normalizeManifest, loadManifest, pictureModel, renderImage });
 })(window);
