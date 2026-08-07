@@ -37,6 +37,102 @@ function loadBrowserMedia({ document, fetch } = {}) {
   return { api: context.window.TakhunMedia, source, window: context.window };
 }
 
+class FakeElement {
+  constructor(tagName, ownerDocument) {
+    this.tagName = String(tagName).toUpperCase();
+    this.ownerDocument = ownerDocument;
+    this.children = [];
+    this.parentNode = null;
+    this.isConnected = true;
+    this.style = {};
+    this._attributes = new Map();
+    this._listeners = new Map();
+  }
+
+  append(...nodes) { nodes.forEach((node) => this._insert(node, this.children.length)); }
+  prepend(...nodes) { nodes.reverse().forEach((node) => this._insert(node, 0)); }
+  _insert(node, index) {
+    node.remove?.();
+    this.children.splice(index, 0, node);
+    node.parentNode = this;
+    node.isConnected = this.isConnected;
+  }
+  replaceWith(node) {
+    const parent = this.parentNode;
+    if (!parent) return;
+    const index = parent.children.indexOf(this);
+    if (index < 0) return;
+    node.remove?.();
+    parent.children.splice(index, 1, node);
+    this.parentNode = null;
+    node.parentNode = parent;
+    node.isConnected = parent.isConnected;
+  }
+  remove() {
+    const parent = this.parentNode;
+    if (!parent) return;
+    const index = parent.children.indexOf(this);
+    if (index >= 0) parent.children.splice(index, 1);
+    this.parentNode = null;
+  }
+  querySelector(selector) {
+    if (selector !== "[data-media-runtime]") return null;
+    for (const child of this.children) {
+      if (child._attributes.has("data-media-runtime")) return child;
+      const nested = child.querySelector(selector);
+      if (nested) return nested;
+    }
+    return null;
+  }
+  setAttribute(name, value) { this._attributes.set(name, String(value)); }
+  getAttribute(name) { return this._attributes.get(name) || null; }
+  removeAttribute(name) { this._attributes.delete(name); }
+  addEventListener(type, listener, options = {}) {
+    const listeners = this._listeners.get(type) || [];
+    listeners.push({ listener, once: options.once === true });
+    this._listeners.set(type, listeners);
+  }
+  dispatch(type) {
+    const listeners = this._listeners.get(type) || [];
+    this._listeners.set(type, listeners.filter((entry) => !entry.once));
+    listeners.forEach((entry) => entry.listener({ type, target: this }));
+  }
+}
+
+function createMediaDom() {
+  const document = { createElement(tag) { return new FakeElement(tag, document); } };
+  return { document, mount: document.createElement("div") };
+}
+
+function fixtureManifest() {
+  return { version: 1, items: [{
+    media_id: "fixture-hero", entity_type: "home", entity_id: "HOME", role: "hero",
+    ratio: "16:9", required: true, alt_th: "ภาพไทย", alt_en: "English image",
+    fallback: "assets/media/placeholders/hero.svg",
+    outputs: [
+      { width: 640, height: 360, path: "assets/media/generated/home/fixture-hero-640.webp" },
+      { width: 1440, height: 810, path: "assets/media/generated/home/fixture-hero-1440.webp" }
+    ]
+  }] };
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+async function flushPromises() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 function sha256(file) {
   return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 }
@@ -285,6 +381,87 @@ async function run() {
     assert.equal(api.placeholderPath("product"), "assets/media/placeholders/product.svg");
     assert.match(source, /replaceWith\(picture\)/, "responsive upgrade must preserve card overlays and controls");
     assert.match(source, /data-media-runtime/, "re-rendering must replace the prior runtime image instead of duplicating it");
+  });
+
+  await test("runtime renderer propagates responsive metadata and preserves sibling overlays", async () => {
+    const { document, mount } = createMediaDom();
+    const badge = document.createElement("span");
+    mount.append(badge);
+    const manifest = fixtureManifest();
+    const { api } = loadBrowserMedia({ document, fetch: async () => ({ ok: true, json: async () => manifest }) });
+    const placeholder = api.renderImage(mount, {
+      mediaId: "fixture-hero", role: "hero", className: "hero-image",
+      fallbackAlt: "Fallback image", loading: "eager", fetchPriority: "high",
+      sizes: "100vw", lang: "en"
+    });
+    assert.equal(placeholder.src, "assets/media/placeholders/hero.svg");
+    assert.equal(placeholder.alt, "Fallback image");
+    assert.equal(placeholder.loading, "eager");
+    assert.equal(placeholder.fetchPriority, "high");
+    await flushPromises();
+    const picture = mount.querySelector("[data-media-runtime]");
+    const image = picture.children[0];
+    assert.equal(image.alt, "English image");
+    assert.equal(image.srcset.includes("640w"), true);
+    assert.equal(image.sizes, "100vw");
+    assert.equal(image.width, 1440);
+    assert.equal(image.height, 810);
+    assert.equal(image.loading, "eager");
+    assert.equal(image.fetchPriority, "high");
+    assert.equal(mount.children.includes(badge), true);
+  });
+
+  await test("runtime renderer separates decorative alt from informative fallback alt", async () => {
+    const { document, mount } = createMediaDom();
+    const semanticFallback = document.createElement("span");
+    semanticFallback.setAttribute("role", "img");
+    semanticFallback.setAttribute("aria-label", "Generic image");
+    const { api } = loadBrowserMedia({ document, fetch: async () => ({ ok: true, json: async () => fixtureManifest() }) });
+    const placeholder = api.renderImage(mount, { mediaId: "fixture-hero", decorative: true, fallbackAlt: "Ignored", fallbackFactory: () => semanticFallback });
+    assert.equal(placeholder.alt, "");
+    placeholder.dispatch("error");
+    assert.equal(semanticFallback.getAttribute("aria-hidden"), "true");
+    assert.equal(semanticFallback.getAttribute("role"), null);
+    assert.equal(semanticFallback.getAttribute("aria-label"), null);
+
+    const second = createMediaDom();
+    api.renderImage(second.mount, { mediaId: "fixture-hero", decorative: true, fallbackAlt: "Ignored" });
+    await flushPromises();
+    assert.equal(second.mount.querySelector("[data-media-runtime]").children[0].alt, "");
+  });
+
+  await test("runtime renderer ignores stale upgrades and fails back to local nodes", async () => {
+    const gate = deferred();
+    const firstDom = createMediaDom();
+    const fallbackNode = firstDom.document.createElement("span");
+    const { api } = loadBrowserMedia({
+      document: firstDom.document,
+      fetch: () => gate.promise
+    });
+    api.renderImage(firstDom.mount, { mediaId: "fixture-hero", fallbackAlt: "First", lang: "th" });
+    api.renderImage(firstDom.mount, {
+      mediaId: "fixture-hero", fallbackAlt: "Second", lang: "en", fetchPriority: "urgent",
+      fallbackFactory: () => fallbackNode
+    });
+    gate.resolve({ ok: true, json: async () => fixtureManifest() });
+    await flushPromises();
+    const latestImage = firstDom.mount.querySelector("[data-media-runtime]").children[0];
+    assert.equal(latestImage.alt, "English image", "the older Thai render must not replace the newer English render");
+    assert.equal(latestImage.fetchPriority || "", "", "invalid priority must be omitted");
+    latestImage.dispatch("error");
+    const localPlaceholder = firstDom.mount.querySelector("[data-media-runtime]");
+    assert.equal(localPlaceholder.src, "assets/media/placeholders/hero.svg");
+    localPlaceholder.dispatch("error");
+    assert.equal(firstDom.mount.querySelector("[data-media-runtime]"), fallbackNode);
+
+    const disconnected = createMediaDom();
+    const delayed = deferred();
+    const secondRuntime = loadBrowserMedia({ document: disconnected.document, fetch: () => delayed.promise }).api;
+    const initial = secondRuntime.renderImage(disconnected.mount, { mediaId: "fixture-hero" });
+    disconnected.mount.isConnected = false;
+    delayed.resolve({ ok: true, json: async () => fixtureManifest() });
+    await flushPromises();
+    assert.equal(disconnected.mount.querySelector("[data-media-runtime]"), initial);
   });
 
   await test("all 27 HTML pages link the local favicon with correct relative paths", () => {

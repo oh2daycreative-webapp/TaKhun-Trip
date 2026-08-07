@@ -73,36 +73,56 @@
     };
   }
 
+  function applyRequestOptions(image, options) {
+    if (options.loading === "eager" || options.loading === "lazy") image.loading = options.loading;
+    if (["high", "low", "auto"].includes(options.fetchPriority)) {
+      image.fetchPriority = options.fetchPriority;
+      image.setAttribute("fetchpriority", options.fetchPriority);
+    }
+  }
+
+  function hideDecorativeFallback(node, decorative) {
+    if (!node || !decorative) return node;
+    node.setAttribute?.("aria-hidden", "true");
+    node.removeAttribute?.("role");
+    node.removeAttribute?.("aria-label");
+    return node;
+  }
+
   function renderImage(mount, options = {}) {
     if (!mount || !global.document) return null;
     const role = options.role || options.type || "cover";
     const generation = Number(mount._takhunMediaGeneration || 0) + 1;
     mount._takhunMediaGeneration = generation;
+    const placeholderAlt = options.decorative ? "" : String(options.fallbackAlt || options.alt || "");
     let current = mount.querySelector?.("[data-media-runtime]") || null;
-    const fallback = () => {
+    const replaceRuntime = (node) => {
+      if (current?.parentNode) current.replaceWith(node); else mount.prepend(node);
+      current = node;
+      return node;
+    };
+    const fallback = (path) => {
       const image = global.document.createElement("img");
       image.setAttribute("data-media-runtime", "placeholder");
       image.className = options.className || "";
-      image.src = placeholderPath(role);
-      image.alt = String(options.alt || "");
-      if (options.loading) image.loading = options.loading;
+      image.src = isLocalPlaceholderPath(path) ? path : placeholderPath(role);
+      image.alt = placeholderAlt;
+      applyRequestOptions(image, options);
       image.addEventListener("error", () => {
-        const node = typeof options.fallbackFactory === "function" ? options.fallbackFactory() : null;
+        if (mount._takhunMediaGeneration !== generation || !mount.isConnected) return;
+        const node = hideDecorativeFallback(typeof options.fallbackFactory === "function" ? options.fallbackFactory() : null, options.decorative);
         if (node) {
           node.setAttribute?.("data-media-runtime", "fallback");
-          if (current?.parentNode) current.replaceWith(node); else mount.prepend(node);
-          current = node;
+          replaceRuntime(node);
         } else current?.remove?.();
       }, { once: true });
-      if (current?.parentNode) current.replaceWith(image); else mount.prepend(image);
-      current = image;
-      return image;
+      return replaceRuntime(image);
     };
-    fallback();
+    fallback(placeholderPath(role));
     loadManifest().then(() => {
-      if (mount._takhunMediaGeneration !== generation) return;
+      if (mount._takhunMediaGeneration !== generation || !mount.isConnected) return;
       const model = pictureModel(options.mediaId, options.lang);
-      if (!model || !mount.isConnected) return;
+      if (!model) return;
       const picture = global.document.createElement("picture");
       picture.setAttribute("data-media-runtime", "picture");
       picture.style.display = "contents";
@@ -111,10 +131,20 @@
       image.src = model.src;
       image.srcset = model.srcset;
       image.sizes = options.sizes || "100vw";
-      image.alt = String(options.alt || model.alt || "");
-      if (options.loading) image.loading = options.loading;
-      image.addEventListener("error", fallback, { once: true });
+      image.width = model.width;
+      image.height = model.height;
+      image.alt = options.decorative
+        ? ""
+        : Object.hasOwn(options, "alt")
+          ? String(options.alt || "")
+          : model.alt || String(options.fallbackAlt || "");
+      applyRequestOptions(image, options);
+      image.addEventListener("error", () => {
+        if (mount._takhunMediaGeneration !== generation || !mount.isConnected) return;
+        fallback(model.fallback || placeholderPath(role));
+      }, { once: true });
       picture.append(image);
+      if (mount._takhunMediaGeneration !== generation || !mount.isConnected) return;
       if (current?.parentNode) current.replaceWith(picture); else mount.prepend(picture);
       current = picture;
     });
