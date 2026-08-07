@@ -102,6 +102,19 @@ assert.equal(api.placeDetailUrl("PLACE A/B"), "place-detail.html?id=PLACE%20A%2F
 
 process.stdout.write("Routes behavior verification passed.\n");
 
+// Production media policy
+assert.equal((source.match(/fetchPriority:\s*"high"/g) || []).length, 1, "Route detail must own the only high-priority image");
+assert.match(source, /mediaIdFor\("route", route\.route_id\)/);
+assert.match(source, /mediaIdFor\("place", stop\.place_id\)/);
+assert.match(source, /route-explorer-card__image[\s\S]*?decorative:\s*true[\s\S]*?loading:\s*"lazy"/);
+assert.match(source, /FEATURED_ROUTE_SIZES/);
+assert.match(source, /STANDARD_ROUTE_SIZES/);
+assert.notEqual(/const FEATURED_ROUTE_SIZES = "([^"]+)"/.exec(source)?.[1], /const STANDARD_ROUTE_SIZES = "([^"]+)"/.exec(source)?.[1]);
+assert.match(source, /route-detail-page__image[\s\S]*?fallbackAlt:[\s\S]*?loading:\s*"eager"[\s\S]*?fetchPriority:\s*"high"/);
+assert.match(source, /route-stop__media[\s\S]*?decorative:\s*true[\s\S]*?loading:\s*"lazy"[\s\S]*?sizes:\s*"20rem"/);
+assert.match(source, /const imageFallback = \(\) => \{[\s\S]*?aria-hidden", "true"[\s\S]*?mediaMount\.replaceChildren/);
+assert.doesNotMatch(source, /renderImage\([\s\S]*?cover_image_url/);
+
 {
   const i18n = loadI18n();
   const keys = [
