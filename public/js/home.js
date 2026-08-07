@@ -154,8 +154,8 @@
     }));
   }
 
-  function mockHomeResponse(lang) {
-    return global.TakhunContentData.getHomeData(normalizeLang(lang));
+  function mockHomeResponse(lang, now) {
+    return global.TakhunContentData.getHomeData(normalizeLang(lang), now);
   }
 
   function createHomeController({ loadHome, onChange = () => {}, initialLang = "th" } = {}) {
