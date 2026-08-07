@@ -62,10 +62,90 @@ async function run() {
     assert.equal(JSON.stringify(spec).includes("generated_at"), false);
   });
 
-  await test("public manifest is deterministic empty runtime state without source leaks", () => {
-    const text = fs.readFileSync(path.join(root, "public/assets/media/manifest/media-manifest.json"), "utf8");
-    assert.equal(text, "{\n  \"version\": 1,\n  \"items\": []\n}\n");
-    assert.equal(/source_file|media-source|\.jpe?g|\.png/i.test(text), false);
+  await test("public manifest contains every approved generated asset without source leaks", () => {
+    const manifestPath = path.join(
+      root,
+      "public/assets/media/manifest/media-manifest.json"
+    );
+    const text = fs.readFileSync(manifestPath, "utf8");
+    const manifest = JSON.parse(text);
+
+    assert.equal(manifest.version, 1);
+    assert.equal(manifest.items.length, requiredIds.length);
+    assert.deepEqual(
+      manifest.items.map((item) => item.media_id),
+      requiredIds
+    );
+
+    assert.equal(
+      /source_file|media-source|\.jpe?g|\.png/i.test(text),
+      false
+    );
+
+    for (const item of manifest.items) {
+      assert.equal(item.required, true, `${item.media_id} is not required`);
+      assert.equal(
+        typeof item.alt_th === "string" && item.alt_th.trim().length > 0,
+        true,
+        `${item.media_id} missing alt_th`
+      );
+      assert.equal(
+        typeof item.alt_en === "string" && item.alt_en.trim().length > 0,
+        true,
+        `${item.media_id} missing alt_en`
+      );
+      assert.equal(
+        Array.isArray(item.outputs) && item.outputs.length > 0,
+        true,
+        `${item.media_id} has no generated outputs`
+      );
+
+      for (const output of item.outputs) {
+        assert.match(
+          output.path,
+          /^assets\/media\/generated\/.+\.webp$/,
+          `${item.media_id} has a non-local generated path`
+        );
+        assert.equal(
+          Number.isInteger(output.width) && output.width > 0,
+          true,
+          `${output.path} has invalid width`
+        );
+        assert.equal(
+          Number.isInteger(output.height) && output.height > 0,
+          true,
+          `${output.path} has invalid height`
+        );
+        assert.equal(
+          Number.isInteger(output.bytes) && output.bytes > 0,
+          true,
+          `${output.path} has invalid byte size`
+        );
+        assert.match(
+          output.sha256,
+          /^[a-f0-9]{64}$/,
+          `${output.path} has invalid SHA-256`
+        );
+
+        const generatedFile = path.join(root, "public", output.path);
+
+        assert.equal(
+          fs.existsSync(generatedFile),
+          true,
+          `missing ${output.path}`
+        );
+        assert.equal(
+          fs.statSync(generatedFile).size,
+          output.bytes,
+          `${output.path} byte size does not match manifest`
+        );
+        assert.equal(
+          sha256(generatedFile),
+          output.sha256,
+          `${output.path} SHA-256 does not match manifest`
+        );
+      }
+    }
   });
 
   await test("validates filename IDs duplicates missing files and ratio policy", async () => {
