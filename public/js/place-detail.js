@@ -130,9 +130,13 @@
     return fallback;
   }
   function appendImage(mount, mediaId, name, options = {}) {
-    const fallbackFactory = () => fallbackMedia(name, options.hero);
+    const fallbackFactory = () => {
+      const fallback = fallbackMedia(name, options.hero);
+      if (options.decorative) { fallback.setAttribute("aria-hidden", "true"); fallback.removeAttribute("role"); fallback.removeAttribute("aria-label"); }
+      return fallback;
+    };
     if (!global.TakhunMedia?.renderImage) { const fallback = fallbackFactory(); mount.append(fallback); return fallback; }
-    return global.TakhunMedia.renderImage(mount, { mediaId, type: options.type || "place", role: options.hero ? "hero" : options.gallery ? "gallery" : "cover", className: options.className || "", alt: format("place_detail.image_alt", { name }), loading: options.lazy ? "lazy" : "eager", sizes: options.hero ? "100vw" : "(min-width: 768px) 33vw, 100vw", lang: global.TakhunI18n?.getCurrentLang?.(), fallbackFactory });
+    return global.TakhunMedia.renderImage(mount, { mediaId, type: options.type || "place", role: options.hero ? "hero" : options.gallery ? "gallery" : "cover", className: options.className || "", decorative: options.decorative === true, loading: options.loading, fetchPriority: options.fetchPriority, sizes: options.sizes, fallbackAlt: options.fallbackAlt, lang: global.TakhunI18n?.getCurrentLang?.(), fallbackFactory });
   }
 
   function renderSummary(place, lang, mount, reviewSummary) {
@@ -209,17 +213,8 @@
   }
   function renderGallery(place, lang) {
     const mount = global.document.querySelector("[data-detail-gallery]");
-    const urls = Array.isArray(place.gallery_image_urls) ? place.gallery_image_urls : [];
-    mount.hidden = !urls.length; mount.replaceChildren();
-    if (!urls.length) return;
-    const name = localized(place, "name", lang); const grid = make("div", "detail-gallery-grid");
-    urls.forEach((_source, index) => {
-      const button = make("button", "detail-gallery__button"); button.type = "button"; button.setAttribute("aria-label", format("place_detail.open_gallery_image", { number: index + 1, name }));
-      const mediaId = `place-${String(place.place_id || "").toLowerCase()}-gallery-${String(index + 1).padStart(2, "0")}`;
-      const media = make("span", "detail-gallery__media"); appendImage(media, mediaId, name, { className: "detail-gallery__image", lazy: true, gallery: true }); button.append(media);
-      button.addEventListener("click", () => openLightbox(mediaId, name, button)); grid.append(button);
-    });
-    mount.append(heading("detail-gallery-title", t("place_detail.gallery")), grid);
+    mount.hidden = true;
+    mount.replaceChildren();
   }
 
   function renderNearby(place, lang) {
@@ -230,7 +225,7 @@
     const grid = make("div", "detail-nearby-grid");
     nearby.forEach((item) => {
       const name = localized(item, "name", lang); const card = make("article", "place-card detail-nearby-card");
-      const media = make("div", "detail-nearby-card__media"); appendImage(media, global.TakhunMedia?.mediaIdFor?.("place", item.place_id) || "", name, { className: "detail-nearby-card__image", lazy: true });
+      const media = make("div", "detail-nearby-card__media"); appendImage(media, global.TakhunMedia?.mediaIdFor?.("place", item.place_id) || "", name, { className: "detail-nearby-card__image", decorative: true, loading: "lazy", sizes: "(min-width: 768px) 50vw, 100vw" });
       const content = make("div", "detail-nearby-card__content"); content.append(make("span", "badge", labelFor("category", item.category)), make("h3", "detail-nearby-card__title", name), make("p", "detail-nearby-card__copy", localized(item, "short_description", lang)));
       const link = make("a", "button button--secondary", t("places.view_details")); link.href = `place-detail.html?id=${encodeURIComponent(item.place_id)}`; content.append(link); card.append(media, content); grid.append(card);
     });
@@ -277,7 +272,7 @@
       if (!currentPlace) return;
       const lang = global.TakhunI18n?.getCurrentLang?.() || "th"; const name = localized(currentPlace, "name", lang);
       global.document.title = format("place_detail.page_title", { name });
-      const heroMedia = global.document.querySelector("[data-detail-hero-media]"); heroMedia.replaceChildren(); appendImage(heroMedia, global.TakhunMedia?.mediaIdFor?.("place", currentPlace.place_id) || "", name, { className: "detail-hero__image", hero: true });
+      const heroMedia = global.document.querySelector("[data-detail-hero-media]"); heroMedia.replaceChildren(); appendImage(heroMedia, global.TakhunMedia?.mediaIdFor?.("place", currentPlace.place_id) || "", name, { className: "detail-hero__image", hero: true, fallbackAlt: format("place_detail.image_alt", { name }), loading: "eager", fetchPriority: "high", sizes: "100vw" });
       renderSummary(currentPlace, lang, global.document.querySelector("[data-detail-summary]"), currentReviewSummary); renderTextSections(currentPlace, lang); renderVisitor(currentPlace, lang); renderGallery(currentPlace, lang); renderNearby(currentPlace, lang); renderMap(currentPlace);
       const favorite = global.document.querySelector("[data-detail-favorite]"); const saved = readFavorites().includes(currentPlace.place_id); favorite.classList.toggle("is-active", saved); favorite.setAttribute("aria-pressed", String(saved)); favorite.setAttribute("aria-label", format(saved ? "place_detail.favorite_remove" : "place_detail.favorite_add", { name })); favorite.querySelector("span").textContent = saved ? "♥" : "♡";
       setPageState(mounts, "ready", root);

@@ -130,8 +130,8 @@
       const card = make("article", "place-card place-card--listing");
       const media = make("div", "place-card__image-wrap");
       const fallbackFactory = () => fallbackMedia(name);
-      if (global.TakhunMedia?.renderImage) global.TakhunMedia.renderImage(media, { mediaId: global.TakhunMedia.mediaIdFor("place", place.place_id), type: "place", role: "cover", className: "place-card__image", alt: format("places.image_alt", { name }), loading: "lazy", sizes: "(min-width: 1024px) 33vw, (min-width: 768px) 50vw, 100vw", lang, fallbackFactory });
-      else media.append(fallbackFactory());
+      if (global.TakhunMedia?.renderImage) global.TakhunMedia.renderImage(media, { mediaId: global.TakhunMedia.mediaIdFor("place", place.place_id), type: "place", role: "cover", className: "place-card__image", decorative: true, loading: "lazy", sizes: "(min-width: 900px) 33vw, (min-width: 600px) 50vw, 100vw", lang, fallbackFactory });
+      else { const fallback = fallbackFactory(); fallback.setAttribute("aria-hidden", "true"); media.append(fallback); }
       const saved = favorites.includes(place.place_id);
       const favorite = make("button", `favorite-btn place-card__favorite${saved ? " is-active" : ""}`, saved ? "♥" : "♡"); favorite.type = "button"; favorite.setAttribute("aria-pressed", String(saved)); favorite.setAttribute("aria-label", format(saved ? "places.favorite_remove" : "places.favorite_add", { name }));
       favorite.addEventListener("click", () => { const next = toggleFavorite(place.place_id); showToast(t(next.includes(place.place_id) ? "places.favorite_added" : "places.favorite_removed")); render(); });

@@ -177,6 +177,21 @@ test("share uses Web Share, treats cancellation as neutral, and falls back to cl
   assert.equal(await loadModules().detail.sharePlace({ title: "T", text: "X", url: "https://example.test" }), "copy_failed");
 });
 
+test("place detail gives only its informative hero high priority", () => {
+  const detailSource = fs.readFileSync(path.join(root, "public/js/place-detail.js"), "utf8");
+  assert.equal((detailSource.match(/fetchPriority:\s*"high"/g) || []).length, 1);
+  assert.match(detailSource, /hero[\s\S]*?fallbackAlt:[\s\S]*?loading:\s*"eager"[\s\S]*?fetchPriority:\s*"high"[\s\S]*?sizes:\s*"100vw"/);
+  assert.match(detailSource, /detail-nearby-card__image[\s\S]*?decorative:\s*true[\s\S]*?loading:\s*"lazy"/);
+});
+
+test("place detail never derives production gallery media from URL array entries", () => {
+  const detailSource = fs.readFileSync(path.join(root, "public/js/place-detail.js"), "utf8");
+  const body = /function renderGallery\(place, lang\) \{([\s\S]*?)\n  \}/.exec(detailSource)?.[1] || "";
+  assert.doesNotMatch(body, /gallery_image_urls|place-.*-gallery|image_url|https?:/);
+  assert.match(body, /mount\.hidden\s*=\s*true/);
+  assert.match(body, /mount\.replaceChildren\(\)/);
+});
+
 Promise.all(pending).then(() => {
   if (!process.exitCode) process.stdout.write("Place detail behavior verification passed.\n");
 });
