@@ -27,6 +27,10 @@ function test(name, fn) {
   );
 }
 
+function sharedRendererCalls(controller) {
+  return controller.match(/TakhunMedia(?:\?\.|\.)renderImage(?:\?\.)?\([\s\S]*?\}\s*\)/g) || [];
+}
+
 function loadBrowserMedia({ document, fetch } = {}) {
   const source = fs.readFileSync(path.join(root, "public/js/media.js"), "utf8");
   const context = { window: {}, URL, console, setTimeout, clearTimeout };
@@ -267,14 +271,22 @@ async function run() {
   });
 
   await test("public controllers never render API image URLs or private media sources", () => {
-    const files = ["home.js", "places.js", "place-detail.js", "routes.js", "products.js", "events.js", "gallery.js", "about.js"];
-    for (const file of files) {
+    const expectedRendererCalls = {
+      "home.js": 2, "places.js": 1, "place-detail.js": 1, "routes.js": 3,
+      "products.js": 1, "events.js": 1, "gallery.js": 2, "about.js": 1
+    };
+    for (const [file, expectedCount] of Object.entries(expectedRendererCalls)) {
       const controller = fs.readFileSync(path.join(root, "public/js", file), "utf8");
       assert.equal(controller.includes("media-source"), false, file);
       assert.equal(/\.innerHTML\s*=/.test(controller), false, file);
-      const calls = controller.match(/TakhunMedia(?:\?\.)?\.renderImage\([\s\S]*?\}\s*\)/g) || [];
+      const calls = sharedRendererCalls(controller);
+      assert.equal(calls.length, expectedCount, `${file} shared renderer calls captured`);
       for (const call of calls) assert.equal(/\b(?:cover_image_url|image_url|thumbnail_url|hero_image_url)\b/.test(call), false, `${file}: ${call}`);
     }
+    const homeCalls = sharedRendererCalls(fs.readFileSync(path.join(root, "public/js", "home.js"), "utf8"));
+    assert.equal(homeCalls.some((call) => call.includes("home-hero-ratchaprapha")), true, "Home hero renderer call captured");
+    assert.equal(homeCalls.some((call) => call.includes("TakhunMedia.renderImage(")), true, "normal renderer call captured");
+    assert.equal(homeCalls.some((call) => call.includes("TakhunMedia?.renderImage?.(")), true, "optional-chained renderer call captured");
   });
 
   await test("validates filename IDs duplicates missing files and ratio policy", async () => {
@@ -432,6 +444,57 @@ async function run() {
     assert.equal(image.loading, "eager");
     assert.equal(image.fetchPriority, "high");
     assert.equal(mount.children.includes(badge), true);
+  });
+
+  await test("runtime renderer preserves explicit caller alt over manifest alt", async () => {
+    const { document, mount } = createMediaDom();
+    const { api } = loadBrowserMedia({ document, fetch: async () => ({ ok: true, json: async () => fixtureManifest() }) });
+    api.renderImage(mount, {
+      mediaId: "fixture-hero", role: "hero", alt: "Caller compatibility alt",
+      fallbackAlt: "Fallback image", lang: "en"
+    });
+    await flushPromises();
+    assert.equal(mount.querySelector("[data-media-runtime]").children[0].alt, "Caller compatibility alt");
+  });
+
+  await test("runtime renderer retains local role placeholders for rejected manifests and unknown media", async () => {
+    const failed = createMediaDom();
+    const failedSibling = failed.document.createElement("span");
+    failed.mount.append(failedSibling);
+    const failedApi = loadBrowserMedia({
+      document: failed.document,
+      fetch: async () => { throw new Error("manifest unavailable"); }
+    }).api;
+    const failedPlaceholder = failedApi.renderImage(failed.mount, { mediaId: "fixture-hero", role: "product", fallbackAlt: "Product fallback" });
+    await flushPromises();
+    assert.equal(failed.mount.querySelector("[data-media-runtime]"), failedPlaceholder);
+    assert.equal(failedPlaceholder.src, "assets/media/placeholders/product.svg");
+    assert.equal(failedPlaceholder.parentNode, failed.mount);
+    assert.equal(failed.mount.children.includes(failedSibling), true);
+
+    const unknown = createMediaDom();
+    const unknownSibling = unknown.document.createElement("span");
+    unknown.mount.append(unknownSibling);
+    const unknownApi = loadBrowserMedia({ document: unknown.document, fetch: async () => ({ ok: true, json: async () => fixtureManifest() }) }).api;
+    const unknownPlaceholder = unknownApi.renderImage(unknown.mount, { mediaId: "unknown-media-id", role: "gallery", fallbackAlt: "Gallery fallback" });
+    await flushPromises();
+    assert.equal(unknown.mount.querySelector("[data-media-runtime]"), unknownPlaceholder);
+    assert.equal(unknownPlaceholder.src, "assets/media/placeholders/gallery.svg");
+    assert.equal(unknownPlaceholder.parentNode, unknown.mount);
+    assert.equal(unknown.mount.children.includes(unknownSibling), true);
+  });
+
+  await test("runtime renderer uses the valid manifest fallback after generated-image error", async () => {
+    const { document, mount } = createMediaDom();
+    const manifest = fixtureManifest();
+    manifest.items[0].fallback = "assets/media/placeholders/cover.svg";
+    const { api } = loadBrowserMedia({ document, fetch: async () => ({ ok: true, json: async () => manifest }) });
+    const initial = api.renderImage(mount, { mediaId: "fixture-hero", role: "hero", fallbackAlt: "Hero fallback" });
+    assert.equal(initial.src, "assets/media/placeholders/hero.svg");
+    await flushPromises();
+    mount.querySelector("[data-media-runtime]").children[0].dispatch("error");
+    const manifestFallback = mount.querySelector("[data-media-runtime]");
+    assert.equal(manifestFallback.src, "assets/media/placeholders/cover.svg");
   });
 
   await test("runtime renderer ignores errors from a replaced placeholder", async () => {
