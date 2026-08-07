@@ -211,8 +211,9 @@ async function run() {
     assert.equal(en.length, 5);
     assert.notEqual(th[0].name, en[0].name);
     assert.deepEqual(th.map(({ href, tone, icon }) => ({ href, tone, icon })), en.map(({ href, tone, icon }) => ({ href, tone, icon })));
-    const mockTh = home.mockHomeResponse("th");
-    const mockEn = home.mockHomeResponse("en");
+    const eventTestDate = new Date("2026-07-17T12:00:00+07:00");
+    const mockTh = home.mockHomeResponse("th", eventTestDate);
+    const mockEn = home.mockHomeResponse("en", eventTestDate);
     assert.notEqual(mockTh.data.featured_places[0].name, mockEn.data.featured_places[0].name);
     assert.notEqual(mockTh.data.featured_routes[0].name, mockEn.data.featured_routes[0].name);
     assert.equal(mockTh.data.upcoming_events[0].event_id, "EVENT-HEART-OF-HILLS-2026");
