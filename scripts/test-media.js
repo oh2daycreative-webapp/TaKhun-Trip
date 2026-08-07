@@ -27,6 +27,116 @@ function test(name, fn) {
   );
 }
 
+function sharedRendererCalls(controller) {
+  return controller.match(/TakhunMedia(?:\?\.|\.)renderImage(?:\?\.)?\([\s\S]*?\}\s*\)/g) || [];
+}
+
+function loadBrowserMedia({ document, fetch } = {}) {
+  const source = fs.readFileSync(path.join(root, "public/js/media.js"), "utf8");
+  const context = { window: {}, URL, console, setTimeout, clearTimeout };
+  context.window.window = context.window;
+  if (document) context.window.document = document;
+  if (fetch) context.window.fetch = fetch;
+  vm.runInNewContext(source, context, { filename: "media.js" });
+  return { api: context.window.TakhunMedia, source, window: context.window };
+}
+
+class FakeElement {
+  constructor(tagName, ownerDocument) {
+    this.tagName = String(tagName).toUpperCase();
+    this.ownerDocument = ownerDocument;
+    this.children = [];
+    this.parentNode = null;
+    this.isConnected = true;
+    this.style = {};
+    this._attributes = new Map();
+    this._listeners = new Map();
+  }
+
+  append(...nodes) { nodes.forEach((node) => this._insert(node, this.children.length)); }
+  prepend(...nodes) { nodes.reverse().forEach((node) => this._insert(node, 0)); }
+  _insert(node, index) {
+    node.remove?.();
+    this.children.splice(index, 0, node);
+    node.parentNode = this;
+    node.isConnected = this.isConnected;
+  }
+  replaceWith(node) {
+    const parent = this.parentNode;
+    if (!parent) return;
+    const index = parent.children.indexOf(this);
+    if (index < 0) return;
+    node.remove?.();
+    parent.children.splice(index, 1, node);
+    this.parentNode = null;
+    node.parentNode = parent;
+    node.isConnected = parent.isConnected;
+  }
+  remove() {
+    const parent = this.parentNode;
+    if (!parent) return;
+    const index = parent.children.indexOf(this);
+    if (index >= 0) parent.children.splice(index, 1);
+    this.parentNode = null;
+  }
+  querySelector(selector) {
+    if (selector !== "[data-media-runtime]") return null;
+    for (const child of this.children) {
+      if (child._attributes.has("data-media-runtime")) return child;
+      const nested = child.querySelector(selector);
+      if (nested) return nested;
+    }
+    return null;
+  }
+  setAttribute(name, value) { this._attributes.set(name, String(value)); }
+  getAttribute(name) { return this._attributes.get(name) || null; }
+  removeAttribute(name) { this._attributes.delete(name); }
+  addEventListener(type, listener, options = {}) {
+    const listeners = this._listeners.get(type) || [];
+    listeners.push({ listener, once: options.once === true });
+    this._listeners.set(type, listeners);
+  }
+  dispatch(type) {
+    const listeners = this._listeners.get(type) || [];
+    this._listeners.set(type, listeners.filter((entry) => !entry.once));
+    listeners.forEach((entry) => entry.listener({ type, target: this }));
+  }
+}
+
+function createMediaDom() {
+  const document = { createElement(tag) { return new FakeElement(tag, document); } };
+  return { document, mount: document.createElement("div") };
+}
+
+function fixtureManifest() {
+  return { version: 1, items: [{
+    media_id: "fixture-hero", entity_type: "home", entity_id: "HOME", role: "hero",
+    ratio: "16:9", required: true, alt_th: "ภาพไทย", alt_en: "English image",
+    fallback: "assets/media/placeholders/hero.svg",
+    outputs: [
+      { width: 640, height: 360, path: "assets/media/generated/home/fixture-hero-640.webp" },
+      { width: 1440, height: 810, path: "assets/media/generated/home/fixture-hero-1440.webp" }
+    ]
+  }] };
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+async function flushPromises() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 function sha256(file) {
   return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 }
@@ -148,6 +258,37 @@ async function run() {
     }
   });
 
+  await test("public media containers match approved production ratios", () => {
+    const css = fs.readFileSync(path.join(root, "public/css/components.css"), "utf8");
+    assert.match(css, /\.home-page \.place-card__media[^\{]*\{[^}]*aspect-ratio:\s*3\s*\/\s*2/);
+    assert.match(css, /\.home-page \.route-card__media[^\{]*\{[^}]*aspect-ratio:\s*16\s*\/\s*9/);
+    assert.match(css, /\.place-card--listing \.place-card__image-wrap[^\{]*\{[^}]*aspect-ratio:\s*3\s*\/\s*2/);
+    assert.match(css, /\.place-detail-page \.detail-gallery__media[^\{]*\{[^}]*aspect-ratio:\s*3\s*\/\s*2/);
+    assert.match(css, /\.routes-page \.route-explorer-card__media[^\{]*\{[^}]*aspect-ratio:\s*16\s*\/\s*9/);
+    assert.match(css, /\.products-page \.product-card__media[^\{]*\{[^}]*aspect-ratio:\s*1\s*\/\s*1/);
+    assert.match(css, /\.events-page \.event-card__media[^\{]*\{[^}]*aspect-ratio:\s*3\s*\/\s*2/);
+    assert.match(css, /\.gallery-page \.gallery-card__image[^\{]*\{[^}]*aspect-ratio:\s*3\s*\/\s*2/);
+  });
+
+  await test("public controllers never render API image URLs or private media sources", () => {
+    const expectedRendererCalls = {
+      "home.js": 2, "places.js": 1, "place-detail.js": 1, "routes.js": 3,
+      "products.js": 1, "events.js": 1, "gallery.js": 2, "about.js": 1
+    };
+    for (const [file, expectedCount] of Object.entries(expectedRendererCalls)) {
+      const controller = fs.readFileSync(path.join(root, "public/js", file), "utf8");
+      assert.equal(controller.includes("media-source"), false, file);
+      assert.equal(/\.innerHTML\s*=/.test(controller), false, file);
+      const calls = sharedRendererCalls(controller);
+      assert.equal(calls.length, expectedCount, `${file} shared renderer calls captured`);
+      for (const call of calls) assert.equal(/\b(?:cover_image_url|image_url|thumbnail_url|hero_image_url)\b/.test(call), false, `${file}: ${call}`);
+    }
+    const homeCalls = sharedRendererCalls(fs.readFileSync(path.join(root, "public/js", "home.js"), "utf8"));
+    assert.equal(homeCalls.some((call) => call.includes("home-hero-ratchaprapha")), true, "Home hero renderer call captured");
+    assert.equal(homeCalls.some((call) => call.includes("TakhunMedia.renderImage(")), true, "normal renderer call captured");
+    assert.equal(homeCalls.some((call) => call.includes("TakhunMedia?.renderImage?.(")), true, "optional-chained renderer call captured");
+  });
+
   await test("validates filename IDs duplicates missing files and ratio policy", async () => {
     const temp = fs.mkdtempSync(path.join(os.tmpdir(), "takhun-media-validate-"));
     try {
@@ -208,19 +349,215 @@ async function run() {
     } finally { fs.rmSync(temp, { recursive: true, force: true }); }
   });
 
-  await test("runtime helper rejects external content and resolves local role placeholders", () => {
-    const source = fs.readFileSync(path.join(root, "public/js/media.js"), "utf8");
-    const context = { window: {}, URL, console, setTimeout, clearTimeout };
-    context.window.window = context.window;
-    vm.runInNewContext(source, context, { filename: "media.js" });
-    const api = context.window.TakhunMedia;
+  await test("runtime maps every entity type and validates only local media paths", () => {
+    const { api } = loadBrowserMedia();
     assert.equal(api.mediaIdFor("place", "BTK-001"), "place-btk-001-cover");
     assert.equal(api.mediaIdFor("route", "ROUTE-BTK-CORE"), "route-btk-core-cover");
-    assert.equal(api.placeholderPath("product"), "assets/media/placeholders/product.svg");
-    assert.equal(api.isLocalGeneratedPath("https://example.com/photo.webp"), false);
+    assert.equal(api.mediaIdFor("product", "PROD-BTK-HONEY"), "product-btk-honey-cover");
+    assert.equal(api.mediaIdFor("event", "EVENT-HEART-OF-HILLS-2026"), "event-heart-of-hills-2026-cover");
+    assert.equal(api.mediaIdFor("gallery", "GALLERY-DAM-LAKE-001"), "gallery-dam-lake-001");
+    assert.equal(api.mediaIdFor("shared", "SHARED-ABOUT-PROJECT"), "shared-about-project");
+    assert.equal(api.mediaIdFor("home", "hero-ratchaprapha"), "home-hero-ratchaprapha");
+    assert.equal(api.mediaIdFor("unknown", "BTK-001"), "");
     assert.equal(api.isLocalGeneratedPath("assets/media/generated/places/place-btk-001-cover-800.webp"), true);
+    for (const value of ["https://example.test/a.webp", "/assets/media/generated/a.webp", "assets/media/generated/../a.webp", "media-source/a.webp", "assets/media/generated/a.jpg"]) assert.equal(api.isLocalGeneratedPath(value), false);
+    assert.equal(api.isLocalPlaceholderPath("assets/media/placeholders/hero.svg"), true);
+    for (const value of ["https://example.test/hero.svg", "assets/media/placeholders/../hero.svg", "assets/media/placeholders/custom.svg"]) assert.equal(api.isLocalPlaceholderPath(value), false);
+  });
+
+  await test("runtime rejects malformed outputs and returns localized intrinsic picture metadata", async () => {
+    const manifest = { version: 1, items: [{
+      media_id: "fixture-hero", entity_type: "home", entity_id: "HOME", role: "hero",
+      ratio: "16:9", required: true, alt_th: "Ã Â¸Â Ã Â¸Â²Ã Â¸Å¾Ã Â¹â€žÃ Â¸â€”Ã Â¸Â¢", alt_en: "English image",
+      fallback: "assets/media/placeholders/hero.svg", source_file: "media-source/private.jpg",
+      outputs: [
+        { width: 1440, height: 810, path: "assets/media/generated/home/fixture-hero-1440.webp" },
+        { width: 640, height: 360, path: "assets/media/generated/home/fixture-hero-640.webp" },
+        { width: 0, height: 360, path: "assets/media/generated/home/bad-width.webp" },
+        { width: 960, height: 540, path: "https://example.test/remote.webp" },
+        { width: 800.5, height: 450, path: "assets/media/generated/home/bad-decimal.webp" }
+      ]
+    }, {
+      media_id: "fixture-empty", entity_type: "home", entity_id: "HOME", role: "hero",
+      ratio: "16:9", required: true, alt_th: "Thai fallback", alt_en: "",
+      fallback: "assets/media/placeholders/custom.svg",
+      outputs: [{ width: 640, height: -1, path: "assets/media/generated/home/bad-height.webp" }]
+    }, {
+      media_id: "fixture-alt-fallback", entity_type: "home", entity_id: "HOME", role: "hero",
+      ratio: "16:9", required: true, alt_th: "Thai fallback", alt_en: "",
+      fallback: "assets/media/placeholders/hero.svg",
+      outputs: [{ width: 640, height: 360, path: "assets/media/generated/home/fixture-alt-fallback-640.webp" }]
+    }] };
+    const { api } = loadBrowserMedia({ fetch: async () => ({ ok: true, json: async () => manifest }) });
+    await api.loadManifest();
+    assert.deepEqual(JSON.parse(JSON.stringify(api.pictureModel("fixture-hero", "en"))), {
+      alt: "English image",
+      src: "assets/media/generated/home/fixture-hero-1440.webp",
+      srcset: "assets/media/generated/home/fixture-hero-640.webp 640w, assets/media/generated/home/fixture-hero-1440.webp 1440w",
+      width: 1440,
+      height: 810,
+      fallback: "assets/media/placeholders/hero.svg",
+      outputs: [
+        { width: 640, height: 360, path: "assets/media/generated/home/fixture-hero-640.webp" },
+        { width: 1440, height: 810, path: "assets/media/generated/home/fixture-hero-1440.webp" }
+      ]
+    });
+    assert.equal(api.pictureModel("fixture-hero", "th").alt, "Ã Â¸Â Ã Â¸Â²Ã Â¸Å¾Ã Â¹â€žÃ Â¸â€”Ã Â¸Â¢");
+    assert.equal(api.pictureModel("fixture-empty", "en"), null);
+    assert.equal(api.pictureModel("fixture-alt-fallback", "en").alt, "Thai fallback");
+    const normalized = api.normalizeManifest(manifest);
+    assert.equal(normalized.items[1].fallback, "");
+    assert.equal(api.pictureModel("fixture-hero", "fr").alt, "Ã Â¸Â Ã Â¸Â²Ã Â¸Å¾Ã Â¹â€žÃ Â¸â€”Ã Â¸Â¢");
+    assert.equal(JSON.stringify(normalized).includes("source_file"), false);
+  });
+
+  await test("runtime helper rejects external content and resolves local role placeholders", () => {
+    const { api, source } = loadBrowserMedia();
+    assert.equal(api.placeholderPath("product"), "assets/media/placeholders/product.svg");
     assert.match(source, /replaceWith\(picture\)/, "responsive upgrade must preserve card overlays and controls");
     assert.match(source, /data-media-runtime/, "re-rendering must replace the prior runtime image instead of duplicating it");
+  });
+
+  await test("runtime renderer propagates responsive metadata and preserves sibling overlays", async () => {
+    const { document, mount } = createMediaDom();
+    const badge = document.createElement("span");
+    mount.append(badge);
+    const manifest = fixtureManifest();
+    const { api } = loadBrowserMedia({ document, fetch: async () => ({ ok: true, json: async () => manifest }) });
+    const placeholder = api.renderImage(mount, {
+      mediaId: "fixture-hero", role: "hero", className: "hero-image",
+      fallbackAlt: "Fallback image", loading: "eager", fetchPriority: "high",
+      sizes: "100vw", lang: "en"
+    });
+    assert.equal(placeholder.src, "assets/media/placeholders/hero.svg");
+    assert.equal(placeholder.alt, "Fallback image");
+    assert.equal(placeholder.loading, "eager");
+    assert.equal(placeholder.fetchPriority, "high");
+    await flushPromises();
+    const picture = mount.querySelector("[data-media-runtime]");
+    const image = picture.children[0];
+    assert.equal(image.alt, "English image");
+    assert.equal(image.srcset.includes("640w"), true);
+    assert.equal(image.sizes, "100vw");
+    assert.equal(image.width, 1440);
+    assert.equal(image.height, 810);
+    assert.equal(image.loading, "eager");
+    assert.equal(image.fetchPriority, "high");
+    assert.equal(mount.children.includes(badge), true);
+  });
+
+  await test("runtime renderer preserves explicit caller alt over manifest alt", async () => {
+    const { document, mount } = createMediaDom();
+    const { api } = loadBrowserMedia({ document, fetch: async () => ({ ok: true, json: async () => fixtureManifest() }) });
+    api.renderImage(mount, {
+      mediaId: "fixture-hero", role: "hero", alt: "Caller compatibility alt",
+      fallbackAlt: "Fallback image", lang: "en"
+    });
+    await flushPromises();
+    assert.equal(mount.querySelector("[data-media-runtime]").children[0].alt, "Caller compatibility alt");
+  });
+
+  await test("runtime renderer retains local role placeholders for rejected manifests and unknown media", async () => {
+    const failed = createMediaDom();
+    const failedSibling = failed.document.createElement("span");
+    failed.mount.append(failedSibling);
+    const failedApi = loadBrowserMedia({
+      document: failed.document,
+      fetch: async () => { throw new Error("manifest unavailable"); }
+    }).api;
+    const failedPlaceholder = failedApi.renderImage(failed.mount, { mediaId: "fixture-hero", role: "product", fallbackAlt: "Product fallback" });
+    await flushPromises();
+    assert.equal(failed.mount.querySelector("[data-media-runtime]"), failedPlaceholder);
+    assert.equal(failedPlaceholder.src, "assets/media/placeholders/product.svg");
+    assert.equal(failedPlaceholder.parentNode, failed.mount);
+    assert.equal(failed.mount.children.includes(failedSibling), true);
+
+    const unknown = createMediaDom();
+    const unknownSibling = unknown.document.createElement("span");
+    unknown.mount.append(unknownSibling);
+    const unknownApi = loadBrowserMedia({ document: unknown.document, fetch: async () => ({ ok: true, json: async () => fixtureManifest() }) }).api;
+    const unknownPlaceholder = unknownApi.renderImage(unknown.mount, { mediaId: "unknown-media-id", role: "gallery", fallbackAlt: "Gallery fallback" });
+    await flushPromises();
+    assert.equal(unknown.mount.querySelector("[data-media-runtime]"), unknownPlaceholder);
+    assert.equal(unknownPlaceholder.src, "assets/media/placeholders/gallery.svg");
+    assert.equal(unknownPlaceholder.parentNode, unknown.mount);
+    assert.equal(unknown.mount.children.includes(unknownSibling), true);
+  });
+
+  await test("runtime renderer uses the valid manifest fallback after generated-image error", async () => {
+    const { document, mount } = createMediaDom();
+    const manifest = fixtureManifest();
+    manifest.items[0].fallback = "assets/media/placeholders/cover.svg";
+    const { api } = loadBrowserMedia({ document, fetch: async () => ({ ok: true, json: async () => manifest }) });
+    const initial = api.renderImage(mount, { mediaId: "fixture-hero", role: "hero", fallbackAlt: "Hero fallback" });
+    assert.equal(initial.src, "assets/media/placeholders/hero.svg");
+    await flushPromises();
+    mount.querySelector("[data-media-runtime]").children[0].dispatch("error");
+    const manifestFallback = mount.querySelector("[data-media-runtime]");
+    assert.equal(manifestFallback.src, "assets/media/placeholders/cover.svg");
+  });
+
+  await test("runtime renderer ignores errors from a replaced placeholder", async () => {
+    const { document, mount } = createMediaDom();
+    const { api } = loadBrowserMedia({ document, fetch: async () => ({ ok: true, json: async () => fixtureManifest() }) });
+    const placeholder = api.renderImage(mount, { mediaId: "fixture-hero", lang: "en" });
+    await flushPromises();
+    const picture = mount.querySelector("[data-media-runtime]");
+    placeholder.dispatch("error");
+    assert.equal(mount.querySelector("[data-media-runtime]"), picture);
+  });
+
+  await test("runtime renderer separates decorative alt from informative fallback alt", async () => {
+    const { document, mount } = createMediaDom();
+    const semanticFallback = document.createElement("span");
+    semanticFallback.setAttribute("role", "img");
+    semanticFallback.setAttribute("aria-label", "Generic image");
+    const { api } = loadBrowserMedia({ document, fetch: async () => ({ ok: true, json: async () => fixtureManifest() }) });
+    const placeholder = api.renderImage(mount, { mediaId: "fixture-hero", decorative: true, fallbackAlt: "Ignored", fallbackFactory: () => semanticFallback });
+    assert.equal(placeholder.alt, "");
+    placeholder.dispatch("error");
+    assert.equal(semanticFallback.getAttribute("aria-hidden"), "true");
+    assert.equal(semanticFallback.getAttribute("role"), null);
+    assert.equal(semanticFallback.getAttribute("aria-label"), null);
+
+    const second = createMediaDom();
+    api.renderImage(second.mount, { mediaId: "fixture-hero", decorative: true, fallbackAlt: "Ignored" });
+    await flushPromises();
+    assert.equal(second.mount.querySelector("[data-media-runtime]").children[0].alt, "");
+  });
+
+  await test("runtime renderer ignores stale upgrades and fails back to local nodes", async () => {
+    const gate = deferred();
+    const firstDom = createMediaDom();
+    const fallbackNode = firstDom.document.createElement("span");
+    const { api } = loadBrowserMedia({
+      document: firstDom.document,
+      fetch: () => gate.promise
+    });
+    api.renderImage(firstDom.mount, { mediaId: "fixture-hero", fallbackAlt: "First", lang: "th" });
+    api.renderImage(firstDom.mount, {
+      mediaId: "fixture-hero", fallbackAlt: "Second", lang: "en", fetchPriority: "urgent",
+      fallbackFactory: () => fallbackNode
+    });
+    gate.resolve({ ok: true, json: async () => fixtureManifest() });
+    await flushPromises();
+    const latestImage = firstDom.mount.querySelector("[data-media-runtime]").children[0];
+    assert.equal(latestImage.alt, "English image", "the older Thai render must not replace the newer English render");
+    assert.equal(latestImage.fetchPriority || "", "", "invalid priority must be omitted");
+    latestImage.dispatch("error");
+    const localPlaceholder = firstDom.mount.querySelector("[data-media-runtime]");
+    assert.equal(localPlaceholder.src, "assets/media/placeholders/hero.svg");
+    localPlaceholder.dispatch("error");
+    assert.equal(firstDom.mount.querySelector("[data-media-runtime]"), fallbackNode);
+
+    const disconnected = createMediaDom();
+    const delayed = deferred();
+    const secondRuntime = loadBrowserMedia({ document: disconnected.document, fetch: () => delayed.promise }).api;
+    const initial = secondRuntime.renderImage(disconnected.mount, { mediaId: "fixture-hero" });
+    disconnected.mount.isConnected = false;
+    delayed.resolve({ ok: true, json: async () => fixtureManifest() });
+    await flushPromises();
+    assert.equal(disconnected.mount.querySelector("[data-media-runtime]"), initial);
   });
 
   await test("all 27 HTML pages link the local favicon with correct relative paths", () => {

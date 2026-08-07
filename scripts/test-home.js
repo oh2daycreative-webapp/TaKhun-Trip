@@ -220,6 +220,20 @@ async function run() {
     assert.equal(home.normalizeHomeResponse(mockEn).ok, true);
   }
 
+  {
+    assert.equal((source.match(/fetchPriority:\s*"high"/g) || []).length, 1, "Home must have exactly one high-priority image");
+    assert.match(source, /mediaId:\s*"home-hero-ratchaprapha"[\s\S]*?loading:\s*"eager"[\s\S]*?fetchPriority:\s*"high"[\s\S]*?sizes:\s*"100vw"/);
+    assert.doesNotMatch(source, /home-hero-ratchaprapha[\s\S]*?alt:\s*(?:lang|format)/, "Home hero must use manifest alt");
+    assert.match(source, /function appendImage[\s\S]*?decorative:\s*true[\s\S]*?loading:\s*"lazy"/);
+    assert.match(source, /mediaId:\s*global\.TakhunMedia\.mediaIdFor\(type, id\)/);
+    assert.doesNotMatch(source, /renderImage\([\s\S]*?(?:cover_image_url|image_url)/, "API image URLs must not be render sources");
+
+    const HOME_THREE_COLUMN_SIZES = "(min-width: 900px) 33vw, (min-width: 600px) 50vw, 100vw";
+    const HOME_ROUTE_SIZES = "(min-width: 900px) calc(21vw - 1rem), (min-width: 600px) 42vw, 100vw";
+    assert.match(source, new RegExp(HOME_THREE_COLUMN_SIZES.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(source, new RegExp(HOME_ROUTE_SIZES.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+
   assert.doesNotMatch(source, /\.innerHTML\s*=/, "home.js must not assign innerHTML");
   assert.doesNotMatch(source, /\beval\s*\(/, "home.js must not use eval");
   process.stdout.write("Home behavior verification passed.\n");

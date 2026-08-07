@@ -126,6 +126,15 @@ test("persists favorite toggles as an array of identifiers", () => {
   assert.deepEqual([...environment.api.toggleFavorite("MOCK-1")], []);
 });
 
+test("place cards use lazy decorative local media for covered and uncovered IDs", () => {
+  assert.match(source, /mediaId:\s*global\.TakhunMedia\.mediaIdFor\("place", place\.place_id\)/);
+  assert.match(source, /decorative:\s*true/);
+  assert.match(source, /loading:\s*"lazy"/);
+  assert.match(source, /sizes:\s*"\(min-width: 900px\) 33vw, \(min-width: 600px\) 50vw, 100vw"/);
+  assert.doesNotMatch(source, /renderImage\([\s\S]*?cover_image_url/);
+  assert.doesNotMatch(source, /const approved(?:Places|Ids)|new Set\([^)]*BTK-001/, "coverage must stay manifest-owned");
+});
+
 Promise.all(pendingTests).then(() => {
   if (!process.exitCode) process.stdout.write("Places behavior verification passed.\n");
 });

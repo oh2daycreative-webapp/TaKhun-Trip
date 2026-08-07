@@ -221,4 +221,12 @@ assert.equal(api.resolveDetailState({ validId: true, product: { product_id: "P-1
   }
 }
 
+assert.equal((source.match(/fetchPriority:\s*"high"/g) || []).length, 1);
+assert.match(source, /mediaIdFor\("product", product\.product_id\)/);
+assert.match(source, /product-card__image[\s\S]*?decorative:\s*true[\s\S]*?loading:\s*"lazy"/);
+assert.match(source, /product-detail-page__image[\s\S]*?fallbackAlt:[\s\S]*?loading:\s*"eager"[\s\S]*?fetchPriority:\s*"high"/);
+assert.match(source, /\(min-width: 901px\) 33vw, \(min-width: 621px\) 50vw, 100vw/);
+assert.match(source, /\(min-width: 901px\) 58vw, 100vw/);
+assert.doesNotMatch(source, /renderImage\([\s\S]*?image_url/);
+
 process.stdout.write("Products behavior verification passed.\n");

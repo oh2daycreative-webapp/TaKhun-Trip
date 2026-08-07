@@ -7,6 +7,8 @@
   ]);
   const DISTRICTS = Object.freeze(["ban_ta_khun", "khiri_rat_nikhom", "phanom"]);
   const PRODUCT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/;
+  const PRODUCT_CARD_SIZES = "(min-width: 901px) 33vw, (min-width: 621px) 50vw, 100vw";
+  const PRODUCT_DETAIL_SIZES = "(min-width: 901px) 58vw, 100vw";
 
   function parseProductId(search = global.location?.search || "") {
     return String(new URLSearchParams(search).get("id") || "").trim();
@@ -191,8 +193,20 @@
       panel.setAttribute("aria-label", format("products.image_alt", { name }));
       return panel;
     };
-    if (global.TakhunMedia?.renderImage) global.TakhunMedia.renderImage(mount, { mediaId: global.TakhunMedia.mediaIdFor("product", product.product_id), type: "product", role: "product", className: detail ? "product-detail-page__image" : "product-card__image", alt: format("products.image_alt", { name }), loading: detail ? "eager" : "lazy", sizes: detail ? "100vw" : "(min-width: 768px) 33vw, 100vw", lang: global.TakhunI18n?.getCurrentLang?.(), fallbackFactory });
-    else mount.append(fallbackFactory());
+    if (global.TakhunMedia?.renderImage) {
+      const options = detail
+        ? { mediaId: global.TakhunMedia.mediaIdFor("product", product.product_id), type: "product", role: "product", className: "product-detail-page__image", fallbackAlt: format("products.image_alt", { name }), loading: "eager", fetchPriority: "high", sizes: PRODUCT_DETAIL_SIZES, lang: global.TakhunI18n?.getCurrentLang?.(), fallbackFactory }
+        : { mediaId: global.TakhunMedia.mediaIdFor("product", product.product_id), type: "product", role: "product", className: "product-card__image", decorative: true, loading: "lazy", sizes: PRODUCT_CARD_SIZES, lang: global.TakhunI18n?.getCurrentLang?.(), fallbackFactory };
+      global.TakhunMedia.renderImage(mount, options);
+    } else {
+      const fallback = fallbackFactory();
+      if (!detail) {
+        fallback.setAttribute("aria-hidden", "true");
+        fallback.removeAttribute?.("role");
+        fallback.removeAttribute?.("aria-label");
+      }
+      mount.append(fallback);
+    }
   }
 
   function categoryLabel(value) { return t(`products.categories.${value}`); }

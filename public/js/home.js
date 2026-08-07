@@ -12,6 +12,9 @@
     "2 วัน 1 คืน": "trip_planner.duration_two_days_one_night"
   });
 
+  const HOME_THREE_COLUMN_SIZES = "(min-width: 900px) 33vw, (min-width: 600px) 50vw, 100vw";
+  const HOME_ROUTE_SIZES = "(min-width: 900px) calc(21vw - 1rem), (min-width: 600px) 42vw, 100vw";
+
   const HOME_DATA = Object.freeze({
     tripInspiration: Object.freeze([
       Object.freeze({ name_th: "ธรรมชาติ", name_en: "Nature", detail_th: "น้ำใส ภูเขา และอากาศดี", detail_en: "Clear water, mountains, and fresh air", href: "places.html?category=nature", tone: "nature", icon: "leaf" }),
@@ -264,17 +267,17 @@
     fallback.setAttribute("aria-label", format("home.image_alt", { name }));
     return fallback;
   }
-  function appendImage(mount, type, id, name) {
+  function appendImage(mount, type, id, name, sizes) {
     const fallbackFactory = () => imageFallback(name);
-    if (!global.TakhunMedia?.renderImage) { mount.append(fallbackFactory()); return; }
-    global.TakhunMedia.renderImage(mount, { mediaId: global.TakhunMedia.mediaIdFor(type, id), type, role: type === "product" ? "product" : "cover", className: "home-card__image", alt: format("home.image_alt", { name }), loading: "lazy", sizes: "(min-width: 1024px) 33vw, 100vw", lang: global.TakhunI18n?.getCurrentLang?.(), fallbackFactory });
+    if (!global.TakhunMedia?.renderImage) { const node = fallbackFactory(); node.setAttribute("aria-hidden", "true"); mount.append(node); return; }
+    global.TakhunMedia.renderImage(mount, { mediaId: global.TakhunMedia.mediaIdFor(type, id), type, role: type === "product" ? "product" : type === "route" ? "card" : "cover", className: "home-card__image", decorative: true, loading: "lazy", sizes, lang: global.TakhunI18n?.getCurrentLang?.(), fallbackFactory });
   }
 
   function renderPlaceCard(item) {
     const place = mapPlace(item, t);
     const card = make("article", "place-card");
     const media = make("div", "place-card__media home-card__media");
-    appendImage(media, "place", place.id, place.title);
+    appendImage(media, "place", place.id, place.title, HOME_THREE_COLUMN_SIZES);
     if (place.featured) media.append(make("span", "place-card__badge", t("home.featured_badge")));
     const content = make("div", "place-card__content");
     const category = make("p", "place-card__category", place.category);
@@ -294,7 +297,7 @@
     const route = mapRoute(item, t);
     const card = make("article", "route-card");
     const media = make("div", "route-card__media home-card__media");
-    appendImage(media, "route", route.id, route.title);
+    appendImage(media, "route", route.id, route.title, HOME_ROUTE_SIZES);
     if (route.featured) media.append(make("span", "route-card__type", t("home.featured_badge")));
     const content = make("div", "route-card__content");
     content.append(make("h3", "", route.title));
@@ -332,7 +335,7 @@
     const event = mapEvent(item);
     const card = make("article", "event-card");
     const media = make("div", "event-card__media home-card__media");
-    appendImage(media, "event", event.id, event.title);
+    appendImage(media, "event", event.id, event.title, HOME_THREE_COLUMN_SIZES);
     if (event.featured) media.append(make("span", "event-card__badge", t("home.event_featured")));
     const content = make("div", "event-card__content");
     content.append(make("p", "event-card__date", formatEventDate(event.date)), make("h3", "", event.title));
@@ -367,7 +370,7 @@
     if (!global.document?.querySelector?.(".home-page")) return;
     const heroMount = global.document.querySelector("[data-home-hero-media]");
     function renderHero(lang) {
-      global.TakhunMedia?.renderImage?.(heroMount, { mediaId: "home-hero-ratchaprapha", type: "home", role: "hero", className: "home-card__image", alt: lang === "en" ? "Ratchaprapha Dam lake and mountain landscape" : "ทิวทัศน์เขื่อนรัชชประภา ทะเลสาบ และแนวภูเขา", loading: "eager", sizes: "100vw", lang });
+      global.TakhunMedia?.renderImage?.(heroMount, { mediaId: "home-hero-ratchaprapha", type: "home", role: "hero", className: "home-card__image", fallbackAlt: t("home.image_fallback"), loading: "eager", fetchPriority: "high", sizes: "100vw", lang });
     }
     renderHero(normalizeLang(global.TakhunI18n?.getCurrentLang?.()));
     const mounts = Object.fromEntries(PRIMARY_STATES.map((state) => [state, [...global.document.querySelectorAll(`[data-home-state="${state}"]`)]]));

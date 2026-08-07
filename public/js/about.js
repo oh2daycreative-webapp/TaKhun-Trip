@@ -170,7 +170,6 @@
     const stateRegions = Array.from(root.querySelectorAll("[data-about-state]"));
     const siteName = root.querySelector("[data-about-site-name]");
     const slogan = root.querySelector("[data-about-slogan]");
-    const heroImage = root.querySelector("[data-about-hero-image]");
     const heroFallback = root.querySelector("[data-about-hero-fallback]");
     const heroMedia = root.querySelector(".about-page__hero-media");
     const logo = root.querySelector("[data-about-logo]");
@@ -185,11 +184,16 @@
       root.setAttribute("aria-busy", normalized === "loading" ? "true" : "false");
     }
 
-    function setImage(image, fallback, _value, altKey) {
-      const mount = heroMedia;
-      image.hidden = false;
-      if (!global.TakhunMedia?.renderImage || !mount) { image.hidden = true; if (fallback) fallback.hidden = false; return; }
-      global.TakhunMedia.renderImage(mount, { mediaId: global.TakhunMedia.mediaIdFor("shared", "shared-about-project"), type: "shared", role: "hero", className: "about-page__hero-image", alt: t(altKey), loading: "eager", sizes: "100vw", lang: global.TakhunI18n?.getCurrentLang?.(), fallbackFactory: () => { fallback.hidden = false; return fallback; } });
+    function renderHeroMedia(fallback) {
+      if (!global.TakhunMedia?.renderImage || !heroMedia) { fallback.hidden = false; return; }
+      fallback.hidden = true;
+      global.TakhunMedia.renderImage(heroMedia, {
+        mediaId: global.TakhunMedia.mediaIdFor("shared", "shared-about-project"),
+        type: "shared", role: "hero", className: "about-page__hero-image",
+        decorative: true, loading: "eager", fetchPriority: "high", sizes: "100vw",
+        lang: global.TakhunI18n?.getCurrentLang?.(),
+        fallbackFactory: () => { fallback.hidden = false; return fallback; }
+      });
     }
 
     function setContact(type, href, value = "") {
@@ -208,7 +212,7 @@
       siteName.textContent = name;
       slogan.textContent = localizedSlogan(settings, lang);
       slogan.hidden = !slogan.textContent;
-      setImage(heroImage, heroFallback, settings.hero_image_url, "about_page.hero_alt");
+      renderHeroMedia(heroFallback);
 
       const logoUrl = "";
       logoWrap.hidden = true;

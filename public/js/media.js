@@ -3,6 +3,7 @@
 (function createMediaRuntime(global) {
   const MANIFEST_PATH = "assets/media/manifest/media-manifest.json";
   const PLACEHOLDERS = Object.freeze({ hero: "hero", cover: "cover", card: "cover", place: "cover", route: "cover", event: "cover", product: "product", gallery: "gallery", shared: "hero" });
+  const PLACEHOLDER_PATTERN = /^assets\/media\/placeholders\/(?:hero|cover|product|gallery)\.svg$/;
   let manifest = Object.freeze({ version: 1, items: Object.freeze([]) });
   let loading = null;
 
@@ -22,9 +23,27 @@
 
   function placeholderPath(role) { return `assets/media/placeholders/${PLACEHOLDERS[role] || "cover"}.svg`; }
   function isLocalGeneratedPath(value) { return /^assets\/media\/generated\/[a-z0-9/_-]+\.webp$/i.test(String(value || "")); }
+  function isLocalPlaceholderPath(value) { return PLACEHOLDER_PATTERN.test(String(value || "")); }
+  function validDimension(value) { return Number.isInteger(value) && value > 0; }
 
   function normalizeManifest(value) {
-    const items = Array.isArray(value?.items) ? value.items.filter((item) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(item?.media_id || "")).map((item) => ({ ...item, outputs: (Array.isArray(item.outputs) ? item.outputs : []).filter((output) => isLocalGeneratedPath(output?.path)).sort((a, b) => Number(a.width) - Number(b.width)) })) : [];
+    const items = Array.isArray(value?.items) ? value.items.filter((item) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(item?.media_id || "")).map((item) => ({
+      media_id: item.media_id,
+      entity_type: String(item.entity_type || ""),
+      entity_id: String(item.entity_id || ""),
+      role: String(item.role || ""),
+      ratio: String(item.ratio || ""),
+      required: item.required === true,
+      alt_th: String(item.alt_th || ""),
+      alt_en: String(item.alt_en || ""),
+      fallback: isLocalPlaceholderPath(item.fallback) ? item.fallback : "",
+      outputs: (Array.isArray(item.outputs) ? item.outputs : []).filter((output) => isLocalGeneratedPath(output?.path) && validDimension(output.width) && validDimension(output.height)).map((output) => {
+        const normalized = { width: output.width, height: output.height, path: output.path };
+        if (validDimension(output.bytes)) normalized.bytes = output.bytes;
+        if (/^[a-f0-9]{64}$/i.test(String(output.sha256 || ""))) normalized.sha256 = output.sha256;
+        return normalized;
+      }).sort((a, b) => a.width - b.width)
+    })) : [];
     return Object.freeze({ version: 1, items: Object.freeze(items) });
   }
 
@@ -42,7 +61,32 @@
   function pictureModel(mediaId, lang = "th") {
     const item = findItem(mediaId);
     if (!item || !item.outputs.length) return null;
-    return { alt: String(item[lang === "en" ? "alt_en" : "alt_th"] || item.alt_th || ""), src: item.outputs.at(-1).path, srcset: item.outputs.map((output) => `${output.path} ${output.width}w`).join(", "), outputs: item.outputs.slice() };
+    const largest = item.outputs.at(-1);
+    return {
+      alt: String(lang === "en" ? item.alt_en || item.alt_th : item.alt_th || ""),
+      src: largest.path,
+      srcset: item.outputs.map((output) => `${output.path} ${output.width}w`).join(", "),
+      width: largest.width,
+      height: largest.height,
+      fallback: item.fallback,
+      outputs: item.outputs.map((output) => ({ ...output }))
+    };
+  }
+
+  function applyRequestOptions(image, options) {
+    if (options.loading === "eager" || options.loading === "lazy") image.loading = options.loading;
+    if (["high", "low", "auto"].includes(options.fetchPriority)) {
+      image.fetchPriority = options.fetchPriority;
+      image.setAttribute("fetchpriority", options.fetchPriority);
+    }
+  }
+
+  function hideDecorativeFallback(node, decorative) {
+    if (!node || !decorative) return node;
+    node.setAttribute?.("aria-hidden", "true");
+    node.removeAttribute?.("role");
+    node.removeAttribute?.("aria-label");
+    return node;
   }
 
   function renderImage(mount, options = {}) {
@@ -50,31 +94,35 @@
     const role = options.role || options.type || "cover";
     const generation = Number(mount._takhunMediaGeneration || 0) + 1;
     mount._takhunMediaGeneration = generation;
+    const placeholderAlt = options.decorative ? "" : String(options.fallbackAlt || options.alt || "");
     let current = mount.querySelector?.("[data-media-runtime]") || null;
-    const fallback = () => {
+    const replaceRuntime = (node) => {
+      if (current?.parentNode) current.replaceWith(node); else mount.prepend(node);
+      current = node;
+      return node;
+    };
+    const fallback = (path) => {
       const image = global.document.createElement("img");
       image.setAttribute("data-media-runtime", "placeholder");
       image.className = options.className || "";
-      image.src = placeholderPath(role);
-      image.alt = String(options.alt || "");
-      if (options.loading) image.loading = options.loading;
+      image.src = isLocalPlaceholderPath(path) ? path : placeholderPath(role);
+      image.alt = placeholderAlt;
+      applyRequestOptions(image, options);
       image.addEventListener("error", () => {
-        const node = typeof options.fallbackFactory === "function" ? options.fallbackFactory() : null;
+        if (mount._takhunMediaGeneration !== generation || !mount.isConnected || current !== image) return;
+        const node = hideDecorativeFallback(typeof options.fallbackFactory === "function" ? options.fallbackFactory() : null, options.decorative);
         if (node) {
           node.setAttribute?.("data-media-runtime", "fallback");
-          if (current?.parentNode) current.replaceWith(node); else mount.prepend(node);
-          current = node;
+          replaceRuntime(node);
         } else current?.remove?.();
       }, { once: true });
-      if (current?.parentNode) current.replaceWith(image); else mount.prepend(image);
-      current = image;
-      return image;
+      return replaceRuntime(image);
     };
-    fallback();
+    fallback(placeholderPath(role));
     loadManifest().then(() => {
-      if (mount._takhunMediaGeneration !== generation) return;
+      if (mount._takhunMediaGeneration !== generation || !mount.isConnected) return;
       const model = pictureModel(options.mediaId, options.lang);
-      if (!model || !mount.isConnected) return;
+      if (!model) return;
       const picture = global.document.createElement("picture");
       picture.setAttribute("data-media-runtime", "picture");
       picture.style.display = "contents";
@@ -83,15 +131,25 @@
       image.src = model.src;
       image.srcset = model.srcset;
       image.sizes = options.sizes || "100vw";
-      image.alt = String(options.alt || model.alt || "");
-      if (options.loading) image.loading = options.loading;
-      image.addEventListener("error", fallback, { once: true });
+      image.width = model.width;
+      image.height = model.height;
+      image.alt = options.decorative
+        ? ""
+        : Object.hasOwn(options, "alt")
+          ? String(options.alt || "")
+          : model.alt || String(options.fallbackAlt || "");
+      applyRequestOptions(image, options);
+      image.addEventListener("error", () => {
+        if (mount._takhunMediaGeneration !== generation || !mount.isConnected || current !== picture) return;
+        fallback(model.fallback || placeholderPath(role));
+      }, { once: true });
       picture.append(image);
+      if (mount._takhunMediaGeneration !== generation || !mount.isConnected) return;
       if (current?.parentNode) current.replaceWith(picture); else mount.prepend(picture);
       current = picture;
     });
     return current;
   }
 
-  global.TakhunMedia = Object.freeze({ mediaIdFor, placeholderPath, isLocalGeneratedPath, normalizeManifest, loadManifest, pictureModel, renderImage });
+  global.TakhunMedia = Object.freeze({ mediaIdFor, placeholderPath, isLocalGeneratedPath, isLocalPlaceholderPath, normalizeManifest, loadManifest, pictureModel, renderImage });
 })(window);

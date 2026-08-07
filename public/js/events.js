@@ -6,6 +6,8 @@
   ]);
   const EVENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/;
   const MONTH_PATTERN = /^(\d{4})-(0[1-9]|1[0-2])$/;
+  const EVENT_CARD_SIZES = "(min-width: 960px) 33vw, (min-width: 640px) 50vw, 100vw";
+  const EVENT_DETAIL_SIZES = "(min-width: 960px) 58vw, 100vw";
 
   function parseEventId(search = global.location?.search || "") {
     return String(new URLSearchParams(search).get("id") || "").trim();
@@ -259,8 +261,20 @@
       panel.setAttribute("aria-label", format("events.image_alt", { name }));
       return panel;
     };
-    if (global.TakhunMedia?.renderImage) global.TakhunMedia.renderImage(mount, { mediaId: global.TakhunMedia.mediaIdFor("event", event.event_id), type: "event", role: "cover", className: detail ? "event-detail-page__image" : "event-card__image", alt: format("events.image_alt", { name }), loading: detail ? "eager" : "lazy", sizes: detail ? "100vw" : "(min-width: 768px) 50vw, 100vw", lang: global.TakhunI18n?.getCurrentLang?.(), fallbackFactory });
-    else mount.append(fallbackFactory());
+    if (global.TakhunMedia?.renderImage) {
+      const options = detail
+        ? { mediaId: global.TakhunMedia.mediaIdFor("event", event.event_id), type: "event", role: "cover", className: "event-detail-page__image", fallbackAlt: format("events.image_alt", { name }), loading: "eager", fetchPriority: "high", sizes: EVENT_DETAIL_SIZES, lang: global.TakhunI18n?.getCurrentLang?.(), fallbackFactory }
+        : { mediaId: global.TakhunMedia.mediaIdFor("event", event.event_id), type: "event", role: "cover", className: "event-card__image", decorative: true, loading: "lazy", sizes: EVENT_CARD_SIZES, lang: global.TakhunI18n?.getCurrentLang?.(), fallbackFactory };
+      global.TakhunMedia.renderImage(mount, options);
+    } else {
+      const fallback = fallbackFactory();
+      if (!detail) {
+        fallback.setAttribute("aria-hidden", "true");
+        fallback.removeAttribute?.("role");
+        fallback.removeAttribute?.("aria-label");
+      }
+      mount.append(fallback);
+    }
   }
 
   function appendMetaLine(mount, className, label, value, timeValue = "") {
