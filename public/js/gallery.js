@@ -130,7 +130,7 @@
   function openViewerState(state, item, trigger = null) {
     const mediaType = normalizeMediaType(item?.media_type);
     let mode = "invalid";
-    if (mediaType === "image" && safeMediaUrl(item?.image_url || item?.media_url)) mode = "image";
+    if (mediaType === "image" && validateMediaId(item?.media_id)) mode = "image";
     if (mediaType === "video" && isDirectVideoUrl(item?.video_url || item?.media_url)) mode = "video";
     else if (mediaType === "video" && safeExternalUrl(item?.video_url || item?.media_url)) mode = "external";
     return { ...createViewerState(), ...state, isOpen: true, item: item ? { ...item } : null, mode, returnFocus: trigger };
@@ -194,6 +194,8 @@
       return fallback;
     }
 
+    function videoSourceUrl(item) { return safeMediaUrl(item.video_url || item.media_url); }
+
     function renderCard(item, index) {
       const lang = currentLang();
       const name = localized(item, "title", lang) || localized(item, "caption", lang) || t("gallery.unnamed");
@@ -202,7 +204,7 @@
       const card = make("article", "gallery-card");
       const media = make("div", "gallery-card__media");
       const fallbackFactory = () => fallbackMedia(name);
-      if (global.TakhunMedia?.renderImage) global.TakhunMedia.renderImage(media, { mediaId: global.TakhunMedia.mediaIdFor("gallery", item.media_id), type: "gallery", role: "gallery", className: "gallery-card__image", alt: localized(item, "alt_text", lang) || format(type === "video" ? "gallery.video_thumbnail_alt" : "gallery.image_alt", { name }), loading: "lazy", sizes: "(min-width: 768px) 33vw, 100vw", lang, fallbackFactory });
+      if (global.TakhunMedia?.renderImage) global.TakhunMedia.renderImage(media, { mediaId: global.TakhunMedia.mediaIdFor("gallery", item.media_id), type: "gallery", role: "gallery", className: "gallery-card__image", fallbackAlt: localized(item, "alt_text", lang) || format("gallery.image_alt", { name }), loading: "lazy", sizes: "(min-width: 1080px) 33vw, (min-width: 640px) 50vw, 100vw", lang, fallbackFactory });
       else media.append(fallbackFactory());
       media.append(make("span", "gallery-card__badge", t(type === "video" ? "gallery.video_label" : "gallery.image_label")));
       const content = make("div", "gallery-card__content");
@@ -251,10 +253,10 @@
       viewerTitle.textContent = name;
       viewerCaption.textContent = localized(item, "caption", lang);
       viewerMedia.replaceChildren();
-      const mediaUrl = item.media_type === "image" ? "" : safeMediaUrl(item.video_url || item.media_url);
+      const mediaUrl = item.media_type === "image" ? "" : videoSourceUrl(item);
       if (viewerState.mode === "image") {
         const fallbackFactory = () => fallbackMedia(name, "gallery.media_load_failed");
-        if (global.TakhunMedia?.renderImage) global.TakhunMedia.renderImage(viewerMedia, { mediaId: global.TakhunMedia.mediaIdFor("gallery", item.media_id), type: "gallery", role: "gallery", alt: localized(item, "alt_text", lang) || format("gallery.image_alt", { name }), loading: "eager", sizes: "100vw", lang, fallbackFactory }); else viewerMedia.append(fallbackFactory());
+        if (global.TakhunMedia?.renderImage) global.TakhunMedia.renderImage(viewerMedia, { mediaId: global.TakhunMedia.mediaIdFor("gallery", item.media_id), type: "gallery", role: "gallery", fallbackAlt: localized(item, "alt_text", lang) || format("gallery.image_alt", { name }), loading: "eager", sizes: "(min-width: 1280px) 72rem, 90vw", lang, fallbackFactory }); else viewerMedia.append(fallbackFactory());
       } else if (viewerState.mode === "video") {
         const video = make("video"); video.src = mediaUrl; video.controls = true; video.preload = "metadata"; video.setAttribute("playsinline", ""); video.addEventListener("error", showMediaError, { once: true }); viewerMedia.append(video);
       } else {

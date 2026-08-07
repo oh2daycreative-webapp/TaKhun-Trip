@@ -159,19 +159,30 @@ for (const [input, expected] of [
 
 {
   const trigger = { id: "button" };
-  const item = { media_id: "G-1", media_type: "image", image_url: "https://example.com/a.jpg" };
   const initial = api.createViewerState();
-  const opened = api.openViewerState(initial, item, trigger);
+  const localImage = api.openViewerState(initial, {
+    media_id: "GALLERY-DAM-LAKE-001", media_type: "image", image_url: "", media_url: ""
+  }, trigger);
+  assert.equal(localImage.mode, "image");
+  const opened = api.openViewerState(initial, { media_id: "G-1", media_type: "image" }, trigger);
   assert.equal(opened.isOpen, true);
   assert.equal(opened.item.media_id, "G-1");
   assert.equal(opened.returnFocus, trigger);
   const closed = api.closeViewerState(opened);
   assert.equal(closed.isOpen, false);
   assert.equal(closed.returnFocus, trigger);
+  assert.equal(api.openViewerState(initial, { media_id: "bad id", media_type: "image", image_url: "https://example.com/a.jpg" }, trigger).mode, "invalid");
+  assert.equal(api.openViewerState(initial, { media_id: "G-4", media_type: "image", image_url: "javascript:bad" }, trigger).mode, "image", "remote image fields are ignored for valid local IDs");
   assert.equal(api.openViewerState(initial, { media_id: "G-2", media_type: "video", video_url: "https://cdn.example/v.mp4" }, trigger).mode, "video");
   assert.equal(api.openViewerState(initial, { media_id: "G-3", media_type: "video", video_url: "https://youtube.com/watch?v=1" }, trigger).mode, "external");
-  assert.equal(api.openViewerState(initial, { media_id: "G-4", media_type: "image", image_url: "javascript:bad" }, trigger).mode, "invalid");
+  assert.equal(api.openViewerState(initial, { media_id: "G-5", media_type: "video", video_url: "javascript:bad" }, trigger).mode, "invalid");
 }
+
+assert.match(source, /mediaIdFor\("gallery", item\.media_id\)/);
+assert.match(source, /gallery-card__image[\s\S]*?fallbackAlt:[\s\S]*?loading:\s*"lazy"/);
+assert.match(source, /\(min-width: 1080px\) 33vw, \(min-width: 640px\) 50vw, 100vw/);
+assert.match(source, /viewerMedia[\s\S]*?loading:\s*"eager"[\s\S]*?sizes:\s*"\(min-width: 1280px\) 72rem, 90vw"/);
+assert.doesNotMatch(source, /renderImage\([\s\S]*?(?:image_url|media_url|thumbnail_url)/);
 
 process.stdout.write("Gallery behavior verification passed.\n");
 
