@@ -254,6 +254,29 @@ async function run() {
     }
   });
 
+  await test("public media containers match approved production ratios", () => {
+    const css = fs.readFileSync(path.join(root, "public/css/components.css"), "utf8");
+    assert.match(css, /\.home-page \.place-card__media[^\{]*\{[^}]*aspect-ratio:\s*3\s*\/\s*2/);
+    assert.match(css, /\.home-page \.route-card__media[^\{]*\{[^}]*aspect-ratio:\s*16\s*\/\s*9/);
+    assert.match(css, /\.place-card--listing \.place-card__image-wrap[^\{]*\{[^}]*aspect-ratio:\s*3\s*\/\s*2/);
+    assert.match(css, /\.place-detail-page \.detail-gallery__media[^\{]*\{[^}]*aspect-ratio:\s*3\s*\/\s*2/);
+    assert.match(css, /\.routes-page \.route-explorer-card__media[^\{]*\{[^}]*aspect-ratio:\s*16\s*\/\s*9/);
+    assert.match(css, /\.products-page \.product-card__media[^\{]*\{[^}]*aspect-ratio:\s*1\s*\/\s*1/);
+    assert.match(css, /\.events-page \.event-card__media[^\{]*\{[^}]*aspect-ratio:\s*3\s*\/\s*2/);
+    assert.match(css, /\.gallery-page \.gallery-card__image[^\{]*\{[^}]*aspect-ratio:\s*3\s*\/\s*2/);
+  });
+
+  await test("public controllers never render API image URLs or private media sources", () => {
+    const files = ["home.js", "places.js", "place-detail.js", "routes.js", "products.js", "events.js", "gallery.js", "about.js"];
+    for (const file of files) {
+      const controller = fs.readFileSync(path.join(root, "public/js", file), "utf8");
+      assert.equal(controller.includes("media-source"), false, file);
+      assert.equal(/\.innerHTML\s*=/.test(controller), false, file);
+      const calls = controller.match(/TakhunMedia(?:\?\.)?\.renderImage\([\s\S]*?\}\s*\)/g) || [];
+      for (const call of calls) assert.equal(/\b(?:cover_image_url|image_url|thumbnail_url|hero_image_url)\b/.test(call), false, `${file}: ${call}`);
+    }
+  });
+
   await test("validates filename IDs duplicates missing files and ratio policy", async () => {
     const temp = fs.mkdtempSync(path.join(os.tmpdir(), "takhun-media-validate-"));
     try {
