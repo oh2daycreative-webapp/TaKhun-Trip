@@ -109,7 +109,7 @@
       image.alt = placeholderAlt;
       applyRequestOptions(image, options);
       image.addEventListener("error", () => {
-        if (mount._takhunMediaGeneration !== generation || !mount.isConnected) return;
+        if (mount._takhunMediaGeneration !== generation || !mount.isConnected || current !== image) return;
         const node = hideDecorativeFallback(typeof options.fallbackFactory === "function" ? options.fallbackFactory() : null, options.decorative);
         if (node) {
           node.setAttribute?.("data-media-runtime", "fallback");
@@ -140,7 +140,7 @@
           : model.alt || String(options.fallbackAlt || "");
       applyRequestOptions(image, options);
       image.addEventListener("error", () => {
-        if (mount._takhunMediaGeneration !== generation || !mount.isConnected) return;
+        if (mount._takhunMediaGeneration !== generation || !mount.isConnected || current !== picture) return;
         fallback(model.fallback || placeholderPath(role));
       }, { once: true });
       picture.append(image);

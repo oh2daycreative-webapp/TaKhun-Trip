@@ -411,6 +411,16 @@ async function run() {
     assert.equal(mount.children.includes(badge), true);
   });
 
+  await test("runtime renderer ignores errors from a replaced placeholder", async () => {
+    const { document, mount } = createMediaDom();
+    const { api } = loadBrowserMedia({ document, fetch: async () => ({ ok: true, json: async () => fixtureManifest() }) });
+    const placeholder = api.renderImage(mount, { mediaId: "fixture-hero", lang: "en" });
+    await flushPromises();
+    const picture = mount.querySelector("[data-media-runtime]");
+    placeholder.dispatch("error");
+    assert.equal(mount.querySelector("[data-media-runtime]"), picture);
+  });
+
   await test("runtime renderer separates decorative alt from informative fallback alt", async () => {
     const { document, mount } = createMediaDom();
     const semanticFallback = document.createElement("span");
