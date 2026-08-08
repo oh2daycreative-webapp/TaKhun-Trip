@@ -6,8 +6,21 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const directory = path.join(__dirname, "../apps-script");
-const files = fs.readdirSync(directory).filter((name) => name.endsWith(".gs")).sort();
-const sources = files.map((name) => ({ name, source: fs.readFileSync(path.join(directory, name), "utf8") }));
+const sources = fs.readdirSync(directory)
+  .filter((name) => name.endsWith(".gs"))
+  .sort()
+  .map((name) => ({ name, source: fs.readFileSync(path.join(directory, name), "utf8") }));
+const router = sources.find(({ name }) => name === "Router.gs").source;
+const apiResponse = sources.find(({ name }) => name === "ApiResponse.gs").source;
+const publicGetActions = [
+  "getCategories", "getEventDetail", "getEvents", "getGallery", "getHomeData", "getMapPlaces",
+  "getPlaceDetail", "getPlaces", "getProductDetail", "getProducts", "getReviews", "getRouteDetail",
+  "getRoutes", "getSettings", "getTripTemplates", "searchAll"
+];
+const safeServerError = {
+  ok: false,
+  error: { code: "SERVER_ERROR", message: "เกิดข้อผิดพลาดของระบบ" }
+};
 
 for (const { name, source } of sources) {
   new vm.Script(source, { filename: `apps-script/${name}` });
@@ -23,50 +36,391 @@ for (const { name, source } of sources) {
   }
 }
 
-const router = sources.find(({ name }) => name === "Router.gs").source;
-const cases = [...router.matchAll(/case\s+"([^"]+)"\s*:/g)].map((match) => match[1]);
-assert.equal(new Set(cases).size, cases.length, "Router must not contain duplicate action cases");
-assert.deepEqual(cases.sort(), ["getCategories", "getEventDetail", "getEvents", "getGallery", "getHomeData", "getMapPlaces", "getPlaceDetail", "getPlaces", "getProductDetail", "getProducts", "getReviews", "getRouteDetail", "getRoutes", "getSettings", "getTripTemplates", "searchAll"]);
-assert.match(router, /action\s*===\s*"submitReview"/);
+const postActions = ["submitReview", "adminLogin", "adminValidateSession", "adminLogout"];
+
+function assertStaticPostActionAllowlist(source) {
+  const actions = [...source.matchAll(/(?<![.\w$])action\s*===\s*"([^"]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(actions.sort(), [...postActions].sort(), "Router POST action comparisons must be exactly the approved allowlist");
+}
+
+const routerCases = [...router.matchAll(/case\s+"([^"]+)"\s*:/g)].map((match) => match[1]);
+assert.equal(new Set(routerCases).size, routerCases.length, "Router must not contain duplicate action cases");
+assert.deepEqual(routerCases.sort(), publicGetActions);
+assertStaticPostActionAllowlist(router);
+assert.throws(
+  () => assertStaticPostActionAllowlist(`${router}\nif (action === "adminFuture") return createJsonResponse_(adminFuture_());`),
+  /Router POST action comparisons must be exactly the approved allowlist/
+);
 assert.match(router, /createJsonResponse_\(/);
 assert.match(router, /UNKNOWN_ACTION/);
 assert.match(router, /SERVER_ERROR/);
 assert.doesNotMatch(router, /stack|spreadsheetId|_error\.(?:message|stack)/);
-
-const calls = [];
-const routerContext = {
-  JSON,
-  ContentService: {
-    MimeType: { JSON: "application/json" },
-    createTextOutput(text) { return { text, mime: "", setMimeType(mime) { this.mime = mime; return this; } }; }
-  }
-};
-for (const action of cases) routerContext[`${action}_`] = (parameters) => { calls.push({ action, parameters }); return { ok: true, data: { action } }; };
-routerContext.submitReview_ = (payload) => { calls.push({ action: "submitReview", payload }); return { ok: true, data: { review_id: "REV-TEST", status: "pending" } }; };
-vm.createContext(routerContext);
-vm.runInContext(sources.find(({ name }) => name === "ApiResponse.gs").source, routerContext, { filename: "apps-script/ApiResponse.gs" });
-vm.runInContext(router, routerContext, { filename: "apps-script/Router.gs" });
-for (const action of cases) {
-  const output = routerContext.routeRequest_("GET", { parameter: { action, marker: "kept" } });
-  assert.equal(output.mime, "application/json");
-  assert.deepEqual(JSON.parse(output.text), { ok: true, data: { action } });
+assert.doesNotMatch(router, /\b(?:eval|Function)\s*\(/, "Router must not dynamically evaluate action names");
+assert.doesNotMatch(router, /(?:this|globalThis)\s*\[\s*action\s*\]|\[\s*action\s*\]\s*\(/, "Router must use static action branches");
+for (const editorOnlyName of ["setupAdminAuthSchema", "benchmarkAdminPbkdf2", "bootstrapFirstAdmin"]) {
+  assert.doesNotMatch(router, new RegExp(`\\b${editorOnlyName}\\b`), `Router must not reference editor-only ${editorOnlyName}`);
 }
-assert.equal(calls.length, cases.length);
-assert.equal(calls.every((call) => call.parameters.marker === "kept"), true);
-const submitted = JSON.parse(routerContext.routeRequest_("POST", { postData: { contents: JSON.stringify({ action: "submitReview", payload: { place_id: "P-1", rating: 5, comment: "good" } }) } }).text);
-assert.deepEqual(submitted, { ok: true, data: { review_id: "REV-TEST", status: "pending" } });
-assert.deepEqual(calls.at(-1).payload, { place_id: "P-1", rating: 5, comment: "good" });
-assert.equal(JSON.parse(routerContext.routeRequest_("GET", { parameter: { action: "submitReview" } }).text).error.code, "UNKNOWN_ACTION");
-assert.equal(JSON.parse(routerContext.routeRequest_("POST", { postData: { contents: JSON.stringify({ action: "getReviews", payload: {} }) } }).text).error.code, "UNKNOWN_ACTION");
-assert.equal(JSON.parse(routerContext.routeRequest_("POST", { postData: { contents: JSON.stringify({ action: "searchAll", payload: {} }) } }).text).error.code, "UNKNOWN_ACTION");
-assert.equal(JSON.parse(routerContext.routeRequest_("POST", {}).text).error.code, "VALIDATION_ERROR");
-assert.equal(JSON.parse(routerContext.routeRequest_("POST", { postData: { contents: "{" } }).text).error.code, "VALIDATION_ERROR");
-routerContext.submitReview_ = () => { throw new Error("sheet reviews spreadsheet id stack secret"); };
-assert.deepEqual(JSON.parse(routerContext.routeRequest_("POST", { postData: { contents: JSON.stringify({ action: "submitReview", payload: {} }) } }).text), { ok: false, error: { code: "SERVER_ERROR", message: "เกิดข้อผิดพลาดของระบบ" } });
-routerContext.getGallery_ = () => { throw new Error("gallery / sheet / spreadsheet id / stack secret"); };
-assert.deepEqual(JSON.parse(routerContext.routeRequest_("GET", { parameter: { action: "getGallery" } }).text), { ok: false, error: { code: "SERVER_ERROR", message: "เกิดข้อผิดพลาดของระบบ" } });
-routerContext.searchAll_ = () => { throw new Error("search / sheet / spreadsheet id / stack secret"); };
-assert.deepEqual(JSON.parse(routerContext.routeRequest_("GET", { parameter: { action: "searchAll", keyword: "lake" } }).text), { ok: false, error: { code: "SERVER_ERROR", message: "เกิดข้อผิดพลาดของระบบ" } });
-assert.equal(JSON.parse(routerContext.routeRequest_("GET", { parameter: { action: "missing" } }).text).error.code, "UNKNOWN_ACTION");
 
-process.stdout.write(`Apps Script static verification passed for ${files.length} files and ${declarations.size} unique functions.\n`);
+function createRouterRuntime({ routerSource = router, json = JSON } = {}) {
+  const calls = [];
+  const context = {
+    JSON: json,
+    Object,
+    Array,
+    String,
+    ContentService: {
+      MimeType: { JSON: "application/json" },
+      createTextOutput(text) { return { text, mime: "", setMimeType(mime) { this.mime = mime; return this; } }; }
+    }
+  };
+  for (const action of publicGetActions) {
+    context[`${action}_`] = (...args) => {
+      calls.push({ action, args });
+      return { ok: true, data: { action } };
+    };
+  }
+  context.submitReview_ = (...args) => {
+    calls.push({ action: "submitReview", args });
+    return { ok: true, data: { review_id: "REV-TEST", status: "pending" } };
+  };
+  for (const action of ["adminLogin", "adminValidateSession", "adminLogout"]) {
+    context[`${action}_`] = (...args) => {
+      calls.push({ action, args });
+      return { ok: true, data: { action } };
+    };
+  }
+  vm.createContext(context);
+  vm.runInContext(apiResponse, context, { filename: "apps-script/ApiResponse.gs" });
+  vm.runInContext(routerSource, context, { filename: "apps-script/Router.gs" });
+  return { context, calls };
+}
+
+function response(output) {
+  assert.equal(output.mime, "application/json", "Router must use the standard JSON content type");
+  return JSON.parse(output.text);
+}
+
+function post(runtime, body, extraEvent = {}) {
+  return response(runtime.context.routeRequest_("POST", {
+    ...extraEvent,
+    postData: { contents: typeof body === "string" ? body : JSON.stringify(body) }
+  }));
+}
+
+function postEvent(runtime, event) {
+  return response(runtime.context.routeRequest_("POST", event));
+}
+
+function assertBodyArgument(routerSource, action, body, event, expected) {
+  const runtime = createRouterRuntime({ routerSource });
+  assert.deepEqual(postEvent(runtime, {
+    ...event,
+    postData: { ...(event.postData || {}), contents: JSON.stringify(body) }
+  }), { ok: true, data: { action } });
+  assert.deepEqual(runtime.calls, [{ action, args: [expected] }]);
+}
+
+function createCountingJson() {
+  const counter = { parseCalls: 0 };
+  return {
+    counter,
+    json: {
+      parse(value) { counter.parseCalls += 1; return JSON.parse(value); },
+      stringify: JSON.stringify.bind(JSON)
+    }
+  };
+}
+
+function assertRouterParseCalls(routerSource, contents, expectedCalls) {
+  const counting = createCountingJson();
+  const runtime = createRouterRuntime({ routerSource, json: counting.json });
+  postEvent(runtime, { postData: { contents } });
+  assert.equal(counting.counter.parseCalls, expectedCalls, `Router must parse nonempty contents once: ${contents}`);
+}
+
+function assertSafeError(output, code) {
+  assert.equal(output.ok, false);
+  assert.equal(output.error.code, code);
+  assert.equal("data" in output, false);
+}
+
+// Public GET contracts are independently snapshotted before Admin dispatch assertions.
+{
+  const runtime = createRouterRuntime();
+  for (const action of publicGetActions) {
+    assert.deepEqual(response(runtime.context.routeRequest_("GET", { parameter: { action, marker: "kept" } })), { ok: true, data: { action } });
+  }
+  assert.deepEqual(response(runtime.context.routeRequest_("GET", { parameter: { action: " getPlaces ", marker: "kept" } })), { ok: true, data: { action: "getPlaces" } });
+  assert.equal(runtime.calls.length, publicGetActions.length + 1);
+  assert.equal(runtime.calls.every(({ args }) => args.length === 1 && args[0].marker === "kept"), true);
+  assertSafeError(response(runtime.context.routeRequest_("GET", { parameter: { action: "missing" } })), "UNKNOWN_ACTION");
+}
+
+// Existing review POST behavior remains body-driven and forwards only its payload.
+{
+  const runtime = createRouterRuntime();
+  const payload = { place_id: "P-1", rating: 5, comment: "good" };
+  assert.deepEqual(post(runtime, { action: "submitReview", payload }), { ok: true, data: { review_id: "REV-TEST", status: "pending" } });
+  assert.deepEqual(runtime.calls, [{ action: "submitReview", args: [payload] }]);
+  assertSafeError(response(runtime.context.routeRequest_("GET", { parameter: { action: "submitReview" } })), "UNKNOWN_ACTION");
+}
+
+// Legacy public POST query-only actions never enter body validation or GET dispatch.
+{
+  const runtime = createRouterRuntime();
+  assertSafeError(response(runtime.context.routeRequest_("POST", { parameter: { action: "getPlaces" } })), "UNKNOWN_ACTION");
+  assert.equal(runtime.calls.length, 0);
+}
+
+// Each permitted POST action reaches exactly one bounded service argument from the JSON body.
+{
+  const runtime = createRouterRuntime();
+  const loginPayload = { username: "  MiXeD_User  ", password: "\tP@ss Word  \n" };
+  const token = "\tToKeN-Raw_Ab9  \n";
+  const requests = [
+    { body: { action: "submitReview", payload: { place_id: "P-1" } }, action: "submitReview", value: { place_id: "P-1" } },
+    { body: { action: "adminLogin", payload: loginPayload, token: "ignore", unexpected: true }, action: "adminLogin", value: loginPayload },
+    { body: { action: "adminValidateSession", token, payload: { ignored: true }, unexpected: true }, action: "adminValidateSession", value: token },
+    { body: { action: "adminLogout", token, payload: { ignored: true }, unexpected: true }, action: "adminLogout", value: token }
+  ];
+  for (const { body, action } of requests) {
+    assert.deepEqual(post(runtime, body), action === "submitReview"
+      ? { ok: true, data: { review_id: "REV-TEST", status: "pending" } }
+      : { ok: true, data: { action } });
+  }
+  assert.equal(runtime.calls.length, requests.length);
+  for (let index = 0; index < requests.length; index += 1) {
+    assert.equal(runtime.calls[index].action, requests[index].action);
+    assert.equal(runtime.calls[index].args.length, 1);
+    assert.deepEqual(runtime.calls[index].args[0], requests[index].value);
+  }
+}
+
+// Admin forwarding preserves body bytes exactly; Router does not trim, lowercase, or fall back to event data.
+for (const [action, body, expected] of [
+  ["adminLogin", { action: "adminLogin", payload: { username: "  MiXeD_User  ", password: "\tP@ss Word  \n" } }, { username: "  MiXeD_User  ", password: "\tP@ss Word  \n" }],
+  ["adminValidateSession", { action: "adminValidateSession", token: "\tToKeN-Raw_Ab9  \n" }, "\tToKeN-Raw_Ab9  \n"],
+  ["adminLogout", { action: "adminLogout", token: "\tToKeN-Raw_Ab9  \n" }, "\tToKeN-Raw_Ab9  \n"]
+]) {
+  assertBodyArgument(router, action, body, {}, expected);
+}
+for (const [action, body, event] of [
+  ["adminLogin", { action: "adminLogin" }, {
+    parameter: { action: "adminLogout", payload: { username: "QUERY", password: "QUERY" }, token: "QUERY_TOKEN" },
+    headers: { Authorization: "HEADER_TOKEN" }, payload: { username: "EVENT", password: "EVENT" }, token: "EVENT_TOKEN",
+    postData: { payload: { username: "POSTDATA", password: "POSTDATA" }, token: "POSTDATA_TOKEN" }
+  }],
+  ["adminValidateSession", { action: "adminValidateSession" }, {
+    parameter: { action: "adminLogin", payload: "QUERY_PAYLOAD", token: "QUERY_TOKEN" },
+    headers: { Authorization: "HEADER_TOKEN" }, payload: "EVENT_PAYLOAD", token: "EVENT_TOKEN",
+    postData: { payload: "POSTDATA_PAYLOAD", token: "POSTDATA_TOKEN" }
+  }],
+  ["adminLogout", { action: "adminLogout" }, {
+    parameter: { action: "adminValidateSession", payload: "QUERY_PAYLOAD", token: "QUERY_TOKEN" },
+    headers: { Authorization: "HEADER_TOKEN" }, payload: "EVENT_PAYLOAD", token: "EVENT_TOKEN",
+    postData: { payload: "POSTDATA_PAYLOAD", token: "POSTDATA_TOKEN" }
+  }]
+]) {
+  assertBodyArgument(router, action, body, event, undefined);
+}
+
+// Detector proofs: these realistic normalization and fallback mutations are rejected by the body contract.
+assert.throws(
+  () => assertBodyArgument(
+    router.replace("adminLogin_(body.payload)", "adminLogin_({ username: body.payload.username.trim().toLowerCase(), password: body.payload.password.trim() })"),
+    "adminLogin",
+    { action: "adminLogin", payload: { username: "  MiXeD_User  ", password: "\tP@ss Word  \n" } },
+    {},
+    { username: "  MiXeD_User  ", password: "\tP@ss Word  \n" }
+  ),
+  /Expected values to be strictly deep-equal/
+);
+assert.throws(
+  () => assertBodyArgument(
+    router.replace("adminValidateSession_(body.token)", "adminValidateSession_(body.token.trim())"),
+    "adminValidateSession",
+    { action: "adminValidateSession", token: "\tToKeN-Raw_Ab9  \n" },
+    {},
+    "\tToKeN-Raw_Ab9  \n"
+  ),
+  /Expected values to be strictly deep-equal/
+);
+assert.throws(
+  () => assertBodyArgument(
+    router.replace("adminLogin_(body.payload)", "adminLogin_(body.payload || parameters.payload)"),
+    "adminLogin",
+    { action: "adminLogin" },
+    { parameter: { payload: { username: "QUERY", password: "QUERY" } } },
+    undefined
+  ),
+  /Expected values to be strictly deep-equal/
+);
+assert.throws(
+  () => assertBodyArgument(
+    router.replace("adminValidateSession_(body.token)", "adminValidateSession_(body.token || event.token)"),
+    "adminValidateSession",
+    { action: "adminValidateSession" },
+    { token: "EVENT_TOKEN" },
+    undefined
+  ),
+  /Expected values to be strictly deep-equal/
+);
+assert.throws(
+  () => assertBodyArgument(
+    router.replace("adminLogout_(body.token)", "adminLogout_(body.token || event.headers.Authorization || event.postData.token)"),
+    "adminLogout",
+    { action: "adminLogout" },
+    { headers: { Authorization: "HEADER_TOKEN" }, postData: { token: "POSTDATA_TOKEN" } },
+    undefined
+  ),
+  /Expected values to be strictly deep-equal/
+);
+assert.throws(
+  () => assertBodyArgument(
+    router.replace("adminLogout_(body.token)", "adminLogout_(body.token || event.postData.token)"),
+    "adminLogout",
+    { action: "adminLogout" },
+    { postData: { token: "POSTDATA_TOKEN" } },
+    undefined
+  ),
+  /Expected values to be strictly deep-equal/
+);
+
+// Query strings and headers cannot override a body-selected Admin action or add arguments.
+for (const [action, body, expected] of [
+  ["adminLogin", { action: "adminLogin", payload: { username: "body-user", password: "body-password" } }, { username: "body-user", password: "body-password" }],
+  ["adminValidateSession", { action: "adminValidateSession", token: "BODY_TOKEN" }, "BODY_TOKEN"],
+  ["adminLogout", { action: "adminLogout", token: "BODY_TOKEN" }, "BODY_TOKEN"]
+]) {
+  const runtime = createRouterRuntime();
+  assert.deepEqual(post(runtime, body, {
+    parameter: { action: "submitReview", token: "QUERY_TOKEN", payload: "query-payload" },
+    headers: { Authorization: "Bearer HEADER_TOKEN" }
+  }), { ok: true, data: { action } });
+  assert.deepEqual(runtime.calls, [{ action, args: [expected] }]);
+}
+
+// Parse failures and non-object JSON are safe and never call any service.
+for (const contents of [undefined, "", "   ", "{", "null", "[]", "true", "17", "\"primitive\""]) {
+  const runtime = createRouterRuntime();
+  const event = contents === undefined ? {} : { postData: { contents } };
+  const output = response(runtime.context.routeRequest_("POST", event));
+  assertSafeError(output, [undefined, "", "   ", "{"].includes(contents) ? "VALIDATION_ERROR" : "UNKNOWN_ACTION");
+  assert.equal(runtime.calls.length, 0, `invalid body ${String(contents)} must not call a service`);
+  assert.equal(JSON.stringify(output).includes("SENTINEL_PASSWORD_DO_NOT_LOG"), false);
+}
+
+// Router parses each nonempty string POST body exactly once, independently of response serialization.
+for (const contents of [
+  JSON.stringify({ action: "adminLogin", payload: { username: "operator", password: "password" } }),
+  "{",
+  "null",
+  "[]",
+  "true",
+  "17",
+  "\"primitive\""
+]) {
+  assertRouterParseCalls(router, contents, 1);
+}
+const parseTwiceForNonObjects = router.replace(
+  '      action = body && typeof body === "object" && !Array.isArray(body) && typeof body.action === "string" ? body.action.trim() : "";',
+  '      if (body === null || Array.isArray(body) || typeof body !== "object") JSON.parse(event.postData.contents);\n      action = body && typeof body === "object" && !Array.isArray(body) && typeof body.action === "string" ? body.action.trim() : "";'
+);
+for (const contents of ["null", "[]", "true", "17", "\"primitive\""]) {
+  assert.throws(
+    () => assertRouterParseCalls(parseTwiceForNonObjects, contents, 1),
+    /Router must parse nonempty contents once/
+  );
+}
+for (const event of [
+  {},
+  { postData: {} },
+  { postData: { contents: null } },
+  { postData: { contents: 7 } },
+  { postData: { contents: "" } },
+  { postData: { contents: " \t\n" } }
+]) {
+  const counting = createCountingJson();
+  const runtime = createRouterRuntime({ json: counting.json });
+  postEvent(runtime, event);
+  assert.equal(counting.counter.parseCalls, 0, "Router must not parse absent, non-string, or blank contents");
+}
+{
+  const runtime = createRouterRuntime();
+  assertSafeError(response(runtime.context.routeRequest_("POST", { postData: {} })), "VALIDATION_ERROR");
+  assert.equal(runtime.calls.length, 0, "a missing postData.contents must not call a service");
+}
+for (const body of [{}, { action: 7 }, { action: false }, { action: {} }, { action: "unknownAction", payload: "SENTINEL_PASSWORD_DO_NOT_LOG" }]) {
+  const runtime = createRouterRuntime();
+  const output = post(runtime, body);
+  assertSafeError(output, "UNKNOWN_ACTION");
+  assert.equal(runtime.calls.length, 0);
+  assert.equal(JSON.stringify(output).includes("SENTINEL_PASSWORD_DO_NOT_LOG"), false);
+}
+for (const action of publicGetActions) {
+  const runtime = createRouterRuntime();
+  assertSafeError(post(runtime, { action, payload: {} }), "UNKNOWN_ACTION");
+  assert.equal(runtime.calls.length, 0, `POST ${action} must not reuse a public GET route`);
+}
+
+// GET and query values cannot activate Admin actions or deliver URL/header tokens.
+for (const action of ["adminLogin", "adminValidateSession", "adminLogout"]) {
+  for (const parameter of [
+    { action, token: "T".repeat(43) },
+    { method: action, token: "T".repeat(43) },
+    { action: "missing", method: action, token: "T".repeat(43) }
+  ]) {
+    const runtime = createRouterRuntime();
+    assertSafeError(response(runtime.context.routeRequest_("GET", { parameter, headers: { Authorization: "Bearer URL_TOKEN" } })), "UNKNOWN_ACTION");
+    assert.equal(runtime.calls.some(({ action: called }) => called.startsWith("admin")), false);
+  }
+}
+
+// Editor-only entry points stay unreachable through every Router input channel.
+for (const editorOnlyName of ["setupAdminAuthSchema", "benchmarkAdminPbkdf2", "bootstrapFirstAdmin"]) {
+  for (const attempt of [
+    () => { const runtime = createRouterRuntime(); return { runtime, output: response(runtime.context.routeRequest_("GET", { parameter: { action: editorOnlyName } })) }; },
+    () => { const runtime = createRouterRuntime(); return { runtime, output: post(runtime, { action: editorOnlyName }) }; },
+    () => { const runtime = createRouterRuntime(); return { runtime, output: post(runtime, { action: "unknown", payload: { action: editorOnlyName } }, { parameter: { action: editorOnlyName, method: editorOnlyName } }) }; }
+  ]) {
+    const { runtime, output } = attempt();
+    assertSafeError(output, "UNKNOWN_ACTION");
+    assert.equal(runtime.calls.length, 0);
+  }
+}
+
+// Every Admin exception is converted to the existing fixed server-safe envelope with no leak.
+for (const action of ["adminLogin", "adminValidateSession", "adminLogout"]) {
+  for (const thrown of [
+    new Error("ordinary failure"),
+    "string failure",
+    { detail: "object failure" },
+    new Error("SENTINEL_PASSWORD_DO_NOT_LOG"),
+    new Error("SENTINEL_RAW_TOKEN_DO_NOT_LOG"),
+    new Error("stack internal Sheet spreadsheetId")
+  ]) {
+    const runtime = createRouterRuntime();
+    runtime.context[`${action}_`] = () => { throw thrown; };
+    const body = action === "adminLogin"
+      ? { action, payload: { username: "operator", password: "SENTINEL_PASSWORD_DO_NOT_LOG" } }
+      : { action, token: "SENTINEL_RAW_TOKEN_DO_NOT_LOG" };
+    const output = post(runtime, body);
+    assert.deepEqual(output, safeServerError);
+    for (const secret of ["SENTINEL_PASSWORD_DO_NOT_LOG", "SENTINEL_RAW_TOKEN_DO_NOT_LOG", "ordinary failure", "string failure", "object failure", "spreadsheetId", "internal Sheet", "stack"]) {
+      assert.equal(JSON.stringify(output).includes(secret), false);
+    }
+  }
+}
+
+// Public exceptions retain the same sanitized response behavior.
+for (const action of ["submitReview", "getGallery", "searchAll"]) {
+  const runtime = createRouterRuntime();
+  runtime.context[`${action}_`] = () => { throw new Error("sheet reviews spreadsheetId stack secret"); };
+  const output = action === "submitReview"
+    ? post(runtime, { action, payload: {} })
+    : response(runtime.context.routeRequest_("GET", { parameter: { action } }));
+  assert.deepEqual(output, safeServerError);
+}
+
+if (process.exitCode) process.exit(process.exitCode);
+process.stdout.write(`Apps Script Router verification passed for ${sources.length} files and ${declarations.size} unique functions.\n`);

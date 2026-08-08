@@ -1,6 +1,7 @@
 function routeRequest_(method, event) {
   var parameters = event && event.parameter ? event.parameter : {};
-  var action = parameters.action ? String(parameters.action).trim() : "";
+  var queryAction = parameters.action ? String(parameters.action).trim() : "";
+  var action = method === "GET" ? queryAction : "";
 
   try {
     if (method === "GET") {
@@ -40,18 +41,24 @@ function routeRequest_(method, event) {
       }
     }
 
-    if (method === "POST" && (!action || action === "submitReview")) {
-      if (!event || !event.postData || typeof event.postData.contents !== "string" || !event.postData.contents.trim()) {
+    if (method === "POST") {
+      var hasPostBody = event && event.postData && typeof event.postData.contents === "string" && event.postData.contents.trim();
+      if (!hasPostBody && (!queryAction || queryAction === "submitReview")) {
         return createJsonResponse_({ ok: false, error: { code: "VALIDATION_ERROR", message: "ข้อมูลคำขอไม่ถูกต้อง" } });
       }
-      var body;
-      try {
-        body = JSON.parse(event.postData.contents);
-      } catch (_jsonError) {
-        return createJsonResponse_({ ok: false, error: { code: "VALIDATION_ERROR", message: "ข้อมูลคำขอไม่ถูกต้อง" } });
+      if (hasPostBody) {
+        var body;
+        try {
+          body = JSON.parse(event.postData.contents);
+        } catch (_jsonError) {
+          return createJsonResponse_({ ok: false, error: { code: "VALIDATION_ERROR", message: "ข้อมูลคำขอไม่ถูกต้อง" } });
+        }
+        action = body && typeof body === "object" && !Array.isArray(body) && typeof body.action === "string" ? body.action.trim() : "";
+        if (action === "submitReview") return createJsonResponse_(submitReview_(body.payload));
+        if (action === "adminLogin") return createJsonResponse_(adminLogin_(body.payload));
+        if (action === "adminValidateSession") return createJsonResponse_(adminValidateSession_(body.token));
+        if (action === "adminLogout") return createJsonResponse_(adminLogout_(body.token));
       }
-      action = body && body.action ? String(body.action).trim() : "";
-      if (action === "submitReview") return createJsonResponse_(submitReview_(body.payload));
     }
 
     return createJsonResponse_({
