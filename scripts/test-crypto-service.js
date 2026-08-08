@@ -91,6 +91,26 @@ function run(name, test) {
   process.stdout.write(`PASS ${name}\n`);
 }
 
+function observeByteReads(values) {
+  const reads = [];
+  const observed = new Proxy(values.slice(), {
+    get(target, property, receiver) {
+      if (typeof property === "string" && /^(?:0|[1-9][0-9]*)$/.test(property)) reads.push(Number(property));
+      return Reflect.get(target, property, receiver);
+    }
+  });
+  return { observed, reads };
+}
+
+function assertComparatorReadsEveryIndex(comparator, leftValues, rightValues, expectedResult) {
+  const left = observeByteReads(leftValues);
+  const right = observeByteReads(rightValues);
+  assert.equal(comparator(left.observed, right.observed), expectedResult);
+  const expectedIndexes = leftValues.map((value, index) => index);
+  assert.deepEqual([...new Set(left.reads)].sort((a, b) => a - b), expectedIndexes, "left operand must read every byte index");
+  assert.deepEqual([...new Set(right.reads)].sort((a, b) => a - b), expectedIndexes, "right operand must read every byte index");
+}
+
 const runtime = createRuntime();
 const service = runtime.context;
 
@@ -191,12 +211,36 @@ run("base64url rejects malformed and non-canonical input", () => {
   assert.throws(() => service.CryptoService_base64UrlEncode_("bytes"), /byte array/);
 });
 
-run("constant-time comparison handles every difference position and length safely", () => {
+run("constant-time comparison reads every same-length byte for equal and unequal values", () => {
   const expected = [1, 2, 3, 4, 5];
-  assert.equal(service.CryptoService_constantTimeEqual_(expected, [1, 2, 3, 4, 5]), true);
-  assert.equal(service.CryptoService_constantTimeEqual_(expected, [9, 2, 3, 4, 5]), false);
-  assert.equal(service.CryptoService_constantTimeEqual_(expected, [1, 2, 9, 4, 5]), false);
-  assert.equal(service.CryptoService_constantTimeEqual_(expected, [1, 2, 3, 4, 9]), false);
+  assertComparatorReadsEveryIndex(service.CryptoService_constantTimeEqual_, expected, [1, 2, 3, 4, 5], true);
+  assertComparatorReadsEveryIndex(service.CryptoService_constantTimeEqual_, expected, [9, 2, 3, 4, 5], false);
+  assertComparatorReadsEveryIndex(service.CryptoService_constantTimeEqual_, expected, [1, 2, 9, 4, 5], false);
+  assertComparatorReadsEveryIndex(service.CryptoService_constantTimeEqual_, expected, [1, 2, 3, 4, 9], false);
+});
+
+run("constant-time access instrumentation rejects a deliberately early-return comparator", () => {
+  function deliberatelyEarlyReturn(left, right) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+    for (let index = 0; index < left.length; index += 1) {
+      if (left[index] !== right[index]) return false;
+    }
+    return true;
+  }
+  let detected = null;
+  try {
+    assertComparatorReadsEveryIndex(deliberatelyEarlyReturn, [1, 2, 3, 4, 5], [9, 2, 3, 4, 5], false);
+  } catch (error) {
+    detected = error;
+  }
+  assert.ok(detected, "early-return comparator must be detected");
+  assert.match(detected.message, /left operand must read every byte index/);
+  assert.deepEqual(detected.actual, [0]);
+  assert.deepEqual(detected.expected, [0, 1, 2, 3, 4]);
+});
+
+run("constant-time comparison rejects incompatible lengths and malformed bytes safely", () => {
+  const expected = [1, 2, 3, 4, 5];
   assert.equal(service.CryptoService_constantTimeEqual_(expected, [1, 2, 3, 4]), false);
   assert.equal(service.CryptoService_constantTimeEqual_([1, 2], [1, 2, 0]), false);
   assert.equal(service.CryptoService_constantTimeEqual_([1, 2], [1, 2]), true);
