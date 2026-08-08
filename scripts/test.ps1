@@ -46,6 +46,7 @@ $required = @(
   "public/js/search.js",
   "public/js/gallery.js",
   "public/js/favorites.js",
+  "public/admin/js/admin-api.js",
   "public/favicon.svg",
   "public/assets/media/placeholders/hero.svg",
   "public/assets/media/placeholders/cover.svg",
@@ -142,6 +143,8 @@ if ($LASTEXITCODE -ne 0) { throw "Public Reviews behavior verification failed." 
 if ($LASTEXITCODE -ne 0) { throw "i18n behavior verification failed." }
 & node (Join-Path $PSScriptRoot "test-api.js")
 if ($LASTEXITCODE -ne 0) { throw "Public API client behavior verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-api.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin API transport verification failed." }
 & node (Join-Path $PSScriptRoot "test-crypto-service.js")
 if ($LASTEXITCODE -ne 0) { throw "CryptoService verification failed." }
 & node (Join-Path $PSScriptRoot "test-auth-service.js")
