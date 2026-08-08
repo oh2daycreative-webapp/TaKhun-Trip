@@ -58,6 +58,7 @@ function loadAdminApi({
 } = {}) {
   const calls = [];
   const timers = [];
+  const clearedTimerIds = [];
   const controllers = [];
   const logs = [];
   let nextTimerId = 1;
@@ -96,6 +97,7 @@ function loadAdminApi({
       const timer = timers.find((candidate) => candidate.id === id);
       assert.ok(timer, `clearTimeout received unknown timer ${id}`);
       timer.cleared = true;
+      clearedTimerIds.push(id);
     },
     console: {
       log: (...args) => logs.push(["log", ...args]),
@@ -112,7 +114,7 @@ function loadAdminApi({
     vm.runInContext(`const APP_CONFIG = Object.freeze({ API_URL: ${JSON.stringify(apiUrl)}, DEFAULT_LANG: "th" });`, context);
   }
   vm.runInContext(source, context, { filename: "admin-api.js" });
-  return { api: context.TakhunAdminApi, calls, timers, controllers, logs, context };
+  return { api: context.TakhunAdminApi, calls, timers, clearedTimerIds, controllers, logs, context };
 }
 
 async function captureError(promise) {
@@ -155,6 +157,45 @@ function mutatedSource(find, replacement) {
 
 async function proveContractRejects(check) {
   await assert.rejects(check, (error) => error instanceof assert.AssertionError);
+}
+
+function assertSingleRequestCleanup(harness) {
+  assert.equal(harness.controllers.length, 1);
+  assert.equal(harness.calls.length, 1);
+  assert.equal(harness.timers.length, 1);
+  assert.equal(harness.timers[0].delay, 12000);
+  assert.deepEqual(harness.clearedTimerIds, [harness.timers[0].id]);
+  assert.equal(harness.timers[0].cleared, true);
+  assert.equal(harness.timers.filter((timer) => !timer.cleared).length, 0);
+  assert.equal(harness.controllers[0].signal.aborted, false);
+}
+
+async function assertBackendErrorCleanup(code, source = productionSource) {
+  const harness = loadAdminApi({
+    source,
+    fetchImpl: async () => textResponse({ ok: false, error: { code, message: `untrusted ${TOKEN}` } })
+  });
+  const expectedCode = code === "INTERNAL_DATABASE_DETAIL" ? "SERVER_ERROR" : code;
+  assertSafeError(await captureError(harness.api.validateSession(TOKEN)), expectedCode, [TOKEN, "untrusted"]);
+  assertSingleRequestCleanup(harness);
+}
+
+async function assertTypeErrorSingleFetch(source = productionSource) {
+  let fetchCount = 0;
+  const harness = loadAdminApi({
+    source,
+    fetchImpl: async () => {
+      fetchCount += 1;
+      throw new TypeError(`network ${TOKEN}`);
+    }
+  });
+  assertSafeError(await captureError(harness.api.login("operator", "TypeErrorPassword")), "NETWORK_ERROR", [TOKEN, "TypeErrorPassword"]);
+  assert.equal(fetchCount, 1);
+  assertSingleRequestCleanup(harness);
+  assert.deepEqual(JSON.parse(harness.calls[0].options.body), {
+    action: "adminLogin",
+    payload: { username: "operator", password: "TypeErrorPassword" }
+  });
 }
 
 const tests = [];
@@ -283,17 +324,31 @@ test("rejects malformed top-level and backend error envelopes safely", async () 
   }
 });
 
-test("normalizes documented backend codes and maps unknown codes to SERVER_ERROR", async () => {
+test("normalizes every documented backend code and clears its exact timer", async () => {
   for (const code of ["VALIDATION_ERROR", "UNAUTHORIZED", "RATE_LIMITED", "SERVER_ERROR", "FORBIDDEN"]) {
-    const harness = loadAdminApi({
-      fetchImpl: async () => textResponse({ ok: false, error: { code, message: `untrusted ${TOKEN}` } })
-    });
-    assertSafeError(await captureError(harness.api.validateSession(TOKEN)), code, [TOKEN, "untrusted"]);
+    await assertBackendErrorCleanup(code);
   }
-  const harness = loadAdminApi({
-    fetchImpl: async () => textResponse({ ok: false, error: { code: "INTERNAL_DATABASE_DETAIL", message: `row ${TOKEN}` } })
-  });
-  assertSafeError(await captureError(harness.api.validateSession(TOKEN)), "SERVER_ERROR", [TOKEN, "INTERNAL_DATABASE_DETAIL"]);
+  await assertBackendErrorCleanup("INTERNAL_DATABASE_DETAIL");
+});
+
+test("backend-error cleanup assertions reject a timer-leak mutation", async () => {
+  const source = mutatedSource(
+    '      return parseEnvelope(body.action, rawText);\n    } finally {\n      if (timer !== null) global.clearTimeout(timer);\n    }',
+    '      try {\n        const parsed = parseEnvelope(body.action, rawText);\n        if (timer !== null) global.clearTimeout(timer);\n        return parsed;\n      } catch (error) {\n        if (!BACKEND_ERROR_CODES.includes(error.code) && timer !== null) global.clearTimeout(timer);\n        throw error;\n      }\n    } finally {\n      /* test-only mutation omits the authoritative cleanup */\n    }'
+  );
+  await proveContractRejects(() => assertBackendErrorCleanup("UNAUTHORIZED", source));
+});
+
+test("TypeError network failure sends exactly one authentication POST", async () => {
+  await assertTypeErrorSingleFetch();
+});
+
+test("TypeError single-fetch assertions reject an executable second-POST mutation", async () => {
+  const source = mutatedSource(
+    '      } catch (error) {\n        if (error && error.name === "AbortError") throw safeError("TIMEOUT");\n        throw safeError("NETWORK_ERROR");\n      }',
+    '      } catch (error) {\n        if (error && error.name === "TypeError") {\n          try { response = await global.fetch(endpoint, options); } catch (_secondError) { /* keep the first safe category */ }\n        }\n        if (error && error.name === "AbortError") throw safeError("TIMEOUT");\n        throw safeError("NETWORK_ERROR");\n      }'
+  );
+  await proveContractRejects(() => assertTypeErrorSingleFetch(source));
 });
 
 test("strictly validates login success and rejects security-bearing projections", async () => {
@@ -358,6 +413,7 @@ test("simultaneous requests isolate controllers timers bodies and failures", asy
   assert.deepEqual(harness.timers.map((timer) => timer.delay), [12000, 12000]);
   pending[0].reject(new Error(`first failed ${TOKEN}`));
   assertSafeError(await captureError(first), "NETWORK_ERROR", [TOKEN]);
+  assert.equal(harness.calls.length, 2);
   assert.deepEqual(harness.timers.map((timer) => timer.cleared), [true, false]);
   pending[1].resolve(textResponse(success({ admin: ADMIN, token: SECOND_TOKEN, expires_at: EXPIRES_AT })));
   assert.deepEqual(plain(await second), { admin: ADMIN, token: SECOND_TOKEN, expires_at: EXPIRES_AT });
