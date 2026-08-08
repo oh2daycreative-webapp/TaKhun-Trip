@@ -1005,6 +1005,48 @@ TypeError: Cannot read properties of undefined
 
 ---
 
+## 30A. Admin Authentication Setup and Bootstrap Rules
+
+### 30A.1 Random-state ownership
+
+- `ADMIN_AUTH_RANDOM_KEY` is a permanent secret supplied only by a human/operator. It must be exactly 32 cryptographically random bytes encoded as 43-character unpadded base64url, and it must never be committed, logged, printed, returned, copied into a test fixture, or given a default value.
+- `ADMIN_AUTH_RANDOM_COUNTER` is code-owned security state. A human must never create, increment, decrement, reset, repair, or otherwise edit it manually.
+- `ADMIN_AUTH_STATE_VERSION` is code-owned security state whose only established value is `1`. A human must never reset or repair a missing, partial, malformed, or wrong-version established state. Such a state fails closed and returns to security review.
+- Random generation must run under the caller-held script lock and persist the incremented counter before deriving or releasing bytes. A later failure may leave a skipped counter; code and operators must never roll it back or reuse it.
+
+### 30A.2 Editor-only setup and benchmark gates
+
+- `setupAdminAuthSchema()` is an editor-only function with no Router/public action. It must run before the benchmark or bootstrap, validates the random key without revealing it, initializes counter `0` and state version `1` only when both properties and both auth datasets are genuinely empty, and otherwise validates established state without repair.
+- Setup is non-destructive: it may append missing required Admin auth headers where safe and create/initialize an absent `admin_sessions` Sheet, but it must not reorder or delete populated rows/columns, purge session audit rows, create an Admin, or create any password, hash, salt, token, or credential.
+- `benchmarkAdminPbkdf2()` is editor-only and non-routed. It uses only its fixed non-secret vector, one warm-up, and five measured derivations at exactly `120000` iterations. It must not read Script Properties, Sheets, bootstrap input, credentials, sessions, or CacheService.
+- The real Apps Script V8 benchmark must report five correct derivations, median `<= 3000 ms`, maximum `<= 5000 ms`, and `passed=true` before any bootstrap username, display name, email, or password is entered. Local Node timing is test evidence only and is never deployment approval.
+- `120000` must never be silently lowered, caller-selected, or automatically tuned. A benchmark failure stops provisioning and deployment and requires explicit security review.
+
+### 30A.3 First Admin bootstrap
+
+- `bootstrapFirstAdmin()` is an editor-only, non-routed, one-shot function. There is no public signup, registration route, default Admin, default username, or default password.
+- A human may set temporary bootstrap properties only after setup and the real Apps Script benchmark gate pass, then must run bootstrap exactly once. Bootstrap requires `ADMIN_BOOTSTRAP_ENABLED` to be the exact string `true`, already-valid random state, no active Admin, and no existing canonical requested username in any status.
+- Bootstrap itself generates the fresh 16-byte salt and PBKDF2-HMAC-SHA256 hash at `120000` iterations and creates only the first active `super_admin`. A human must never calculate, paste, or edit `password_hash`, `password_salt`, or `password_iterations` manually.
+- The function must append exactly one row, reread and verify the authoritative source-of-truth row, and only then delete `ADMIN_BOOTSTRAP_USERNAME`, `ADMIN_BOOTSTRAP_DISPLAY_NAME`, `ADMIN_BOOTSTRAP_EMAIL`, and `ADMIN_BOOTSTRAP_PASSWORD`. It sets `ADMIN_BOOTSTRAP_ENABLED=false` last and verifies cleanup before reporting success. It creates no session.
+- Plaintext passwords, the random key/counter, generated salt/hash, complete Admin rows, and temporary property values must never appear in logs, errors, responses, screenshots, source, or deployment output.
+
+### 30A.4 Bootstrap failure procedure
+
+If `bootstrapFirstAdmin()` throws, returns failure, or cleanup cannot be verified:
+
+1. **STOP.** Do not automatically retry and do not perform an immediate manual rerun.
+2. Do not deploy.
+3. Inspect only the non-secret failure category; do not print or copy property values, password, hash, salt, key, or complete row data.
+4. Check whether an Admin row was created and whether temporary bootstrap properties remain.
+5. During the controlled human recovery gate, manually remove any remaining `ADMIN_BOOTSTRAP_USERNAME`, `ADMIN_BOOTSTRAP_DISPLAY_NAME`, `ADMIN_BOOTSTRAP_EMAIL`, and `ADMIN_BOOTSTRAP_PASSWORD`.
+6. Set `ADMIN_BOOTSTRAP_ENABLED=false` if it is still `true`.
+7. Never manually edit `password_hash`, `password_salt`, or `password_iterations`, and never reset the auth random counter to retry.
+8. Return to code/security review before authorizing another bootstrap attempt.
+
+These steps document future human operations only. Implementing or reviewing this repository does not authorize access to Apps Script, Google Sheets, Script Properties, credentials, deployments, or production systems.
+
+---
+
 ## 31. Deployment Rules
 
 ### 31.1 Cloudflare Pages

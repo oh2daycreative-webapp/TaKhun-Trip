@@ -5,6 +5,380 @@ var AuthService_IDENTIFIER_BUCKET_SECONDS_ = 900;
 var AuthService_GLOBAL_FAILURE_LIMIT_ = 100;
 var AuthService_GLOBAL_BUCKET_SECONDS_ = 600;
 var AuthService_LOCK_TIMEOUT_MS_ = 10000;
+var AuthService_BENCHMARK_PASSWORD_ = "takhun-admin-fixed-benchmark-password";
+var AuthService_BENCHMARK_SALT_ = "AAECAwQFBgcICQoLDA0ODw";
+var AuthService_BENCHMARK_HASH_ = "eGLDj63GbV5Z60GNKMQIGER5te8h0libLPyTBX3OokM";
+
+function setupAdminAuthSchema() {
+  var lock = null;
+  var acquired = false;
+  try {
+    lock = LockService.getScriptLock();
+    if (!lock || !lock.tryLock(AuthService_LOCK_TIMEOUT_MS_)) throw new Error("AUTH_SETUP_LOCK");
+    acquired = true;
+
+    var properties = PropertiesService.getScriptProperties();
+    AuthService_assertRandomKey_(properties.getProperty(ADMIN_AUTH_RANDOM_KEY_PROPERTY_));
+
+    var config = getAppConfig_();
+    if (!config.spreadsheetId) throw new Error("AUTH_SETUP_CONFIGURATION");
+    var spreadsheet = SpreadsheetApp.openById(config.spreadsheetId);
+    var adminSheet = spreadsheet.getSheetByName(ADMIN_SHEET_NAME_);
+    if (!adminSheet) throw new Error("AUTH_SETUP_ADMIN_SHEET");
+    var sessionSheet = spreadsheet.getSheetByName(ADMIN_SESSION_SHEET_NAME_);
+
+    var adminInspection = AuthService_inspectSetupSheet_(adminSheet, ADMIN_REQUIRED_HEADERS_);
+    var sessionInspection = sessionSheet ?
+      AuthService_inspectSetupSheet_(sessionSheet, ADMIN_SESSION_REQUIRED_HEADERS_) :
+      { hasDataRows: false };
+    var stateMode = AuthService_setupRandomState_(
+      properties,
+      !adminInspection.hasDataRows && !sessionInspection.hasDataRows
+    );
+
+    var adminHeaders = SheetService_ensureHeaders_(ADMIN_SHEET_NAME_, ADMIN_REQUIRED_HEADERS_);
+    SheetService_assertUniqueHeaders_(adminHeaders.headers, ADMIN_REQUIRED_HEADERS_);
+    if (!sessionSheet) {
+      spreadsheet.insertSheet(ADMIN_SESSION_SHEET_NAME_);
+    }
+    var sessionHeaders = SheetService_ensureHeaders_(ADMIN_SESSION_SHEET_NAME_, ADMIN_SESSION_REQUIRED_HEADERS_);
+    SheetService_assertUniqueHeaders_(sessionHeaders.headers, ADMIN_SESSION_REQUIRED_HEADERS_);
+
+    return {
+      random_key: "valid",
+      random_state: stateMode,
+      state_version: ADMIN_AUTH_STATE_VERSION_VALUE_,
+      admins_headers: "valid",
+      admin_sessions_headers: "valid"
+    };
+  } catch (_authSetupError) {
+    throw new Error("AUTH_SETUP_FAILED");
+  } finally {
+    if (acquired) {
+      try {
+        lock.releaseLock();
+      } catch (_authSetupReleaseError) {
+        throw new Error("AUTH_SETUP_FAILED");
+      }
+    }
+  }
+}
+
+function benchmarkAdminPbkdf2() {
+  var saltBytes;
+  var expectedBytes;
+  try {
+    saltBytes = CryptoService_base64UrlDecode_(AuthService_BENCHMARK_SALT_);
+    expectedBytes = CryptoService_base64UrlDecode_(AuthService_BENCHMARK_HASH_);
+    if (saltBytes.length !== ADMIN_PASSWORD_SALT_BYTES_ || expectedBytes.length !== ADMIN_PASSWORD_HASH_BYTES_) {
+      throw new Error("AUTH_BENCHMARK_VECTOR");
+    }
+
+    CryptoService_pbkdf2Sha256_(
+      AuthService_BENCHMARK_PASSWORD_,
+      saltBytes,
+      ADMIN_PBKDF2_ITERATIONS_
+    );
+
+    var durations = [];
+    var correctness = [];
+    for (var run = 0; run < 5; run += 1) {
+      var startedAt = Date.now();
+      var derived = CryptoService_pbkdf2Sha256_(
+        AuthService_BENCHMARK_PASSWORD_,
+        saltBytes,
+        ADMIN_PBKDF2_ITERATIONS_
+      );
+      var finishedAt = Date.now();
+      var duration = finishedAt - startedAt;
+      if (!Number.isSafeInteger(duration) || duration < 0) throw new Error("AUTH_BENCHMARK_CLOCK");
+      durations.push(duration);
+      correctness.push(
+        derived.length === ADMIN_PASSWORD_HASH_BYTES_ &&
+        CryptoService_constantTimeEqual_(expectedBytes, derived)
+      );
+    }
+
+    var sorted = durations.slice().sort(function (left, right) { return left - right; });
+    var median = sorted[2];
+    var maximum = Math.max.apply(Math, durations);
+    var allCorrect = correctness.every(function (value) { return value === true; });
+    return {
+      iterations: ADMIN_PBKDF2_ITERATIONS_,
+      durations_ms: durations,
+      correctness: correctness,
+      median_ms: median,
+      max_ms: maximum,
+      passed: allCorrect && median <= 3000 && maximum <= 5000
+    };
+  } catch (_authBenchmarkError) {
+    throw new Error("AUTH_BENCHMARK_FAILED");
+  }
+}
+
+function bootstrapFirstAdmin() {
+  var properties;
+  try {
+    properties = PropertiesService.getScriptProperties();
+    if (properties.getProperty(ADMIN_BOOTSTRAP_ENABLED_PROPERTY_) !== "true") {
+      throw new Error("AUTH_BOOTSTRAP_DISABLED");
+    }
+  } catch (_authBootstrapEnableError) {
+    throw new Error("AUTH_BOOTSTRAP_FAILED");
+  }
+
+  var lock = null;
+  var acquired = false;
+  try {
+    lock = LockService.getScriptLock();
+    if (!lock || !lock.tryLock(AuthService_LOCK_TIMEOUT_MS_)) throw new Error("AUTH_BOOTSTRAP_LOCK");
+    acquired = true;
+
+    AuthService_assertRandomKey_(properties.getProperty(ADMIN_AUTH_RANDOM_KEY_PROPERTY_));
+    AuthService_assertEstablishedRandomState_(properties);
+
+    var adminTable = SheetService_readTable_(ADMIN_SHEET_NAME_, ADMIN_REQUIRED_HEADERS_);
+    SheetService_readTable_(ADMIN_SESSION_SHEET_NAME_, ADMIN_SESSION_REQUIRED_HEADERS_);
+    var input = AuthService_bootstrapInput_(properties, adminTable);
+    if (input.password === AuthService_unescapeHumanText_(input.displayName) ||
+        input.password === AuthService_unescapeHumanText_(input.email)) {
+      throw new Error("AUTH_BOOTSTRAP_PLAINTEXT");
+    }
+
+    var saltBytes = CryptoService_randomBytesLocked_("admin-password-salt", ADMIN_PASSWORD_SALT_BYTES_);
+    var encodedSalt = CryptoService_base64UrlEncode_(saltBytes);
+    if (!AuthService_validEncodedBytes_(encodedSalt, ADMIN_PASSWORD_SALT_BYTES_)) {
+      throw new Error("AUTH_BOOTSTRAP_SALT");
+    }
+    var hashBytes = CryptoService_pbkdf2Sha256_(input.password, saltBytes, ADMIN_PBKDF2_ITERATIONS_);
+    var encodedHash = CryptoService_base64UrlEncode_(hashBytes);
+    if (!AuthService_validEncodedBytes_(encodedHash, ADMIN_PASSWORD_HASH_BYTES_)) {
+      throw new Error("AUTH_BOOTSTRAP_HASH");
+    }
+
+    var adminId = "ADM-" + Utilities.getUuid();
+    if (!AuthService_validIdentifier_(adminId, "ADM-")) throw new Error("AUTH_BOOTSTRAP_ID");
+    var adminIdExists = adminTable.rows.some(function (entry) {
+      return entry && entry.values && entry.values.admin_id === adminId;
+    });
+    if (adminIdExists) throw new Error("AUTH_BOOTSTRAP_ID_COLLISION");
+    var timestamp = AuthService_timestamp_(Date.now());
+    var record = {
+      admin_id: SheetService_writeValue_("security", "admin_id", adminId),
+      username: SheetService_writeValue_("security", "username", input.username),
+      display_name: SheetService_writeValue_("human_text", "display_name", input.displayName),
+      email: SheetService_writeValue_("human_text", "email", input.email),
+      password_algorithm: SheetService_writeValue_("security", "password_algorithm", ADMIN_PASSWORD_ALGORITHM_),
+      password_hash: SheetService_writeValue_("security", "password_hash", encodedHash),
+      password_salt: SheetService_writeValue_("security", "password_salt", encodedSalt),
+      password_iterations: SheetService_writeValue_("security", "password_iterations", ADMIN_PBKDF2_ITERATIONS_),
+      role: SheetService_writeValue_("security", "role", "super_admin"),
+      status: SheetService_writeValue_("security", "status", "active"),
+      last_login_at: SheetService_writeValue_("security", "last_login_at", ""),
+      created_at: SheetService_writeValue_("security", "created_at", timestamp),
+      updated_at: SheetService_writeValue_("security", "updated_at", timestamp)
+    };
+    Object.keys(record).forEach(function (field) {
+      var writtenValue = field === "display_name" || field === "email" ?
+        AuthService_unescapeHumanText_(record[field]) : record[field];
+      if (writtenValue === input.password) throw new Error("AUTH_BOOTSTRAP_PLAINTEXT");
+    });
+
+    appendSheetObject_(ADMIN_SHEET_NAME_, ADMIN_REQUIRED_HEADERS_, record);
+    var verifiedTable = SheetService_readTable_(ADMIN_SHEET_NAME_, ADMIN_REQUIRED_HEADERS_);
+    AuthService_verifyBootstrapRecord_(verifiedTable, record, input.password);
+    AuthService_cleanupBootstrap_(properties);
+    return { admin_id: adminId, username: input.username, cleanup: "complete" };
+  } catch (authBootstrapError) {
+    if (authBootstrapError && authBootstrapError.message === "AUTH_BOOTSTRAP_CLEANUP_FAILED") {
+      throw new Error("AUTH_BOOTSTRAP_CLEANUP_FAILED");
+    }
+    throw new Error("AUTH_BOOTSTRAP_FAILED");
+  } finally {
+    if (acquired) {
+      try {
+        lock.releaseLock();
+      } catch (_authBootstrapReleaseError) {
+        throw new Error("AUTH_BOOTSTRAP_FAILED");
+      }
+    }
+  }
+}
+
+function AuthService_inspectSetupSheet_(sheet, requiredHeaders) {
+  var values = sheet.getDataRange().getValues();
+  var lastRow = sheet.getLastRow();
+  if (!Number.isSafeInteger(lastRow) || lastRow < 0) throw new Error("AUTH_SETUP_SHEET");
+  if (lastRow === 0) return { hasDataRows: false };
+  if (!values || !values.length) throw new Error("AUTH_SETUP_SHEET");
+  var headers = values[0].map(function (header) {
+    return typeof header === "string" ? header.trim() : header;
+  });
+  SheetService_assertUniqueHeaders_(headers, []);
+  requiredHeaders.forEach(function (requiredHeader) {
+    headers.forEach(function (header) {
+      if (header !== requiredHeader && header.toLowerCase() === requiredHeader.toLowerCase()) {
+        throw new Error("AUTH_SETUP_HEADERS");
+      }
+    });
+  });
+  var hasDataRows = values.slice(1).some(function (row) {
+    return (row || []).some(function (cell) {
+      return cell !== null && cell !== undefined && String(cell).trim() !== "";
+    });
+  });
+  return { hasDataRows: hasDataRows };
+}
+
+function AuthService_assertRandomKey_(encodedKey) {
+  if (typeof encodedKey !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(encodedKey)) {
+    throw new Error("AUTH_RANDOM_KEY");
+  }
+  var keyBytes = CryptoService_base64UrlDecode_(encodedKey);
+  if (keyBytes.length !== 32 || CryptoService_base64UrlEncode_(keyBytes) !== encodedKey) {
+    throw new Error("AUTH_RANDOM_KEY");
+  }
+}
+
+function AuthService_setupRandomState_(properties, authDataEmpty) {
+  var counterText = properties.getProperty(ADMIN_AUTH_RANDOM_COUNTER_PROPERTY_);
+  var versionText = properties.getProperty(ADMIN_AUTH_STATE_VERSION_PROPERTY_);
+  var counterAbsent = counterText === null || counterText === undefined;
+  var versionAbsent = versionText === null || versionText === undefined;
+  if (counterAbsent && versionAbsent) {
+    if (!authDataEmpty) throw new Error("AUTH_RANDOM_STATE");
+    properties.setProperty(ADMIN_AUTH_RANDOM_COUNTER_PROPERTY_, String(0));
+    properties.setProperty(ADMIN_AUTH_STATE_VERSION_PROPERTY_, String(ADMIN_AUTH_STATE_VERSION_VALUE_));
+    return "initialized";
+  }
+  AuthService_assertRandomStateValues_(counterText, versionText);
+  return "valid";
+}
+
+function AuthService_assertEstablishedRandomState_(properties) {
+  AuthService_assertRandomStateValues_(
+    properties.getProperty(ADMIN_AUTH_RANDOM_COUNTER_PROPERTY_),
+    properties.getProperty(ADMIN_AUTH_STATE_VERSION_PROPERTY_)
+  );
+}
+
+function AuthService_assertRandomStateValues_(counterText, versionText) {
+  if (versionText !== String(ADMIN_AUTH_STATE_VERSION_VALUE_) ||
+      typeof counterText !== "string" || !/^(?:0|[1-9][0-9]*)$/.test(counterText)) {
+    throw new Error("AUTH_RANDOM_STATE");
+  }
+  var counter = Number(counterText);
+  if (!Number.isSafeInteger(counter) || counter < 0 || counter >= Number.MAX_SAFE_INTEGER) {
+    throw new Error("AUTH_RANDOM_STATE");
+  }
+}
+
+function AuthService_bootstrapInput_(properties, adminTable) {
+  if (!adminTable || !Array.isArray(adminTable.rows)) throw new Error("AUTH_BOOTSTRAP_ADMINS");
+  var requestedUsernameText = properties.getProperty(ADMIN_BOOTSTRAP_USERNAME_PROPERTY_);
+  if (typeof requestedUsernameText !== "string" || requestedUsernameText.length > ADMIN_USERNAME_MAX_CHARACTERS_) {
+    throw new Error("AUTH_BOOTSTRAP_INPUT");
+  }
+  var requestedUsername = requestedUsernameText.trim().toLowerCase();
+  if (!new RegExp(ADMIN_USERNAME_PATTERN_).test(requestedUsername)) throw new Error("AUTH_BOOTSTRAP_INPUT");
+
+  var usernames = Object.create(null);
+  var activeExists = false;
+  adminTable.rows.forEach(function (entry) {
+    var account = entry && entry.values;
+    if (!account || typeof account.username !== "string" || typeof account.status !== "string") {
+      throw new Error("AUTH_BOOTSTRAP_ADMINS");
+    }
+    var canonical = account.username.trim().toLowerCase();
+    if (account.username !== canonical || !new RegExp(ADMIN_USERNAME_PATTERN_).test(canonical) ||
+        ADMIN_ALLOWED_STATUSES_.indexOf(account.status) === -1 ||
+        Object.prototype.hasOwnProperty.call(usernames, canonical)) {
+      throw new Error("AUTH_BOOTSTRAP_ADMINS");
+    }
+    usernames[canonical] = true;
+    if (account.status === "active") activeExists = true;
+  });
+  if (activeExists || Object.prototype.hasOwnProperty.call(usernames, requestedUsername)) {
+    throw new Error("AUTH_BOOTSTRAP_PRECONDITION");
+  }
+
+  var displayName = properties.getProperty(ADMIN_BOOTSTRAP_DISPLAY_NAME_PROPERTY_);
+  if (typeof displayName !== "string" || !displayName.trim()) throw new Error("AUTH_BOOTSTRAP_INPUT");
+  var displayLength = Array.from(displayName).length;
+  CryptoService_utf8Bytes_(displayName);
+  if (displayLength < ADMIN_DISPLAY_NAME_MIN_CODE_POINTS_ || displayLength > ADMIN_DISPLAY_NAME_MAX_CODE_POINTS_) {
+    throw new Error("AUTH_BOOTSTRAP_INPUT");
+  }
+
+  var emailValue = properties.getProperty(ADMIN_BOOTSTRAP_EMAIL_PROPERTY_);
+  var email = emailValue === null || emailValue === undefined ? "" : emailValue;
+  if (typeof email !== "string" || email.length > ADMIN_EMAIL_MAX_CHARACTERS_) throw new Error("AUTH_BOOTSTRAP_INPUT");
+  CryptoService_utf8Bytes_(email);
+
+  var password = properties.getProperty(ADMIN_BOOTSTRAP_PASSWORD_PROPERTY_);
+  if (typeof password !== "string" || password.length > ADMIN_PASSWORD_MAX_UTF8_BYTES_) {
+    throw new Error("AUTH_BOOTSTRAP_INPUT");
+  }
+  var passwordLength = Array.from(password).length;
+  var passwordBytes = CryptoService_utf8Bytes_(password);
+  if (passwordLength < ADMIN_PASSWORD_PROVISIONING_MIN_CODE_POINTS_ ||
+      passwordLength > ADMIN_PASSWORD_MAX_CODE_POINTS_ ||
+      passwordBytes.length > ADMIN_PASSWORD_MAX_UTF8_BYTES_) {
+    throw new Error("AUTH_BOOTSTRAP_INPUT");
+  }
+  return { username: requestedUsername, displayName: displayName, email: email, password: password };
+}
+
+function AuthService_verifyBootstrapRecord_(table, expectedRecord, plaintextPassword) {
+  var matches = table.rows.filter(function (entry) {
+    return entry && entry.values && entry.values.admin_id === expectedRecord.admin_id;
+  });
+  if (matches.length !== 1 || !AuthService_validAccount_(matches[0].values)) {
+    throw new Error("AUTH_BOOTSTRAP_VERIFY");
+  }
+  ADMIN_REQUIRED_HEADERS_.forEach(function (field) {
+    var verifiedValue = field === "display_name" || field === "email" ?
+      AuthService_unescapeHumanText_(matches[0].values[field]) : matches[0].values[field];
+    if (matches[0].values[field] !== expectedRecord[field] || verifiedValue === plaintextPassword) {
+      throw new Error("AUTH_BOOTSTRAP_VERIFY");
+    }
+  });
+}
+
+function AuthService_cleanupBootstrap_(properties) {
+  var failed = false;
+  var temporaryProperties = [
+    ADMIN_BOOTSTRAP_USERNAME_PROPERTY_,
+    ADMIN_BOOTSTRAP_DISPLAY_NAME_PROPERTY_,
+    ADMIN_BOOTSTRAP_EMAIL_PROPERTY_,
+    ADMIN_BOOTSTRAP_PASSWORD_PROPERTY_
+  ];
+  temporaryProperties.forEach(function (propertyName) {
+    try {
+      properties.deleteProperty(propertyName);
+    } catch (_authBootstrapDeleteError) {
+      failed = true;
+    }
+  });
+  try {
+    properties.setProperty(ADMIN_BOOTSTRAP_ENABLED_PROPERTY_, "false");
+  } catch (_authBootstrapDisableError) {
+    failed = true;
+  }
+  temporaryProperties.forEach(function (propertyName) {
+    try {
+      if (properties.getProperty(propertyName) !== null) failed = true;
+    } catch (_authBootstrapCleanupReadError) {
+      failed = true;
+    }
+  });
+  try {
+    if (properties.getProperty(ADMIN_BOOTSTRAP_ENABLED_PROPERTY_) !== "false") failed = true;
+  } catch (_authBootstrapDisableReadError) {
+    failed = true;
+  }
+  if (failed) throw new Error("AUTH_BOOTSTRAP_CLEANUP_FAILED");
+}
 
 function adminLogin_(payload) {
   var input = AuthService_loginInput_(payload);
@@ -207,7 +581,9 @@ function AuthService_validAccount_(account) {
   var displayName = AuthService_unescapeHumanText_(account.display_name);
   var displayLength = Array.from(displayName).length;
   if (displayLength < ADMIN_DISPLAY_NAME_MIN_CODE_POINTS_ || displayLength > ADMIN_DISPLAY_NAME_MAX_CODE_POINTS_) return false;
-  if (typeof account.email !== "string" || account.email.length > ADMIN_EMAIL_MAX_CHARACTERS_) return false;
+  if (typeof account.email !== "string") return false;
+  var email = AuthService_unescapeHumanText_(account.email);
+  if (email.length > ADMIN_EMAIL_MAX_CHARACTERS_) return false;
   if (account.password_algorithm !== ADMIN_PASSWORD_ALGORITHM_) return false;
   if (!AuthService_validEncodedBytes_(account.password_hash, ADMIN_PASSWORD_HASH_BYTES_)) return false;
   if (!AuthService_validEncodedBytes_(account.password_salt, ADMIN_PASSWORD_SALT_BYTES_)) return false;

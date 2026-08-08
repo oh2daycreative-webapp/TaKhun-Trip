@@ -29,6 +29,17 @@ const TOKEN_BYTES = Array.from({ length: 32 }, (_, index) => 255 - index);
 const RAW_TOKEN = Buffer.from(TOKEN_BYTES).toString("base64url");
 const TOKEN_HASH = crypto.createHash("sha256").update(RAW_TOKEN, "utf8").digest("base64url");
 const OTHER_TOKEN = Buffer.from(Array.from({ length: 32 }, (_, index) => index)).toString("base64url");
+const SYNTHETIC_RANDOM_KEY = Buffer.from(Array(32).fill(0x5a)).toString("base64url");
+const BOOTSTRAP_PASSWORD = "SYNTHETIC bootstrap passphrase 2026";
+const BENCHMARK_PASSWORD = "takhun-admin-fixed-benchmark-password";
+const BENCHMARK_SALT = Array.from({ length: 16 }, (_, index) => index);
+const BENCHMARK_HASH = crypto.pbkdf2Sync(
+  BENCHMARK_PASSWORD,
+  Buffer.from(BENCHMARK_SALT),
+  120000,
+  32,
+  "sha256"
+).toString("base64url");
 const AUTH_ERROR = {
   ok: false,
   error: { code: "UNAUTHORIZED", message: "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง" }
@@ -321,6 +332,359 @@ function createRuntime(options = {}) {
   return { context, state };
 }
 
+function createTask5Runtime(options = {}) {
+  const initialProperties = {
+    SPREADSHEET_ID: "configured",
+    ADMIN_AUTH_RANDOM_KEY: SYNTHETIC_RANDOM_KEY,
+    ADMIN_AUTH_RANDOM_COUNTER: "0",
+    ADMIN_AUTH_STATE_VERSION: "1",
+    ADMIN_BOOTSTRAP_ENABLED: "true",
+    ADMIN_BOOTSTRAP_USERNAME: "first.operator",
+    ADMIN_BOOTSTRAP_DISPLAY_NAME: "Synthetic Operator",
+    ADMIN_BOOTSTRAP_EMAIL: "operator@example.test",
+    ADMIN_BOOTSTRAP_PASSWORD: BOOTSTRAP_PASSWORD,
+    ...(options.properties || {})
+  };
+  for (const name of options.absentProperties || []) delete initialProperties[name];
+
+  const state = {
+    now: options.now ?? NOW,
+    nowValues: [...(options.nowValues || [])],
+    properties: { ...initialProperties },
+    propertyCalls: [],
+    events: [],
+    logs: [],
+    lockHeld: false,
+    lockAttempts: 0,
+    headers: {
+      admins: [...(Object.hasOwn(options, "adminHeaders") ? options.adminHeaders : ADMIN_HEADERS)],
+      admin_sessions: options.sessionSheetMissing ? null : [
+        ...(Object.hasOwn(options, "sessionHeaders") ? options.sessionHeaders : SESSION_HEADERS)
+      ]
+    },
+    tables: {
+      admins: (options.admins || []).map((row) => ({ ...row })),
+      admin_sessions: (options.sessions || []).map((row) => ({ ...row }))
+    },
+    sheetReads: [],
+    sheetWrites: [],
+    readCounts: { admins: 0, admin_sessions: 0 },
+    pbkdf2Calls: [],
+    randomCalls: [],
+    writePolicies: [],
+    appendAttempts: 0,
+    uuidValues: [...(options.uuidValues || ["55555555-5555-4555-8555-555555555555"])]
+  };
+
+  function safeLog(...values) {
+    const rendered = values.map(String).join(" ");
+    state.logs.push(rendered);
+    for (const secret of [SYNTHETIC_RANDOM_KEY, BOOTSTRAP_PASSWORD]) {
+      assert.equal(rendered.includes(secret), false, "Task 5 functions must not log secrets");
+    }
+  }
+
+  const lock = {
+    tryLock(timeout) {
+      state.lockAttempts += 1;
+      state.events.push(`lock:try:${timeout}`);
+      if (options.throwTryLock) throw new Error("synthetic tryLock secret detail");
+      if (options.failLock) return false;
+      state.lockHeld = true;
+      state.events.push("lock:acquired");
+      return true;
+    },
+    releaseLock() {
+      state.events.push("lock:release-attempted");
+      state.lockHeld = false;
+      if (options.throwReleaseLock) throw new Error("synthetic releaseLock secret detail");
+      state.events.push("lock:released");
+    },
+    hasLock() {
+      return state.lockHeld;
+    }
+  };
+
+  const scriptProperties = {
+    getProperty(name) {
+      state.propertyCalls.push({ method: "get", name, lockHeld: state.lockHeld });
+      state.events.push(`property:get:${name}`);
+      if (options.forbidPersistentAccess) throw new Error("forbidden persistent property access");
+      if (options.failPropertyRead === name) throw new Error("synthetic property read failure");
+      if (options.cleanupVerificationFailure === name && state.events.includes("cleanup:verification")) {
+        return "synthetic-leftover";
+      }
+      return Object.hasOwn(state.properties, name) ? state.properties[name] : null;
+    },
+    setProperty(name, value) {
+      state.propertyCalls.push({ method: "set", name, value, lockHeld: state.lockHeld });
+      state.events.push(`property:set:${name}:${value}`);
+      if (options.forbidPersistentAccess) throw new Error("forbidden persistent property write");
+      if (options.failPropertySet === name ||
+          (options.failRandomCounterPersistence && name === "ADMIN_AUTH_RANDOM_COUNTER" && state.randomCalls.length)) {
+        throw new Error("synthetic property write failure");
+      }
+      state.properties[name] = String(value);
+      return scriptProperties;
+    },
+    deleteProperty(name) {
+      state.propertyCalls.push({ method: "delete", name, lockHeld: state.lockHeld });
+      state.events.push(`property:delete:${name}`);
+      if (options.failPropertyDelete === name) throw new Error("synthetic property delete failure");
+      if (options.stickyDeleteProperty !== name) delete state.properties[name];
+      return scriptProperties;
+    }
+  };
+
+  function assertUniqueHeaders(headers, requiredHeaders) {
+    if (!Array.isArray(headers) || !Array.isArray(requiredHeaders || [])) throw new Error("synthetic invalid headers");
+    const exact = Object.create(null);
+    const folded = Object.create(null);
+    headers.forEach((header, index) => {
+      if (typeof header !== "string" || !header.trim()) throw new Error("synthetic malformed headers");
+      const normalized = header.trim();
+      if (Object.hasOwn(exact, normalized) || Object.hasOwn(folded, normalized.toLowerCase())) {
+        throw new Error("synthetic duplicate headers");
+      }
+      exact[normalized] = index;
+      folded[normalized.toLowerCase()] = true;
+    });
+    for (const required of requiredHeaders || []) {
+      if (!Object.hasOwn(exact, required)) throw new Error("synthetic missing header");
+    }
+    return exact;
+  }
+
+  function sheetValues(name) {
+    const headers = state.headers[name];
+    if (headers === null) return [];
+    if (!headers.length && !state.tables[name].length) return [];
+    return [headers.slice()].concat(state.tables[name].map((record) => headers.map((header) =>
+      Object.hasOwn(record, header) ? record[header] : ""
+    )));
+  }
+
+  function fakeSheet(name) {
+    return {
+      getDataRange() {
+        state.events.push(`spreadsheet:data:${name}`);
+        return { getValues: () => sheetValues(name) };
+      },
+      getLastRow() {
+        return state.headers[name] && state.headers[name].length ? state.tables[name].length + 1 : 0;
+      }
+    };
+  }
+
+  const spreadsheet = {
+    getSheetByName(name) {
+      state.events.push(`spreadsheet:get:${name}`);
+      if (options.forbidPersistentAccess) throw new Error("forbidden Sheet access");
+      if (!Object.hasOwn(state.headers, name) || state.headers[name] === null) return null;
+      return fakeSheet(name);
+    },
+    insertSheet(name) {
+      state.events.push(`spreadsheet:insert:${name}`);
+      if (options.forbidPersistentAccess) throw new Error("forbidden Sheet creation");
+      if (options.failSheetCreation) throw new Error("synthetic Sheet creation failure");
+      if (state.headers[name] !== null && state.headers[name] !== undefined) throw new Error("synthetic duplicate Sheet");
+      state.headers[name] = [];
+      state.tables[name] = [];
+      state.sheetWrites.push({ method: "insertSheet", sheetName: name });
+      return fakeSheet(name);
+    }
+  };
+
+  class FakeDate extends Date {
+    constructor(value) {
+      super(arguments.length ? value : state.now);
+    }
+    static now() {
+      return state.nowValues.length ? state.nowValues.shift() : state.now;
+    }
+  }
+
+  const context = {
+    Array,
+    Date: FakeDate,
+    Error,
+    JSON,
+    Math,
+    Number,
+    Object,
+    RegExp,
+    String,
+    TypeError,
+    RangeError,
+    ADMIN_PBKDF2_ITERATIONS_: 120000,
+    console: { log: safeLog, debug: safeLog, info: safeLog, warn: safeLog, error: safeLog },
+    Logger: { log: safeLog },
+    PropertiesService: {
+      getScriptProperties() {
+        state.events.push("properties:get-script");
+        if (options.forbidPersistentAccess) throw new Error("forbidden PropertiesService access");
+        return scriptProperties;
+      }
+    },
+    CacheService: {
+      getScriptCache() {
+        if (options.forbidPersistentAccess) throw new Error("forbidden CacheService access");
+        return { get: () => null, put: () => {}, remove: () => {} };
+      }
+    },
+    LockService: {
+      getScriptLock() {
+        if (options.throwGetLock) throw new Error("synthetic getScriptLock secret detail");
+        return lock;
+      }
+    },
+    SpreadsheetApp: {
+      openById(id) {
+        state.events.push(`spreadsheet:open:${id}`);
+        if (options.forbidPersistentAccess) throw new Error("forbidden SpreadsheetApp access");
+        assert.equal(id, "configured");
+        return spreadsheet;
+      }
+    },
+    Utilities: {
+      getUuid() {
+        state.events.push("uuid:admin");
+        if (!state.uuidValues.length) throw new Error("synthetic UUID exhaustion");
+        return state.uuidValues.shift();
+      }
+    },
+    getAppConfig_() {
+      if (options.forbidPersistentAccess) throw new Error("forbidden credential/config access");
+      return { spreadsheetId: "configured" };
+    },
+    SheetService_assertUniqueHeaders_(headers, requiredHeaders) {
+      return assertUniqueHeaders(Array.from(headers || []), Array.from(requiredHeaders || []));
+    },
+    SheetService_ensureHeaders_(sheetName, requiredHeaders) {
+      state.events.push(`sheet:ensure:${sheetName}`);
+      if (options.failEnsureHeaders === sheetName) throw new Error("synthetic ensure headers failure");
+      const headers = state.headers[sheetName];
+      if (headers === null || headers === undefined) throw new Error("synthetic missing Sheet");
+      assertUniqueHeaders(headers, []);
+      for (const required of requiredHeaders) {
+        for (const header of headers) {
+          if (header !== required && header.toLowerCase() === required.toLowerCase()) {
+            throw new Error("synthetic conflicting headers");
+          }
+        }
+      }
+      const appendedHeaders = Array.from(requiredHeaders).filter((header) => !headers.includes(header));
+      if (appendedHeaders.length) {
+        state.headers[sheetName] = headers.concat(appendedHeaders);
+        state.sheetWrites.push({ method: "ensureHeaders", sheetName, appendedHeaders: appendedHeaders.slice() });
+      }
+      return {
+        headers: state.headers[sheetName].slice(),
+        headerMap: assertUniqueHeaders(state.headers[sheetName], Array.from(requiredHeaders)),
+        appendedHeaders
+      };
+    },
+    SheetService_readTable_(sheetName, requiredHeaders) {
+      state.readCounts[sheetName] += 1;
+      const count = state.readCounts[sheetName];
+      state.events.push(`sheet:read:${sheetName}:${count}`);
+      state.sheetReads.push({ sheetName, count, lockHeld: state.lockHeld });
+      if (options.forbidPersistentAccess) throw new Error("forbidden Sheet table access");
+      if (options.failRead === sheetName ||
+          (options.failRead && options.failRead.sheet === sheetName && options.failRead.at === count)) {
+        throw new Error("synthetic Sheet read failure");
+      }
+      assertUniqueHeaders(state.headers[sheetName], Array.from(requiredHeaders));
+      const rows = state.tables[sheetName].map((row, index) => ({ sourceRowNumber: index + 2, values: { ...row } }));
+      if (options.rereadMismatch && sheetName === "admins" && count >= 2 && rows.length) {
+        rows[rows.length - 1].values.password_hash = "A".repeat(43);
+      }
+      return {
+        headers: state.headers[sheetName].slice(),
+        headerMap: assertUniqueHeaders(state.headers[sheetName], Array.from(requiredHeaders)),
+        rows
+      };
+    },
+    SheetService_writeValue_(policy, fieldName, value) {
+      state.events.push(`sheet:validate:${fieldName}`);
+      state.writePolicies.push({ policy, fieldName, value });
+      if (policy === "human_text") {
+        assert.ok(fieldName === "display_name" || fieldName === "email");
+        if (typeof value !== "string") throw new Error("synthetic human text failure");
+        return /^[=+\-@]/.test(value) ? `'${value}` : value;
+      }
+      assert.equal(policy, "security");
+      return value;
+    },
+    appendSheetObject_(sheetName, requiredHeaders, record) {
+      state.appendAttempts += 1;
+      state.events.push(`sheet:append:${sheetName}`);
+      assert.deepEqual(Array.from(requiredHeaders), sheetName === "admins" ? ADMIN_HEADERS : SESSION_HEADERS);
+      if (options.failAppend) throw new Error("synthetic append failure");
+      state.tables[sheetName].push({ ...record });
+      state.sheetWrites.push({ method: "append", sheetName, record: { ...record } });
+    },
+    CryptoService_utf8Bytes_(value) {
+      if (typeof value !== "string" || /[\uD800-\uDFFF]/.test(value.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, ""))) {
+        throw new Error("UTF-8 input is malformed.");
+      }
+      return Array.from(Buffer.from(value, "utf8"));
+    },
+    CryptoService_pbkdf2Sha256_(password, saltBytes, iterations) {
+      const callNumber = state.pbkdf2Calls.length + 1;
+      state.events.push(`crypto:pbkdf2:${iterations}`);
+      state.pbkdf2Calls.push({ password, saltBytes: Array.from(saltBytes), iterations });
+      if (options.failPbkdf2) throw new Error("synthetic PBKDF2 failure");
+      if (password === BENCHMARK_PASSWORD &&
+          Buffer.from(saltBytes).equals(Buffer.from(BENCHMARK_SALT)) && iterations === 120000) {
+        if (options.incorrectPbkdf2Call === callNumber) return Array(32).fill(0);
+        return Array.from(Buffer.from(BENCHMARK_HASH, "base64url"));
+      }
+      if (options.bootstrapDerivedBytes) return Array.from(options.bootstrapDerivedBytes);
+      return pbkdf2Fixture(password, saltBytes, iterations);
+    },
+    CryptoService_base64UrlEncode_(bytes) {
+      return Buffer.from(bytes).toString("base64url");
+    },
+    CryptoService_base64UrlDecode_(value) {
+      if (typeof value !== "string" || !/^[A-Za-z0-9_-]+$/.test(value) || value.length % 4 === 1) {
+        throw new Error("Invalid base64url value.");
+      }
+      const decoded = Buffer.from(value, "base64url");
+      if (decoded.toString("base64url") !== value) throw new Error("Invalid base64url value.");
+      return Array.from(decoded);
+    },
+    CryptoService_constantTimeEqual_(left, right) {
+      let difference = left.length ^ right.length;
+      for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+        difference |= (left[index] || 0) ^ (right[index] || 0);
+      }
+      return difference === 0;
+    },
+    CryptoService_randomBytesLocked_(purpose, length) {
+      state.events.push(`random:entered:${purpose}:${length}`);
+      state.randomCalls.push({ purpose, length, lockHeld: state.lockHeld });
+      assert.equal(state.lockHeld, true, "Task 5 random generation must use the caller-held script lock");
+      const counterText = state.properties.ADMIN_AUTH_RANDOM_COUNTER;
+      const counter = Number(counterText);
+      scriptProperties.setProperty("ADMIN_AUTH_RANDOM_COUNTER", String(counter + 1));
+      state.events.push("random:counter-persisted");
+      if (options.failRandomDerivation) throw new Error("synthetic random derivation failure");
+      state.events.push("random:derived");
+      return Array.from(options.saltBytes || Array.from({ length: length }, (_, index) => index + 1));
+    }
+  };
+
+  vm.createContext(context);
+  vm.runInContext(configSource, context, { filename: "apps-script/Config.gs" });
+  vm.runInContext(
+    options.authServiceSourceOverride === undefined ? serviceSource : options.authServiceSourceOverride,
+    context,
+    { filename: "apps-script/AuthService.gs" }
+  );
+  return { context, state };
+}
+
 let passed = 0;
 function test(name, fn) {
   try {
@@ -397,13 +761,771 @@ function assertRequireAdminRejectsInactiveAdminSecondCall_(runtime) {
   assert.equal(runtime.state.writes.length, 0);
 }
 
-test("exports only the Task 4 public and reusable service entry points", () => {
+function benchmarkTicks(durations) {
+  const ticks = [];
+  let cursor = 1000;
+  for (const duration of durations) {
+    ticks.push(cursor, cursor + duration);
+    cursor += duration + 17;
+  }
+  return ticks;
+}
+
+function assertSafeTask5Error(fn, secrets = [SYNTHETIC_RANDOM_KEY, BOOTSTRAP_PASSWORD]) {
+  let thrown;
+  try {
+    fn();
+  } catch (error) {
+    thrown = error;
+  }
+  assert.ok(thrown, "expected a fail-closed Task 5 error");
+  const rendered = `${thrown.name}: ${thrown.message}`;
+  for (const secret of secrets.filter((value) => typeof value === "string" && value.length > 0)) {
+    assert.equal(rendered.includes(secret), false, "Task 5 errors must not expose secrets");
+  }
+  assert.equal(/synthetic|Spreadsheet|property read|property write|stack/i.test(rendered), false, "Task 5 errors must use safe categories");
+  return thrown;
+}
+
+function assertNoBootstrapCreation(state) {
+  assert.equal(state.randomCalls.length, 0, "failed bootstrap validation must precede salt generation");
+  assert.equal(state.pbkdf2Calls.length, 0, "failed bootstrap validation must precede PBKDF2");
+  assert.equal(state.appendAttempts, 0, "failed bootstrap validation must precede append");
+  assert.equal(state.tables.admins.length, 0, "failed bootstrap validation must create no Admin row");
+}
+
+test("setup initializes both random-state properties only for genuinely empty auth data", () => {
+  const runtime = createTask5Runtime({
+    absentProperties: ["ADMIN_AUTH_RANDOM_COUNTER", "ADMIN_AUTH_STATE_VERSION"],
+    admins: [],
+    sessions: []
+  });
+  const result = plain(runtime.context.setupAdminAuthSchema());
+  assert.deepEqual(result, {
+    random_key: "valid",
+    random_state: "initialized",
+    state_version: 1,
+    admins_headers: "valid",
+    admin_sessions_headers: "valid"
+  });
+  assert.equal(runtime.state.properties.ADMIN_AUTH_RANDOM_COUNTER, "0");
+  assert.equal(runtime.state.properties.ADMIN_AUTH_STATE_VERSION, "1");
+  assert.deepEqual(
+    runtime.state.propertyCalls.filter((call) => call.method === "set").map(({ name, value, lockHeld }) => ({ name, value, lockHeld })),
+    [
+      { name: "ADMIN_AUTH_RANDOM_COUNTER", value: "0", lockHeld: true },
+      { name: "ADMIN_AUTH_STATE_VERSION", value: "1", lockHeld: true }
+    ]
+  );
+  assert.equal(runtime.state.lockHeld, false);
+  assert.equal(runtime.state.tables.admins.length, 0);
+  assert.equal(runtime.state.tables.admin_sessions.length, 0);
+  assert.equal(runtime.state.appendAttempts, 0);
+});
+
+test("setup preserves a valid established counter/version pair without rewriting either property", () => {
+  const runtime = createTask5Runtime({ properties: { ADMIN_AUTH_RANDOM_COUNTER: "9007199254740990" } });
+  const result = plain(runtime.context.setupAdminAuthSchema());
+  assert.equal(result.random_state, "valid");
+  assert.equal(runtime.state.properties.ADMIN_AUTH_RANDOM_COUNTER, "9007199254740990");
+  assert.equal(runtime.state.properties.ADMIN_AUTH_STATE_VERSION, "1");
+  assert.equal(runtime.state.propertyCalls.some((call) => call.method === "set"), false);
+});
+
+test("setup fails closed for every partial malformed unsafe or wrong-version established state without reset", () => {
+  const cases = [
+    [{ ADMIN_AUTH_RANDOM_COUNTER: null, ADMIN_AUTH_STATE_VERSION: "1" }, ["ADMIN_AUTH_RANDOM_COUNTER"]],
+    [{ ADMIN_AUTH_RANDOM_COUNTER: "0", ADMIN_AUTH_STATE_VERSION: null }, ["ADMIN_AUTH_STATE_VERSION"]],
+    [{ ADMIN_AUTH_RANDOM_COUNTER: "01", ADMIN_AUTH_STATE_VERSION: "1" }, []],
+    [{ ADMIN_AUTH_RANDOM_COUNTER: "-1", ADMIN_AUTH_STATE_VERSION: "1" }, []],
+    [{ ADMIN_AUTH_RANDOM_COUNTER: "1.5", ADMIN_AUTH_STATE_VERSION: "1" }, []],
+    [{ ADMIN_AUTH_RANDOM_COUNTER: String(Number.MAX_SAFE_INTEGER), ADMIN_AUTH_STATE_VERSION: "1" }, []],
+    [{ ADMIN_AUTH_RANDOM_COUNTER: "0", ADMIN_AUTH_STATE_VERSION: "2" }, []]
+  ];
+  for (const [properties, absentProperties] of cases) {
+    const runtime = createTask5Runtime({ properties, absentProperties });
+    const before = { ...runtime.state.properties };
+    assertSafeTask5Error(() => runtime.context.setupAdminAuthSchema());
+    assert.deepEqual(runtime.state.properties, before, "setup must not repair/reset invalid established state");
+    assert.equal(runtime.state.propertyCalls.some((call) => call.method === "set"), false);
+    assert.equal(runtime.state.sheetWrites.length, 0);
+    assert.equal(runtime.state.lockHeld, false);
+  }
+});
+
+test("setup state assertions reject an explicit reset-invalid-state mutation", () => {
+  const runtime = createTask5Runtime({ properties: { ADMIN_AUTH_RANDOM_COUNTER: "malformed" } });
+  runtime.context.setupAdminAuthSchema = function () {
+    runtime.state.properties.ADMIN_AUTH_RANDOM_COUNTER = "0";
+    runtime.state.properties.ADMIN_AUTH_STATE_VERSION = "1";
+    return { random_state: "initialized" };
+  };
+  assert.throws(() => {
+    const before = { ...runtime.state.properties };
+    runtime.context.setupAdminAuthSchema();
+    assert.deepEqual(runtime.state.properties, before, "invalid established state must remain unchanged");
+  }, /invalid established state must remain unchanged/);
+});
+
+test("setup refuses absent state when either authoritative auth dataset already has a row", () => {
+  for (const options of [
+    { admins: [makeAdmin()], sessions: [] },
+    { admins: [], sessions: [makeSession()] },
+    { admins: [makeAdmin()], sessions: [makeSession()] }
+  ]) {
+    const runtime = createTask5Runtime({
+      ...options,
+      absentProperties: ["ADMIN_AUTH_RANDOM_COUNTER", "ADMIN_AUTH_STATE_VERSION"]
+    });
+    assertSafeTask5Error(() => runtime.context.setupAdminAuthSchema());
+    assert.equal(Object.hasOwn(runtime.state.properties, "ADMIN_AUTH_RANDOM_COUNTER"), false);
+    assert.equal(Object.hasOwn(runtime.state.properties, "ADMIN_AUTH_STATE_VERSION"), false);
+    assert.equal(runtime.state.propertyCalls.some((call) => call.method === "set"), false);
+    assert.equal(runtime.state.sheetWrites.length, 0);
+    assert.equal(runtime.state.lockHeld, false);
+  }
+});
+
+test("setup key validation rejects every noncanonical key without returning logging or echoing it", () => {
+  const invalidKeys = [null, "", "A".repeat(42), "A".repeat(44), `${"A".repeat(42)}=`, `${"A".repeat(42)}!`, "_".repeat(43)];
+  for (const key of invalidKeys) {
+    const runtime = createTask5Runtime({ properties: { ADMIN_AUTH_RANDOM_KEY: key }, absentProperties: key === null ? ["ADMIN_AUTH_RANDOM_KEY"] : [] });
+    const error = assertSafeTask5Error(() => runtime.context.setupAdminAuthSchema(), [String(key)]);
+    if (key) {
+      assert.equal(error.message.includes(String(key)), false);
+      assert.equal(JSON.stringify(runtime.state.logs).includes(String(key)), false);
+    }
+    assert.equal(runtime.state.propertyCalls.some((call) => call.method === "set"), false);
+    assert.equal(runtime.state.lockHeld, false);
+  }
+  assert.equal(SYNTHETIC_RANDOM_KEY.length, 43);
+  assert.equal(Buffer.from(SYNTHETIC_RANDOM_KEY, "base64url").length, 32);
+  const valid = createTask5Runtime();
+  const result = plain(valid.context.setupAdminAuthSchema());
+  assert.equal(result.random_key, "valid");
+  assert.equal(JSON.stringify(result).includes(SYNTHETIC_RANDOM_KEY), false);
+});
+
+test("setup uses one script lock and releases it on lock/schema/property failures", () => {
+  const lockFailure = createTask5Runtime({ failLock: true });
+  assertSafeTask5Error(() => lockFailure.context.setupAdminAuthSchema());
+  assert.deepEqual(lockFailure.state.events.filter((event) => event.startsWith("lock:")), ["lock:try:10000"]);
+  assert.equal(lockFailure.state.sheetReads.length, 0);
+
+  for (const options of [
+    { failEnsureHeaders: "admins" },
+    { failSheetCreation: true, sessionSheetMissing: true },
+    { failPropertySet: "ADMIN_AUTH_RANDOM_COUNTER", absentProperties: ["ADMIN_AUTH_RANDOM_COUNTER", "ADMIN_AUTH_STATE_VERSION"] },
+    { failPropertySet: "ADMIN_AUTH_STATE_VERSION", absentProperties: ["ADMIN_AUTH_RANDOM_COUNTER", "ADMIN_AUTH_STATE_VERSION"] }
+  ]) {
+    const runtime = createTask5Runtime(options);
+    assertSafeTask5Error(() => runtime.context.setupAdminAuthSchema());
+    assert.equal(runtime.state.lockHeld, false);
+    assert.equal(runtime.state.events[runtime.state.events.length - 1], "lock:released");
+  }
+});
+
+test("setup sanitizes get try and release lock exceptions and always attempts held-lock release", () => {
+  for (const options of [{ throwGetLock: true }, { throwTryLock: true }, { throwReleaseLock: true }]) {
+    const runtime = createTask5Runtime(options);
+    const error = assertSafeTask5Error(
+      () => runtime.context.setupAdminAuthSchema(),
+      ["synthetic getScriptLock secret detail", "synthetic tryLock secret detail", "synthetic releaseLock secret detail"]
+    );
+    assert.equal(error.message, "AUTH_SETUP_FAILED");
+    assert.equal(runtime.state.lockHeld, false);
+    if (options.throwReleaseLock) assert.equal(runtime.state.events.includes("lock:release-attempted"), true);
+  }
+
+  const bodyAndReleaseFailure = createTask5Runtime({ failEnsureHeaders: "admins", throwReleaseLock: true });
+  const error = assertSafeTask5Error(() => bodyAndReleaseFailure.context.setupAdminAuthSchema());
+  assert.equal(error.message, "AUTH_SETUP_FAILED");
+  assert.equal(bodyAndReleaseFailure.state.events.includes("lock:release-attempted"), true);
+  assert.equal(bodyAndReleaseFailure.state.lockHeld, false);
+});
+
+test("a first-time version persistence failure leaves partial state fail-closed and never auto-repairs it", () => {
+  const runtime = createTask5Runtime({
+    absentProperties: ["ADMIN_AUTH_RANDOM_COUNTER", "ADMIN_AUTH_STATE_VERSION"],
+    failPropertySet: "ADMIN_AUTH_STATE_VERSION"
+  });
+  assertSafeTask5Error(() => runtime.context.setupAdminAuthSchema());
+  assert.equal(runtime.state.properties.ADMIN_AUTH_RANDOM_COUNTER, "0");
+  assert.equal(Object.hasOwn(runtime.state.properties, "ADMIN_AUTH_STATE_VERSION"), false);
+  const writesAfterFirstFailure = runtime.state.propertyCalls.filter((call) => call.method === "set").length;
+  assertSafeTask5Error(() => runtime.context.setupAdminAuthSchema());
+  assert.equal(runtime.state.propertyCalls.filter((call) => call.method === "set").length, writesAfterFirstFailure);
+  assert.equal(runtime.state.properties.ADMIN_AUTH_RANDOM_COUNTER, "0");
+  assert.equal(Object.hasOwn(runtime.state.properties, "ADMIN_AUTH_STATE_VERSION"), false);
+  assert.equal(runtime.state.lockHeld, false);
+});
+
+test("setup appends only missing Admin headers and preserves shuffled populated rows and columns", () => {
+  const headers = ["status", "admin_id", "username", "display_name", "email"];
+  const row = {
+    status: "inactive",
+    admin_id: "ADM-11111111-1111-4111-8111-111111111111",
+    username: "legacy",
+    display_name: "Legacy",
+    email: "legacy@example.test"
+  };
+  const runtime = createTask5Runtime({ adminHeaders: headers, admins: [row] });
+  const before = plain(runtime.state.tables.admins);
+  runtime.context.setupAdminAuthSchema();
+  assert.deepEqual(runtime.state.headers.admins.slice(0, headers.length), headers);
+  assert.deepEqual(runtime.state.headers.admins.slice(headers.length), ADMIN_HEADERS.filter((header) => !headers.includes(header)));
+  assert.deepEqual(runtime.state.tables.admins, before);
+  assert.deepEqual(runtime.state.sheetWrites.filter((write) => write.sheetName === "admins"), [{
+    method: "ensureHeaders",
+    sheetName: "admins",
+    appendedHeaders: ADMIN_HEADERS.filter((header) => !headers.includes(header))
+  }]);
+  assert.equal(runtime.state.appendAttempts, 0);
+  assert.equal(JSON.stringify(runtime.state.tables.admins).includes(BOOTSTRAP_PASSWORD), false);
+});
+
+test("setup initializes a genuinely blank existing Admin Sheet without adding rows", () => {
+  const runtime = createTask5Runtime({ adminHeaders: [], admins: [] });
+  runtime.context.setupAdminAuthSchema();
+  assert.deepEqual(runtime.state.headers.admins, ADMIN_HEADERS);
+  assert.deepEqual(runtime.state.tables.admins, []);
+  assert.deepEqual(runtime.state.sheetWrites.filter((write) => write.sheetName === "admins"), [{
+    method: "ensureHeaders",
+    sheetName: "admins",
+    appendedHeaders: ADMIN_HEADERS
+  }]);
+  assert.equal(runtime.state.appendAttempts, 0);
+});
+
+test("setup creates only an absent admin_sessions Sheet and installs documented headers without rows", () => {
+  const runtime = createTask5Runtime({ sessionSheetMissing: true });
+  runtime.context.setupAdminAuthSchema();
+  assert.deepEqual(runtime.state.headers.admin_sessions, SESSION_HEADERS);
+  assert.deepEqual(runtime.state.tables.admin_sessions, []);
+  assert.deepEqual(runtime.state.sheetWrites, [
+    { method: "insertSheet", sheetName: "admin_sessions" },
+    { method: "ensureHeaders", sheetName: "admin_sessions", appendedHeaders: SESSION_HEADERS }
+  ]);
+  assert.equal(runtime.state.appendAttempts, 0);
+});
+
+test("setup accepts shuffled session headers and only appends missing headers without purge/reorder", () => {
+  const headers = ["revoked_at", "session_id", "admin_id", "token_hash"];
+  const session = {
+    revoked_at: "",
+    session_id: "SES-22222222-2222-4222-8222-222222222222",
+    admin_id: "ADM-11111111-1111-4111-8111-111111111111",
+    token_hash: TOKEN_HASH
+  };
+  const runtime = createTask5Runtime({ sessionHeaders: headers, sessions: [session] });
+  const before = plain(runtime.state.tables.admin_sessions);
+  runtime.context.setupAdminAuthSchema();
+  assert.deepEqual(runtime.state.headers.admin_sessions.slice(0, headers.length), headers);
+  assert.deepEqual(runtime.state.headers.admin_sessions.slice(headers.length), SESSION_HEADERS.filter((header) => !headers.includes(header)));
+  assert.deepEqual(runtime.state.tables.admin_sessions, before);
+  assert.equal(serviceSource.match(/deleteRow|deleteRows|clearContent|purge/gi), null);
+});
+
+test("setup fails before mutation on absent Admin Sheet and duplicate conflicting or malformed headers", () => {
+  const cases = [
+    { adminHeaders: ["admin_id", "admin_id"] },
+    { adminHeaders: ["admin_id", "Admin_id"] },
+    { adminHeaders: ["admin_id", ""] },
+    { sessionHeaders: ["session_id", "session_id"] },
+    { sessionHeaders: ["session_id", "Session_id"] },
+    { sessionHeaders: ["session_id", ""] }
+  ];
+  for (const options of cases) {
+    const runtime = createTask5Runtime(options);
+    const headersBefore = plain(runtime.state.headers);
+    assertSafeTask5Error(() => runtime.context.setupAdminAuthSchema());
+    assert.deepEqual(runtime.state.headers, headersBefore);
+    assert.equal(runtime.state.sheetWrites.length, 0);
+    assert.equal(runtime.state.propertyCalls.some((call) => call.method === "set"), false);
+    assert.equal(runtime.state.lockHeld, false);
+  }
+  const missingAdmin = createTask5Runtime();
+  missingAdmin.state.headers.admins = null;
+  assertSafeTask5Error(() => missingAdmin.context.setupAdminAuthSchema());
+  assert.equal(missingAdmin.state.sheetWrites.length, 0);
+});
+
+test("first-time setup preflights required-header case conflicts before initializing random state", () => {
+  for (const options of [
+    { adminHeaders: ["Admin_id"] },
+    { sessionHeaders: ["Session_id"] }
+  ]) {
+    const runtime = createTask5Runtime({
+      ...options,
+      absentProperties: ["ADMIN_AUTH_RANDOM_COUNTER", "ADMIN_AUTH_STATE_VERSION"]
+    });
+    assertSafeTask5Error(() => runtime.context.setupAdminAuthSchema());
+    assert.equal(Object.hasOwn(runtime.state.properties, "ADMIN_AUTH_RANDOM_COUNTER"), false);
+    assert.equal(Object.hasOwn(runtime.state.properties, "ADMIN_AUTH_STATE_VERSION"), false);
+    assert.equal(runtime.state.propertyCalls.some((call) => call.method === "set"), false);
+    assert.equal(runtime.state.sheetWrites.length, 0);
+    assert.equal(runtime.state.lockHeld, false);
+  }
+});
+
+test("benchmark is isolated from properties Sheets cache credentials and bootstrap services", () => {
+  const runtime = createTask5Runtime({
+    forbidPersistentAccess: true,
+    nowValues: benchmarkTicks([100, 200, 300, 400, 500])
+  });
+  const result = plain(runtime.context.benchmarkAdminPbkdf2());
+  assert.equal(result.passed, true);
+  assert.equal(runtime.state.propertyCalls.length, 0);
+  assert.equal(runtime.state.sheetReads.length, 0);
+  assert.equal(runtime.state.sheetWrites.length, 0);
+  assert.equal(runtime.state.randomCalls.length, 0);
+});
+
+test("benchmark performs exactly one warm-up and five fixed 120000-round measured derivations", () => {
+  const durations = [101, 202, 303, 404, 505];
+  const runtime = createTask5Runtime({ nowValues: benchmarkTicks(durations) });
+  const result = plain(runtime.context.benchmarkAdminPbkdf2(60000));
+  assert.deepEqual(result, {
+    iterations: 120000,
+    durations_ms: durations,
+    correctness: [true, true, true, true, true],
+    median_ms: 303,
+    max_ms: 505,
+    passed: true
+  });
+  assert.equal(runtime.state.pbkdf2Calls.length, 6);
+  for (const call of runtime.state.pbkdf2Calls) {
+    assert.equal(call.password, BENCHMARK_PASSWORD);
+    assert.deepEqual(call.saltBytes, BENCHMARK_SALT);
+    assert.equal(call.iterations, 120000);
+  }
+  assert.equal(Buffer.from(BENCHMARK_HASH, "base64url").length, 32);
+});
+
+test("benchmark vector is independently derived by Node crypto and rejects a matching-wrong production constant", () => {
+  assert.equal(BENCHMARK_HASH, crypto.pbkdf2Sync(
+    BENCHMARK_PASSWORD,
+    Buffer.from(BENCHMARK_SALT),
+    120000,
+    32,
+    "sha256"
+  ).toString("base64url"));
+
+  const runtime = createTask5Runtime({ nowValues: benchmarkTicks([1, 1, 1, 1, 1]) });
+  assert.equal(runtime.context.AuthService_BENCHMARK_PASSWORD_, BENCHMARK_PASSWORD);
+  assert.deepEqual(Array.from(runtime.context.CryptoService_base64UrlDecode_(runtime.context.AuthService_BENCHMARK_SALT_)), BENCHMARK_SALT);
+  assert.equal(runtime.context.AuthService_BENCHMARK_HASH_, BENCHMARK_HASH);
+
+  const wrongHash = "A".repeat(43);
+  const mutatedSource = serviceSource.replace(
+    `var AuthService_BENCHMARK_HASH_ = "${BENCHMARK_HASH}";`,
+    `var AuthService_BENCHMARK_HASH_ = "${wrongHash}";`
+  );
+  assert.notEqual(mutatedSource, serviceSource, "benchmark mutation fixture must replace the production vector");
+  const mutated = createTask5Runtime({
+    authServiceSourceOverride: mutatedSource,
+    nowValues: benchmarkTicks([1, 1, 1, 1, 1])
+  });
+  const result = plain(mutated.context.benchmarkAdminPbkdf2());
+  assert.equal(result.passed, false);
+  assert.deepEqual(result.correctness, [false, false, false, false, false]);
+});
+
+test("benchmark threshold boundaries and correctness fail closed exactly", () => {
+  const cases = [
+    [[1000, 2000, 3000, 4000, 5000], null, true],
+    [[1000, 2000, 3001, 4000, 5000], null, false],
+    [[100, 200, 300, 400, 5001], null, false],
+    [[100, 200, 300, 400, 500], 4, false]
+  ];
+  for (const [durations, incorrectPbkdf2Call, passedExpected] of cases) {
+    const runtime = createTask5Runtime({ nowValues: benchmarkTicks(durations), incorrectPbkdf2Call });
+    const result = plain(runtime.context.benchmarkAdminPbkdf2(100000));
+    assert.equal(result.passed, passedExpected);
+    assert.equal(result.median_ms, durations.slice().sort((a, b) => a - b)[2]);
+    assert.equal(result.max_ms, Math.max(...durations));
+    assert.equal(runtime.state.pbkdf2Calls.every((call) => call.iterations === 120000), true);
+  }
+});
+
+test("benchmark isolation/workload assertions detect forbidden-property and lowered-iteration mutations", () => {
+  const propertyMutation = createTask5Runtime({ forbidPersistentAccess: true, nowValues: benchmarkTicks([1, 1, 1, 1, 1]) });
+  propertyMutation.context.benchmarkAdminPbkdf2 = function () {
+    return propertyMutation.context.PropertiesService.getScriptProperties().getProperty("ADMIN_AUTH_RANDOM_KEY");
+  };
+  assert.throws(() => propertyMutation.context.benchmarkAdminPbkdf2(), /forbidden/);
+
+  const iterationMutation = createTask5Runtime({ nowValues: benchmarkTicks([1, 1, 1, 1, 1]) });
+  iterationMutation.context.benchmarkAdminPbkdf2 = function () {
+    for (let index = 0; index < 6; index += 1) {
+      iterationMutation.context.CryptoService_pbkdf2Sha256_(BENCHMARK_PASSWORD, BENCHMARK_SALT, 60000);
+    }
+  };
+  iterationMutation.context.benchmarkAdminPbkdf2();
+  assert.equal(iterationMutation.state.pbkdf2Calls.some((call) => call.iterations !== 120000), true, "mutation fixture must lower iterations");
+  assert.throws(() => {
+    assert.equal(iterationMutation.state.pbkdf2Calls.every((call) => call.iterations === 120000), true);
+  });
+});
+
+test("bootstrap requires enabled to be the exact lowercase string true before lock or persistence", () => {
+  for (const enabled of [null, "false", "TRUE", true, "1", " true", "true "]) {
+    const runtime = createTask5Runtime({
+      properties: { ADMIN_BOOTSTRAP_ENABLED: enabled },
+      absentProperties: enabled === null ? ["ADMIN_BOOTSTRAP_ENABLED"] : []
+    });
+    assertSafeTask5Error(() => runtime.context.bootstrapFirstAdmin());
+    assertNoBootstrapCreation(runtime.state);
+    assert.equal(runtime.state.lockAttempts, 0);
+    assert.equal(runtime.state.propertyCalls.some((call) => call.method !== "get"), false);
+  }
+});
+
+test("bootstrap sanitizes get try and release lock exceptions and never returns unsafe success", () => {
+  for (const options of [{ throwGetLock: true }, { throwTryLock: true }]) {
+    const runtime = createTask5Runtime(options);
+    const error = assertSafeTask5Error(
+      () => runtime.context.bootstrapFirstAdmin(),
+      ["synthetic getScriptLock secret detail", "synthetic tryLock secret detail"]
+    );
+    assert.equal(error.message, "AUTH_BOOTSTRAP_FAILED");
+    assertNoBootstrapCreation(runtime.state);
+    assert.equal(runtime.state.lockHeld, false);
+  }
+
+  const releaseFailure = createTask5Runtime({ throwReleaseLock: true });
+  const releaseError = assertSafeTask5Error(
+    () => releaseFailure.context.bootstrapFirstAdmin(),
+    ["synthetic releaseLock secret detail"]
+  );
+  assert.equal(releaseError.message, "AUTH_BOOTSTRAP_FAILED");
+  assert.equal(releaseFailure.state.appendAttempts, 1, "release failure must not roll back or duplicate the verified row");
+  assert.equal(releaseFailure.state.tables.admins.length, 1);
+  assert.equal(releaseFailure.state.events.includes("lock:release-attempted"), true);
+  assert.equal(releaseFailure.state.lockHeld, false);
+
+  const bodyAndReleaseFailure = createTask5Runtime({ failAppend: true, throwReleaseLock: true });
+  const bodyError = assertSafeTask5Error(() => bodyAndReleaseFailure.context.bootstrapFirstAdmin());
+  assert.equal(bodyError.message, "AUTH_BOOTSTRAP_FAILED");
+  assert.equal(bodyAndReleaseFailure.state.events.includes("lock:release-attempted"), true);
+  assert.equal(bodyAndReleaseFailure.state.lockHeld, false);
+});
+
+test("bootstrap requires already-valid random state and never initializes repairs or resets it", () => {
+  const cases = [
+    [{ ADMIN_AUTH_RANDOM_COUNTER: null, ADMIN_AUTH_STATE_VERSION: null }, ["ADMIN_AUTH_RANDOM_COUNTER", "ADMIN_AUTH_STATE_VERSION"]],
+    [{ ADMIN_AUTH_RANDOM_COUNTER: null, ADMIN_AUTH_STATE_VERSION: "1" }, ["ADMIN_AUTH_RANDOM_COUNTER"]],
+    [{ ADMIN_AUTH_RANDOM_COUNTER: "0", ADMIN_AUTH_STATE_VERSION: null }, ["ADMIN_AUTH_STATE_VERSION"]],
+    [{ ADMIN_AUTH_RANDOM_COUNTER: "01", ADMIN_AUTH_STATE_VERSION: "1" }, []],
+    [{ ADMIN_AUTH_RANDOM_COUNTER: String(Number.MAX_SAFE_INTEGER), ADMIN_AUTH_STATE_VERSION: "1" }, []],
+    [{ ADMIN_AUTH_RANDOM_COUNTER: "0", ADMIN_AUTH_STATE_VERSION: "2" }, []]
+  ];
+  for (const [properties, absentProperties] of cases) {
+    const runtime = createTask5Runtime({ properties, absentProperties });
+    const before = { ...runtime.state.properties };
+    assertSafeTask5Error(() => runtime.context.bootstrapFirstAdmin());
+    assertNoBootstrapCreation(runtime.state);
+    assert.deepEqual(runtime.state.properties, before);
+    assert.equal(runtime.state.lockHeld, false);
+  }
+});
+
+test("bootstrap lock and initial authoritative Sheet failures are safe and release any acquired lock", () => {
+  const lockFailure = createTask5Runtime({ failLock: true });
+  assertSafeTask5Error(() => lockFailure.context.bootstrapFirstAdmin());
+  assertNoBootstrapCreation(lockFailure.state);
+  assert.equal(lockFailure.state.lockHeld, false);
+
+  for (const failRead of [
+    { sheet: "admins", at: 1 },
+    { sheet: "admin_sessions", at: 1 }
+  ]) {
+    const runtime = createTask5Runtime({ failRead });
+    assertSafeTask5Error(() => runtime.context.bootstrapFirstAdmin());
+    assertNoBootstrapCreation(runtime.state);
+    assert.equal(runtime.state.lockHeld, false);
+    assert.equal(runtime.state.events[runtime.state.events.length - 1], "lock:released");
+  }
+});
+
+test("bootstrap blocks an existing active Admin requested-username reuse and malformed/duplicate username state before crypto", () => {
+  const cases = [
+    [makeAdmin()],
+    [makeAdmin({ status: "inactive", username: "first.operator" })],
+    [makeAdmin({ status: "deleted", username: "first.operator" })],
+    [makeAdmin({ status: "inactive", username: "malformed username" })],
+    [
+      makeAdmin({ status: "inactive", username: "other" }),
+      makeAdmin({ admin_id: "ADM-44444444-4444-4444-8444-444444444444", status: "deleted", username: " OTHER " })
+    ]
+  ];
+  for (const admins of cases) {
+    const runtime = createTask5Runtime({ admins });
+    const before = plain(runtime.state.tables.admins);
+    assertSafeTask5Error(() => runtime.context.bootstrapFirstAdmin());
+    assert.equal(runtime.state.randomCalls.length, 0);
+    assert.equal(runtime.state.pbkdf2Calls.length, 0);
+    assert.equal(runtime.state.appendAttempts, 0);
+    assert.deepEqual(runtime.state.tables.admins, before);
+    assert.equal(runtime.state.lockHeld, false);
+  }
+});
+
+test("bootstrap validates username display email and password bounds before salt PBKDF2 or append", () => {
+  const overBytePassword = "\u{1F600}".repeat(65);
+  assert.equal(Array.from(overBytePassword).length, 65);
+  assert.equal(overBytePassword.length, 130);
+  assert.equal(Buffer.byteLength(overBytePassword, "utf8"), 260);
+  const cases = [
+    { absentProperties: ["ADMIN_BOOTSTRAP_USERNAME"] },
+    { absentProperties: ["ADMIN_BOOTSTRAP_DISPLAY_NAME"] },
+    { absentProperties: ["ADMIN_BOOTSTRAP_PASSWORD"] },
+    { properties: { ADMIN_BOOTSTRAP_USERNAME: "ab" } },
+    { properties: { ADMIN_BOOTSTRAP_USERNAME: true } },
+    { properties: { ADMIN_BOOTSTRAP_USERNAME: "bad@name" } },
+    { properties: { ADMIN_BOOTSTRAP_USERNAME: `a${"b".repeat(64)}` } },
+    { properties: { ADMIN_BOOTSTRAP_DISPLAY_NAME: "" } },
+    { properties: { ADMIN_BOOTSTRAP_DISPLAY_NAME: true } },
+    { properties: { ADMIN_BOOTSTRAP_DISPLAY_NAME: " ".repeat(4) } },
+    { properties: { ADMIN_BOOTSTRAP_DISPLAY_NAME: "x".repeat(101) } },
+    { properties: { ADMIN_BOOTSTRAP_DISPLAY_NAME: `Synthetic\uD800` } },
+    { properties: { ADMIN_BOOTSTRAP_EMAIL: "x".repeat(255) } },
+    { properties: { ADMIN_BOOTSTRAP_EMAIL: true } },
+    { properties: { ADMIN_BOOTSTRAP_EMAIL: `operator\uD800@example.test` } },
+    { properties: { ADMIN_BOOTSTRAP_PASSWORD: "too-short-123" } },
+    { properties: { ADMIN_BOOTSTRAP_PASSWORD: true } },
+    { properties: { ADMIN_BOOTSTRAP_PASSWORD: "x".repeat(129) } },
+    { properties: { ADMIN_BOOTSTRAP_PASSWORD: overBytePassword } },
+    { properties: { ADMIN_BOOTSTRAP_PASSWORD: `valid length xx\uD800` } }
+  ];
+  for (const options of cases) {
+    const runtime = createTask5Runtime(options);
+    const candidatePassword = options.properties && options.properties.ADMIN_BOOTSTRAP_PASSWORD;
+    assertSafeTask5Error(() => runtime.context.bootstrapFirstAdmin(), [String(candidatePassword || "")]);
+    assertNoBootstrapCreation(runtime.state);
+    assert.equal(runtime.state.lockHeld, false);
+  }
+});
+
+test("bootstrap success uses exact locked random/hash/write/reread/cleanup order and returns only safe fields", () => {
+  const saltBytes = [248].concat(Array.from({ length: 15 }, (_, index) => index + 1));
+  const hashBytes = [248].concat(Array.from({ length: 31 }, (_, index) => index + 32));
+  const runtime = createTask5Runtime({
+    properties: {
+      ADMIN_AUTH_RANDOM_COUNTER: "7",
+      ADMIN_BOOTSTRAP_USERNAME: "  FiRsT.Admin  ",
+      ADMIN_BOOTSTRAP_DISPLAY_NAME: "=Synthetic Operator",
+      ADMIN_BOOTSTRAP_EMAIL: "-operator@example.test"
+    },
+    saltBytes,
+    bootstrapDerivedBytes: hashBytes
+  });
+  const result = plain(runtime.context.bootstrapFirstAdmin());
+  assert.deepEqual(result, {
+    admin_id: "ADM-55555555-5555-4555-8555-555555555555",
+    username: "first.admin",
+    cleanup: "complete"
+  });
+  assert.deepEqual(Object.keys(result), ["admin_id", "username", "cleanup"]);
+  assert.equal(JSON.stringify(result).includes(BOOTSTRAP_PASSWORD), false);
+  assert.equal(runtime.state.tables.admins.length, 1);
+  assert.equal(runtime.state.tables.admin_sessions.length, 0);
+  const row = runtime.state.tables.admins[0];
+  assert.deepEqual(Object.keys(row), ADMIN_HEADERS);
+  assert.equal(row.username, "first.admin");
+  assert.equal(row.display_name, "'=Synthetic Operator");
+  assert.equal(row.email, "'-operator@example.test");
+  assert.equal(row.password_algorithm, "pbkdf2_sha256");
+  assert.equal(row.password_salt, Buffer.from(saltBytes).toString("base64url"));
+  assert.equal(row.password_hash, Buffer.from(hashBytes).toString("base64url"));
+  assert.equal(row.password_salt.startsWith("-"), true);
+  assert.equal(row.password_hash.startsWith("-"), true);
+  assert.equal(row.password_salt.startsWith("'"), false);
+  assert.equal(row.password_hash.startsWith("'"), false);
+  assert.equal(row.password_iterations, 120000);
+  assert.equal(row.role, "super_admin");
+  assert.equal(row.status, "active");
+  assert.equal(row.last_login_at, "");
+  assert.equal(row.created_at, new Date(NOW).toISOString());
+  assert.equal(row.updated_at, row.created_at);
+  assert.equal(Object.values(row).includes(BOOTSTRAP_PASSWORD), false);
+  assert.deepEqual(runtime.state.randomCalls, [{ purpose: "admin-password-salt", length: 16, lockHeld: true }]);
+  assert.deepEqual(runtime.state.pbkdf2Calls, [{ password: BOOTSTRAP_PASSWORD, saltBytes, iterations: 120000 }]);
+  const policyByField = Object.fromEntries(runtime.state.writePolicies.map(({ policy, fieldName }) => [fieldName, policy]));
+  assert.equal(policyByField.display_name, "human_text");
+  assert.equal(policyByField.email, "human_text");
+  for (const field of ADMIN_HEADERS.filter((field) => field !== "display_name" && field !== "email")) {
+    assert.equal(policyByField[field], "security", `${field} must use strict security writes`);
+  }
+  assert.equal(runtime.state.properties.ADMIN_AUTH_RANDOM_COUNTER, "8");
+  for (const name of [
+    "ADMIN_BOOTSTRAP_USERNAME", "ADMIN_BOOTSTRAP_DISPLAY_NAME", "ADMIN_BOOTSTRAP_EMAIL", "ADMIN_BOOTSTRAP_PASSWORD"
+  ]) assert.equal(Object.hasOwn(runtime.state.properties, name), false);
+  assert.equal(runtime.state.properties.ADMIN_BOOTSTRAP_ENABLED, "false");
+  const appendIndex = runtime.state.events.indexOf("sheet:append:admins");
+  const rereadIndex = runtime.state.events.indexOf("sheet:read:admins:2");
+  const firstDelete = runtime.state.events.indexOf("property:delete:ADMIN_BOOTSTRAP_USERNAME");
+  const disableIndex = runtime.state.events.indexOf("property:set:ADMIN_BOOTSTRAP_ENABLED:false");
+  assert.ok(appendIndex < rereadIndex && rereadIndex < firstDelete && firstDelete < disableIndex);
+  assert.equal(runtime.state.events[runtime.state.events.length - 1], "lock:released");
+});
+
+test("bootstrap accepts a password at the exact 256-byte UTF-8 boundary", () => {
+  const boundaryPassword = "\u{1F600}".repeat(64);
+  assert.equal(Buffer.byteLength(boundaryPassword, "utf8"), 256);
+  const runtime = createTask5Runtime({ properties: { ADMIN_BOOTSTRAP_PASSWORD: boundaryPassword } });
+  const result = plain(runtime.context.bootstrapFirstAdmin());
+  assert.equal(result.cleanup, "complete");
+  assert.equal(runtime.state.pbkdf2Calls.length, 1);
+  assert.equal(runtime.state.pbkdf2Calls[0].password, boundaryPassword);
+  assert.equal(runtime.state.tables.admins.length, 1);
+  assert.equal(Object.values(runtime.state.tables.admins[0]).includes(boundaryPassword), false);
+});
+
+test("bootstrap succeeds without optional email and cleanup remains complete", () => {
+  const runtime = createTask5Runtime({ absentProperties: ["ADMIN_BOOTSTRAP_EMAIL"] });
+  const result = plain(runtime.context.bootstrapFirstAdmin());
+  assert.equal(result.cleanup, "complete");
+  assert.equal(runtime.state.tables.admins.length, 1);
+  assert.equal(runtime.state.tables.admins[0].email, "");
+  assert.equal(Object.hasOwn(runtime.state.properties, "ADMIN_BOOTSTRAP_EMAIL"), false);
+  assert.equal(runtime.state.properties.ADMIN_BOOTSTRAP_ENABLED, "false");
+  assert.equal(runtime.state.lockHeld, false);
+});
+
+test("bootstrap rejects formula-prefixed password equality with human fields before append or secret exposure", () => {
+  const formulaPassword = "=SyntheticPassword123";
+  for (const field of ["ADMIN_BOOTSTRAP_DISPLAY_NAME", "ADMIN_BOOTSTRAP_EMAIL"]) {
+    const runtime = createTask5Runtime({
+      properties: {
+        ADMIN_BOOTSTRAP_PASSWORD: formulaPassword,
+        [field]: formulaPassword
+      }
+    });
+    assertSafeTask5Error(() => runtime.context.bootstrapFirstAdmin(), [formulaPassword]);
+    assert.equal(runtime.state.appendAttempts, 0, `${field} equality must fail before append`);
+    assert.equal(runtime.state.tables.admins.length, 0);
+    assert.equal(JSON.stringify(runtime.state.logs).includes(formulaPassword), false);
+    assert.equal(runtime.state.lockHeld, false);
+  }
+});
+
+test("bootstrap accepts a formula-leading email at the exact 254-character unescaped boundary", () => {
+  const boundaryEmail = `=${"e".repeat(253)}`;
+  assert.equal(Array.from(boundaryEmail).length, 254);
+  const runtime = createTask5Runtime({ properties: { ADMIN_BOOTSTRAP_EMAIL: boundaryEmail } });
+  const result = plain(runtime.context.bootstrapFirstAdmin());
+  assert.equal(result.cleanup, "complete");
+  assert.equal(runtime.state.tables.admins.length, 1);
+  assert.equal(runtime.state.tables.admins[0].email, `'${boundaryEmail}`);
+  assert.equal(runtime.state.tables.admins[0].email.length, 255);
+  assert.equal(runtime.context.AuthService_unescapeHumanText_(runtime.state.tables.admins[0].email), boundaryEmail);
+});
+
+test("bootstrap rejects a generated admin_id collision before append without UUID retry", () => {
+  const collidingId = "ADM-55555555-5555-4555-8555-555555555555";
+  const runtime = createTask5Runtime({
+    admins: [makeAdmin({ admin_id: collidingId, username: "inactive.operator", status: "inactive" })]
+  });
+  assertSafeTask5Error(() => runtime.context.bootstrapFirstAdmin());
+  assert.equal(runtime.state.appendAttempts, 0);
+  assert.equal(runtime.state.tables.admins.length, 1);
+  assert.equal(runtime.state.randomCalls.length, 1);
+  assert.equal(runtime.state.pbkdf2Calls.length, 1);
+  assert.equal(runtime.state.uuidValues.length, 0, "collision UUID must be consumed exactly once without retry");
+  assert.equal(runtime.state.lockHeld, false);
+});
+
+test("bootstrap counter persistence precedes derivation and later failures never roll the counter back", () => {
+  const persistence = createTask5Runtime({ properties: { ADMIN_AUTH_RANDOM_COUNTER: "7" }, failRandomCounterPersistence: true });
+  assertSafeTask5Error(() => persistence.context.bootstrapFirstAdmin());
+  assert.equal(persistence.state.properties.ADMIN_AUTH_RANDOM_COUNTER, "7");
+  assert.equal(persistence.state.events.includes("random:derived"), false);
+  assert.equal(persistence.state.pbkdf2Calls.length, 0);
+  assert.equal(persistence.state.appendAttempts, 0);
+
+  for (const options of [{ failRandomDerivation: true }, { failPbkdf2: true }, { failAppend: true }]) {
+    const runtime = createTask5Runtime({ properties: { ADMIN_AUTH_RANDOM_COUNTER: "7" }, ...options });
+    assertSafeTask5Error(() => runtime.context.bootstrapFirstAdmin());
+    assert.equal(runtime.state.properties.ADMIN_AUTH_RANDOM_COUNTER, "8", "post-persistence failure may skip but cannot reuse counter 8");
+    assert.equal(runtime.state.propertyCalls.some((call) => call.method === "set" && call.name === "ADMIN_AUTH_RANDOM_COUNTER" && call.value === "7"), false);
+    assert.equal(runtime.state.lockHeld, false);
+  }
+});
+
+test("bootstrap append and authoritative reread failures never claim success or begin cleanup", () => {
+  for (const options of [
+    { failAppend: true },
+    { failRead: { sheet: "admins", at: 2 } },
+    { rereadMismatch: true }
+  ]) {
+    const runtime = createTask5Runtime(options);
+    assertSafeTask5Error(() => runtime.context.bootstrapFirstAdmin());
+    assert.equal(runtime.state.propertyCalls.some((call) => call.method === "delete"), false);
+    assert.equal(runtime.state.propertyCalls.some((call) => call.method === "set" && call.name === "ADMIN_BOOTSTRAP_ENABLED"), false);
+    assert.equal(runtime.state.tables.admins.length, options.failAppend ? 0 : 1);
+    assert.equal(runtime.state.lockHeld, false);
+  }
+});
+
+test("bootstrap cleanup is best-effort ordered disables last verifies outcome and never auto-retries", () => {
+  const cleanupProperties = [
+    "ADMIN_BOOTSTRAP_USERNAME", "ADMIN_BOOTSTRAP_DISPLAY_NAME", "ADMIN_BOOTSTRAP_EMAIL", "ADMIN_BOOTSTRAP_PASSWORD"
+  ];
+  const cases = cleanupProperties.map((name) => ({ failPropertyDelete: name })).concat([
+    { failPropertySet: "ADMIN_BOOTSTRAP_ENABLED" },
+    { stickyDeleteProperty: "ADMIN_BOOTSTRAP_PASSWORD" }
+  ]);
+  for (const options of cases) {
+    const runtime = createTask5Runtime(options);
+    assertSafeTask5Error(() => runtime.context.bootstrapFirstAdmin());
+    assert.equal(runtime.state.tables.admins.length, 1, "cleanup failure must leave the verified row inspectable");
+    assert.equal(runtime.state.appendAttempts, 1);
+    const deleteCalls = runtime.state.propertyCalls.filter((call) => call.method === "delete").map((call) => call.name);
+    assert.deepEqual(deleteCalls, cleanupProperties, "best-effort cleanup must attempt every temporary property in order");
+    const disableCalls = runtime.state.propertyCalls.filter((call) => call.method === "set" && call.name === "ADMIN_BOOTSTRAP_ENABLED");
+    assert.equal(disableCalls.length, 1, "cleanup must attempt disable exactly once after deletions");
+    assert.ok(
+      runtime.state.propertyCalls.findIndex((call) => call.method === "delete" && call.name === "ADMIN_BOOTSTRAP_PASSWORD") <
+      runtime.state.propertyCalls.findIndex((call) => call.method === "set" && call.name === "ADMIN_BOOTSTRAP_ENABLED")
+    );
+    assertSafeTask5Error(() => runtime.context.bootstrapFirstAdmin());
+    assert.equal(runtime.state.appendAttempts, 1, "second invocation after partial cleanup must never append again");
+    assert.equal(runtime.state.lockHeld, false);
+  }
+});
+
+test("successful bootstrap is one-shot and a second invocation cannot create another Admin", () => {
+  const runtime = createTask5Runtime();
+  const first = plain(runtime.context.bootstrapFirstAdmin());
+  assert.equal(first.cleanup, "complete");
+  assertSafeTask5Error(() => runtime.context.bootstrapFirstAdmin());
+  assert.equal(runtime.state.tables.admins.length, 1);
+  assert.equal(runtime.state.appendAttempts, 1);
+  assert.equal(runtime.state.randomCalls.length, 1);
+});
+
+test("Task 5 source has no secret defaults logging destructive recovery counter reset or remote route", () => {
+  const routerSource = fs.readFileSync(path.join(root, "apps-script/Router.gs"), "utf8");
+  assert.doesNotMatch(serviceSource, /(?:Logger\s*\.\s*log|console\s*\.\s*(?:log|debug|info|warn|error))\s*\(/);
+  assert.doesNotMatch(serviceSource, /ADMIN_AUTH_RANDOM_KEY\s*[:=]\s*["'][A-Za-z0-9_-]{20,}["']/);
+  assert.doesNotMatch(serviceSource, /DEFAULT_(?:ADMIN_)?(?:USERNAME|PASSWORD)|ADMIN_BOOTSTRAP_(?:USERNAME|PASSWORD)\s*=\s*["'][^"']+["']/);
+  assert.doesNotMatch(serviceSource, /deleteRow|deleteRows|clearContent|clear\s*\(|purge/i);
+  assert.doesNotMatch(serviceSource, /ADMIN_AUTH_RANDOM_COUNTER[^\n]*(?:=|setProperty\s*\()[^\n]*["']0["']/);
+  for (const name of ["setupAdminAuthSchema", "benchmarkAdminPbkdf2", "bootstrapFirstAdmin"]) {
+    assert.equal(new RegExp(name).test(routerSource), false, `${name} must remain unreachable from Router`);
+  }
+  assert.doesNotMatch(serviceSource, /doGet\s*\(|doPost\s*\(/);
+  assert.equal(JSON.stringify({ SYNTHETIC_RANDOM_KEY, BOOTSTRAP_PASSWORD }).includes("production"), false);
+});
+
+test("exports the Task 4 services and exactly the three Task 5 editor entry points", () => {
   const { context } = createRuntime();
   for (const name of ["adminLogin_", "adminValidateSession_", "adminLogout_", "AuthService_requireAdmin_"]) {
     assert.equal(typeof context[name], "function", `${name} must be implemented`);
   }
-  for (const forbidden of ["setupAdminAuthSchema", "benchmarkAdminPbkdf2", "bootstrapFirstAdmin"]) {
-    assert.equal(typeof context[forbidden], "undefined", `${forbidden} belongs to Task 5`);
+  for (const name of ["setupAdminAuthSchema", "benchmarkAdminPbkdf2", "bootstrapFirstAdmin"]) {
+    assert.equal(typeof context[name], "function", `${name} must be implemented as an editor-only function`);
   }
   assert.equal(context.ADMIN_PBKDF2_ITERATIONS_, 120000);
   assert.equal(context.ADMIN_SESSION_LIFETIME_MS_, 28800000);
@@ -1095,7 +2217,7 @@ test("never deletes expired or revoked rows clears token hashes writes validatio
   runtime.context.adminValidateSession_(OTHER_TOKEN);
   assert.deepEqual(runtime.state.tables.admin_sessions, before);
   assert.equal(runtime.state.writes.length, 0);
-  assert.doesNotMatch(serviceSource, /deleteRow|deleteRows|clearContent|cleanup|purge/i);
+  assert.doesNotMatch(serviceSource, /deleteRow|deleteRows|clearContent|purge/i);
 });
 
 test("public envelopes logs cache and Sheet writes never reveal credentials or security metadata", () => {
