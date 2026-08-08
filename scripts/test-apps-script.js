@@ -39,8 +39,19 @@ for (const { name, source } of sources) {
 const postActions = ["submitReview", "adminLogin", "adminValidateSession", "adminLogout"];
 
 function assertStaticPostActionAllowlist(source) {
-  const actions = [...source.matchAll(/(?<![.\w$])action\s*===\s*"([^"]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(actions.sort(), [...postActions].sort(), "Router POST action comparisons must be exactly the approved allowlist");
+  const dispatchSource = source.replace(
+    /\btypeof\s+(?:action|body\s*\.\s*action)\s*===\s*"[^"]+"/g,
+    ""
+  );
+  const detected = [];
+  for (const match of dispatchSource.matchAll(/(?:^|[^.\w$])(?:action|body\s*\.\s*action)\s*===\s*"([^"]+)"/gm)) {
+    detected.push(match[1]);
+  }
+  for (const match of dispatchSource.matchAll(/"([^"]+)"\s*===\s*(?:action|body\s*\.\s*action)\b/g)) {
+    detected.push(match[1]);
+  }
+  const actions = [...new Set(detected)].sort();
+  assert.deepEqual(actions, [...postActions].sort(), "Router POST action comparisons must be exactly the approved allowlist");
 }
 
 const routerCases = [...router.matchAll(/case\s+"([^"]+)"\s*:/g)].map((match) => match[1]);
@@ -51,6 +62,16 @@ assert.throws(
   () => assertStaticPostActionAllowlist(`${router}\nif (action === "adminFuture") return createJsonResponse_(adminFuture_());`),
   /Router POST action comparisons must be exactly the approved allowlist/
 );
+assert.throws(
+  () => assertStaticPostActionAllowlist(`${router}\nif (body.action === "adminFuture") return createJsonResponse_(adminFuture_(body.payload));`),
+  /Router POST action comparisons must be exactly the approved allowlist/
+);
+assert.throws(
+  () => assertStaticPostActionAllowlist(`${router}\nif ("adminFuture" === body.action) return createJsonResponse_(adminFuture_(body.payload));`),
+  /Router POST action comparisons must be exactly the approved allowlist/
+);
+assert.doesNotThrow(() => assertStaticPostActionAllowlist(`${router}\nif (typeof body.action === "string") validateActionType_();`));
+assert.doesNotThrow(() => assertStaticPostActionAllowlist(`${router}\nif (unrelatedField === "unrelated-value") keepUnrelated_();`));
 assert.match(router, /createJsonResponse_\(/);
 assert.match(router, /UNKNOWN_ACTION/);
 assert.match(router, /SERVER_ERROR/);
@@ -142,6 +163,28 @@ function assertSafeError(output, code) {
   assert.equal(output.ok, false);
   assert.equal(output.error.code, code);
   assert.equal("data" in output, false);
+}
+
+// The direct-body mutation is a real fifth dispatch path, and the static allowlist rejects its source.
+{
+  const directBodyMutation = router.replace(
+    '        if (action === "adminLogout") return createJsonResponse_(adminLogout_(body.token));',
+    '        if (body.action === "adminFuture") return createJsonResponse_(adminFuture_(body.payload));\n' +
+      '        if (action === "adminLogout") return createJsonResponse_(adminLogout_(body.token));'
+  );
+  assert.notEqual(directBodyMutation, router, "direct-body mutation target must match production Router source");
+  const runtime = createRouterRuntime({ routerSource: directBodyMutation });
+  runtime.context.adminFuture_ = (...args) => {
+    runtime.calls.push({ action: "adminFuture", args });
+    return { ok: true, data: { action: "adminFuture" } };
+  };
+  const payload = { sentinel: "future-route" };
+  assert.deepEqual(post(runtime, { action: "adminFuture", payload }), { ok: true, data: { action: "adminFuture" } });
+  assert.deepEqual(runtime.calls, [{ action: "adminFuture", args: [payload] }]);
+  assert.throws(
+    () => assertStaticPostActionAllowlist(directBodyMutation),
+    /Router POST action comparisons must be exactly the approved allowlist/
+  );
 }
 
 // Public GET contracts are independently snapshotted before Admin dispatch assertions.
