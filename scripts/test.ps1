@@ -55,6 +55,7 @@ $required = @(
   "apps-script/Code.gs",
   "apps-script/Config.gs",
   "apps-script/CryptoService.gs",
+  "apps-script/AuthService.gs",
   "apps-script/Router.gs",
   "apps-script/ApiResponse.gs",
   "apps-script/SheetService.gs",
@@ -143,6 +144,8 @@ if ($LASTEXITCODE -ne 0) { throw "i18n behavior verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Public API client behavior verification failed." }
 & node (Join-Path $PSScriptRoot "test-crypto-service.js")
 if ($LASTEXITCODE -ne 0) { throw "CryptoService verification failed." }
+& node (Join-Path $PSScriptRoot "test-auth-service.js")
+if ($LASTEXITCODE -ne 0) { throw "AuthService verification failed." }
 & node (Join-Path $PSScriptRoot "test-sheet-service.js")
 if ($LASTEXITCODE -ne 0) { throw "SheetService verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-schema.js")
