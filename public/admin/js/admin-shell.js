@@ -85,7 +85,7 @@
   }
 
   function setBackgroundInert(inert) {
-    [elements.header, elements.main].forEach((element) => {
+    [elements.skip, elements.header, elements.main].forEach((element) => {
       if (inert) element.setAttribute("inert", "");
       else element.removeAttribute("inert");
     });
@@ -147,6 +147,11 @@
     }
     const first = controls[0];
     const last = controls[controls.length - 1];
+    if (!elements.drawer.contains(global.document.activeElement)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+      return;
+    }
     if (controls.length === 1 || (!event.shiftKey && global.document.activeElement === last)) {
       event.preventDefault();
       first.focus();

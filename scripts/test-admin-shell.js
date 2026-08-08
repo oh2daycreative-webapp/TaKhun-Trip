@@ -386,6 +386,39 @@ test("mobile drawer synchronizes ARIA overlay scroll focus and traps Tab in both
   assert.equal(harness.document.activeElement, last);
 });
 
+test("mobile drawer makes every background focus region inert and restores it on close", async () => {
+  const harness = makeHarness();
+  await harness.shell.init();
+  assert.equal(harness.elements.skip.hasAttribute("inert"), false);
+  await harness.elements.opener.dispatch("click");
+  assert.equal(harness.elements.skip.hasAttribute("inert"), true);
+  assert.equal(harness.elements.header.hasAttribute("inert"), true);
+  assert.equal(harness.elements.main.hasAttribute("inert"), true);
+  await harness.elements.close.dispatch("click");
+  assert.equal(harness.elements.skip.hasAttribute("inert"), false);
+  assert.equal(harness.elements.header.hasAttribute("inert"), false);
+  assert.equal(harness.elements.main.hasAttribute("inert"), false);
+});
+
+test("mobile drawer recaptures forward and reverse Tab when focus starts outside", async () => {
+  const harness = makeHarness();
+  await harness.shell.init();
+  await harness.elements.opener.dispatch("click");
+  const focusables = harness.elements.drawer.querySelectorAll('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])');
+  const first = focusables[0];
+  const last = focusables[focusables.length - 1];
+
+  harness.elements.skip.focus();
+  const forward = await harness.document.dispatch("keydown", { key: "Tab", shiftKey: false });
+  assert.equal(forward.defaultPrevented, true);
+  assert.equal(harness.document.activeElement, first);
+
+  harness.elements.skip.focus();
+  const reverse = await harness.document.dispatch("keydown", { key: "Tab", shiftKey: true });
+  assert.equal(reverse.defaultPrevented, true);
+  assert.equal(harness.document.activeElement, last);
+});
+
 test("drawer closes on Escape backdrop and nav activation, restores focus, and ignores closed Escape and inside clicks", async () => {
   const harness = makeHarness();
   await harness.shell.init();
@@ -458,6 +491,32 @@ test("Admin CSS provides source hiding, desktop and mobile layouts, touch target
   assert.match(css, /@media\s*\(min-width:\s*900px\)/i);
   assert.match(css, /@media\s*\(prefers-reduced-motion:\s*reduce\)/i);
   assert.match(css, /prefers-reduced-motion[^}]+transition:\s*none\s*!important/is);
+});
+
+test("Admin focus indicators use surface-specific high-contrast outlines", () => {
+  const blocks = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+  function declarationsFor(selector) {
+    const block = blocks.find((match) => match[1].split(",").map((value) => value.trim()).includes(selector));
+    return block ? block[2] : "";
+  }
+
+  for (const selector of [
+    ".admin-shell__header a:focus-visible",
+    ".admin-shell__header button:focus-visible",
+    ".admin-main a:focus-visible",
+    ".admin-main button:focus-visible",
+    ".admin-guard a:focus-visible",
+    ".admin-guard button:focus-visible",
+    ".admin-skip-link:focus-visible"
+  ]) {
+    assert.match(declarationsFor(selector), /outline:\s*3px solid var\(--color-primary-dark\)/, `${selector}: dark outline on light surface`);
+  }
+  for (const selector of [
+    ".admin-shell__sidebar a:focus-visible",
+    ".admin-shell__sidebar button:focus-visible"
+  ]) {
+    assert.match(declarationsFor(selector), /outline:\s*3px solid var\(--color-accent\)/, `${selector}: accent outline on dark drawer`);
+  }
 });
 
 (async () => {

@@ -40,11 +40,15 @@
 .admin-guard__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); }
 .admin-guard__retry,
 .admin-guard__login { min-width: 44px; min-height: 44px; }
-.admin-shell a:focus-visible,
-.admin-shell button:focus-visible,
+.admin-shell__header a:focus-visible,
+.admin-shell__header button:focus-visible,
+.admin-main a:focus-visible,
+.admin-main button:focus-visible,
 .admin-guard a:focus-visible,
 .admin-guard button:focus-visible,
-.admin-skip-link:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 3px; }
+.admin-skip-link:focus-visible { outline: 3px solid var(--color-primary-dark); outline-offset: 3px; }
+.admin-shell__sidebar a:focus-visible,
+.admin-shell__sidebar button:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 3px; }
 .login-shell { display: grid; min-height: 100vh; padding: 1rem; place-items: center; }
 .login-card { display: grid; width: min(100%, 28rem); gap: 0.75rem; padding: 2rem; border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-card); }
 
