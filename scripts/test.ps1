@@ -54,6 +54,7 @@ $required = @(
   "public/assets/media/manifest/media-manifest.json",
   "apps-script/Code.gs",
   "apps-script/Config.gs",
+  "apps-script/CryptoService.gs",
   "apps-script/Router.gs",
   "apps-script/ApiResponse.gs",
   "apps-script/SheetService.gs",
@@ -140,6 +141,8 @@ if ($LASTEXITCODE -ne 0) { throw "Public Reviews behavior verification failed." 
 if ($LASTEXITCODE -ne 0) { throw "i18n behavior verification failed." }
 & node (Join-Path $PSScriptRoot "test-api.js")
 if ($LASTEXITCODE -ne 0) { throw "Public API client behavior verification failed." }
+& node (Join-Path $PSScriptRoot "test-crypto-service.js")
+if ($LASTEXITCODE -ne 0) { throw "CryptoService verification failed." }
 & node (Join-Path $PSScriptRoot "test-settings-service.js")
 if ($LASTEXITCODE -ne 0) { throw "SettingsService verification failed." }
 & node (Join-Path $PSScriptRoot "test-category-service.js")
