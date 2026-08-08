@@ -15,6 +15,15 @@ const EXPIRES_AT = "2026-08-08T12:00:00.000Z";
 const TOKEN = "-".padEnd(43, "A");
 const ADMIN_ID = "ADM-123e4567-e89b-42d3-a456-426614174000";
 const OTHER_ADMIN_ID = "ADM-223e4567-e89b-42d3-a456-426614174000";
+const UNSAFE_RETURN_CANDIDATES = Object.freeze([
+  "https://evil.example/x",
+  "../dashboard.html",
+  "%2e%2e/dashboard.html",
+  "login.html",
+  "dashboard.html?token=SECRET",
+  "dashboard.html?password=SECRET",
+  "//evil.example/x"
+]);
 const ADMIN = Object.freeze({
   admin_id: ADMIN_ID,
   username: "operator",
@@ -155,6 +164,138 @@ function validServerSession(overrides = {}) {
 function assertNoSecrets(value, secrets = [TOKEN, "PasswordSentinel", "server-internal-secret"]) {
   const serialized = `${String(value)} ${JSON.stringify(value)}`;
   for (const secret of secrets) assert.equal(serialized.includes(secret), false, `exposed secret ${secret}`);
+}
+
+function mutatedSource(find, replacement) {
+  const mutated = productionSource.replace(find, replacement);
+  assert.notEqual(mutated, productionSource, `mutation target must exist: ${find}`);
+  return mutated;
+}
+
+async function proveContractRejects(check) {
+  await assert.rejects(check, (error) => error instanceof assert.AssertionError);
+}
+
+async function assertStaleSuccessIgnored(source = productionSource, observation = {}) {
+  const pending = deferred();
+  const storage = makeStorage({ initial: JSON.stringify(SESSION) });
+  let reveals = 0;
+  const harness = loadAuth({
+    source,
+    storage,
+    api: {
+      validateSession: async () => pending.promise,
+      logout: async () => ({})
+    }
+  });
+  const olderGuard = harness.auth.guardProtectedPage({ onAuthenticated: () => { reveals += 1; } });
+  assert.deepEqual(plain(await harness.auth.logout()), { status: "confirmed" });
+  pending.resolve(validServerSession());
+  const olderResult = await olderGuard;
+  observation.completed = true;
+  observation.result = plain(olderResult);
+  observation.reveals = reveals;
+  observation.storageRestored = storage.values.has(STORAGE_KEY);
+  observation.replacements = harness.location.replacements.slice();
+  assert.deepEqual(plain(olderResult), { status: "stale" });
+  assert.equal(reveals, 0);
+  assert.equal(storage.values.has(STORAGE_KEY), false);
+  assert.deepEqual(harness.location.replacements, ["login.html"]);
+}
+
+async function assertEveryProtectedGuardRevalidates(source = productionSource, observation = {}) {
+  let validationCalls = 0;
+  let firstReveals = 0;
+  let secondReveals = 0;
+  const storage = makeStorage({ initial: JSON.stringify(SESSION) });
+  const harness = loadAuth({
+    source,
+    storage,
+    href: "https://site.example/admin/places.html",
+    api: {
+      validateSession: async () => {
+        validationCalls += 1;
+        if (validationCalls === 1) return validServerSession();
+        throw apiError("UNAUTHORIZED");
+      }
+    }
+  });
+  const first = await harness.auth.guardProtectedPage({ onAuthenticated: () => { firstReveals += 1; } });
+  const second = await harness.auth.guardProtectedPage({ onAuthenticated: () => { secondReveals += 1; } });
+  observation.completed = true;
+  observation.validationCalls = validationCalls;
+  observation.first = plain(first);
+  observation.second = plain(second);
+  observation.firstReveals = firstReveals;
+  observation.secondReveals = secondReveals;
+  observation.storagePresent = storage.values.has(STORAGE_KEY);
+  assert.equal(first.status, "authenticated");
+  assert.equal(second.status, "unauthenticated");
+  assert.equal(validationCalls, 2);
+  assert.equal(firstReveals, 1);
+  assert.equal(secondReveals, 0);
+  assert.equal(storage.values.has(STORAGE_KEY), false);
+  assert.deepEqual(harness.location.replacements, ["login.html?return=places.html"]);
+}
+
+async function assertLoginSanitizesUnsafeReturns(source = productionSource, observation = {}) {
+  observation.navigations = [];
+  for (const candidate of UNSAFE_RETURN_CANDIDATES) {
+    const storage = makeStorage();
+    const harness = loadAuth({
+      source,
+      storage,
+      href: "https://site.example/admin/login.html",
+      api: { login: async () => ({ admin: ADMIN, token: TOKEN, expires_at: EXPIRES_AT }) }
+    });
+    const result = await harness.auth.login("operator", "PasswordSentinel", candidate);
+    observation.navigations.push({ candidate, target: harness.location.replacements[0], redirect: result.redirect });
+    observation.navigationAssertionReached = true;
+    assert.deepEqual(harness.location.replacements, ["dashboard.html"]);
+    assert.equal(result.redirect, "dashboard.html");
+    assert.equal(harness.location.replacements.some((target) => target.includes("SECRET") || target === candidate), false);
+  }
+  observation.completed = true;
+}
+
+async function assertProtectedRedirectSanitizesCurrentLocation(source = productionSource, observation = {}) {
+  const unsafeLocations = [
+    "https://evil.example/x",
+    "https://site.example/admin/%252e%252e/dashboard.html",
+    "https://site.example/admin/reviews.html?token=SECRET",
+    "https://site.example/admin/reviews.html?password=SECRET"
+  ];
+  observation.navigations = [];
+  for (const href of unsafeLocations) {
+    const harness = loadAuth({ source, href });
+    const result = await harness.auth.guardProtectedPage();
+    observation.navigations.push({ href, target: harness.location.replacements[0] });
+    observation.navigationAssertionReached = true;
+    assert.deepEqual(plain(result), { status: "unauthenticated" });
+    assert.deepEqual(harness.location.replacements, ["login.html?return=dashboard.html"]);
+    assert.equal(harness.location.replacements[0].includes("SECRET"), false);
+  }
+  observation.completed = true;
+}
+
+async function assertAuthenticatedLoginSanitizesUnsafeReturns(source = productionSource, observation = {}) {
+  observation.navigations = [];
+  for (const candidate of UNSAFE_RETURN_CANDIDATES) {
+    const storage = makeStorage({ initial: JSON.stringify(SESSION) });
+    const harness = loadAuth({
+      source,
+      storage,
+      href: "https://site.example/admin/login.html",
+      api: { validateSession: async () => validServerSession() }
+    });
+    const result = await harness.auth.redirectAuthenticatedLogin({ returnPath: candidate });
+    observation.navigations.push({ candidate, target: harness.location.replacements[0] });
+    observation.navigationAssertionReached = true;
+    assert.equal(result.status, "authenticated");
+    assert.deepEqual(harness.location.replacements, ["dashboard.html"]);
+    assert.equal(harness.location.replacements.some((target) => target.includes("SECRET") || target === candidate), false);
+  }
+  observation.completed = true;
 }
 
 const tests = [];
@@ -600,6 +741,96 @@ test("a stale failed validation cannot clear a newer authoritative success", asy
   first.reject(apiError("UNAUTHORIZED"));
   assert.deepEqual(plain(await older), { status: "stale" });
   assert.deepEqual(storedSession(storage), { ...SESSION, display_name: "ผู้ตรวจสอบ", role: "reviewer" });
+});
+
+test("a stale successful guard cannot restore state after logout invalidates it", async () => {
+  await assertStaleSuccessIgnored();
+});
+
+test("stale-success assertions reject removal of the success-path generation check", async () => {
+  const source = mutatedSource(
+    '    if (generation !== validationGeneration) return { status: "stale" };\n    if (!exactKeys(response, ["admin", "expires_at"]))',
+    '    /* test-only mutation accepts stale successful validation */\n    if (!exactKeys(response, ["admin", "expires_at"]))'
+  );
+  const observation = {};
+  await proveContractRejects(() => assertStaleSuccessIgnored(source, observation));
+  assert.equal(observation.completed, true);
+  assert.equal(observation.result.status, "authenticated");
+  assert.equal(observation.reveals, 1);
+  assert.equal(observation.storageRestored, true);
+});
+
+test("every protected guard revalidates authority on the same loaded module", async () => {
+  await assertEveryProtectedGuardRevalidates();
+});
+
+test("protected-guard assertions reject caching a previous successful authority result", async () => {
+  const source = mutatedSource(
+    '  async function guardProtectedPage(options) {\n    const callbacks = options && typeof options === "object" ? options : {};\n    const result = await validateCurrentSession();',
+    '  let cachedSuccessfulGuard = null;\n  async function guardProtectedPage(options) {\n    const callbacks = options && typeof options === "object" ? options : {};\n    const result = cachedSuccessfulGuard || await validateCurrentSession();\n    if (result.status === "authenticated") cachedSuccessfulGuard = result;'
+  );
+  const observation = {};
+  await proveContractRejects(() => assertEveryProtectedGuardRevalidates(source, observation));
+  assert.equal(observation.completed, true);
+  assert.equal(observation.validationCalls, 1);
+  assert.equal(observation.second.status, "authenticated");
+  assert.equal(observation.secondReveals, 1);
+  assert.equal(observation.storagePresent, true);
+});
+
+test("successful login sanitizes every unsafe return before navigation", async () => {
+  await assertLoginSanitizesUnsafeReturns();
+});
+
+test("login consumer assertions reject navigating to the raw return candidate", async () => {
+  const source = mutatedSource(
+    "    const redirect = safeReturnPath(returnCandidate);",
+    "    const redirect = returnCandidate;"
+  );
+  const observation = {};
+  await proveContractRejects(() => assertLoginSanitizesUnsafeReturns(source, observation));
+  assert.equal(observation.navigationAssertionReached, true);
+  assert.deepEqual(observation.navigations[0], {
+    candidate: "https://evil.example/x",
+    target: "https://evil.example/x",
+    redirect: "https://evil.example/x"
+  });
+});
+
+test("protected-page redirects sanitize unsafe current locations before building login return", async () => {
+  await assertProtectedRedirectSanitizesCurrentLocation();
+});
+
+test("protected-page redirect assertions reject using the raw current location", async () => {
+  const source = mutatedSource(
+    "      return safeReturnPath(global.location.href);",
+    "      return global.location.href;"
+  );
+  const observation = {};
+  await proveContractRejects(() => assertProtectedRedirectSanitizesCurrentLocation(source, observation));
+  assert.equal(observation.navigationAssertionReached, true);
+  assert.deepEqual(observation.navigations[0], {
+    href: "https://evil.example/x",
+    target: "login.html?return=https%3A%2F%2Fevil.example%2Fx"
+  });
+});
+
+test("authenticated login redirects sanitize every unsafe requested return", async () => {
+  await assertAuthenticatedLoginSanitizesUnsafeReturns();
+});
+
+test("authenticated-login assertions reject redirecting to the raw requested return", async () => {
+  const source = mutatedSource(
+    "      replaceLocation(safeReturnPath(callbacks.returnPath));",
+    "      replaceLocation(callbacks.returnPath);"
+  );
+  const observation = {};
+  await proveContractRejects(() => assertAuthenticatedLoginSanitizesUnsafeReturns(source, observation));
+  assert.equal(observation.navigationAssertionReached, true);
+  assert.deepEqual(observation.navigations[0], {
+    candidate: "https://evil.example/x",
+    target: "https://evil.example/x"
+  });
 });
 
 test("production source excludes alternate auth persistence retries and secret sinks", async () => {
