@@ -66,6 +66,7 @@ function loadAdminApi({
   class FakeAbortController {
     constructor() {
       const listeners = [];
+      this.abortCount = 0;
       this.signal = {
         aborted: false,
         addEventListener(type, listener) {
@@ -73,6 +74,8 @@ function loadAdminApi({
         }
       };
       this.abort = () => {
+        this.abortCount += 1;
+        if (this.signal.aborted) return;
         this.signal.aborted = true;
         for (const listener of listeners.slice()) listener({ type: "abort" });
       };
@@ -198,6 +201,43 @@ async function assertTypeErrorSingleFetch(source = productionSource) {
   });
 }
 
+async function assertAbortErrorSingleFetch(source = productionSource, observation = {}) {
+  let fetchCount = 0;
+  const harness = loadAdminApi({
+    source,
+    fetchImpl: async (_url, options) => {
+      fetchCount += 1;
+      return new Promise((_resolve, reject) => {
+        const rejectAbort = () => {
+          const error = new Error(`aborted ${TOKEN}`);
+          error.name = "AbortError";
+          reject(error);
+        };
+        if (options.signal.aborted) {
+          rejectAbort();
+          return;
+        }
+        options.signal.addEventListener("abort", rejectAbort);
+      });
+    }
+  });
+  const pending = harness.api.validateSession(TOKEN);
+  assert.equal(harness.controllers.length, 1);
+  assert.equal(harness.timers.length, 1);
+  assert.equal(harness.timers[0].delay, 12000);
+  harness.timers[0].callback();
+  assertSafeError(await captureError(pending), "TIMEOUT", [TOKEN]);
+  assert.equal(harness.controllers[0].signal.aborted, true);
+  assert.equal(harness.controllers[0].abortCount, 1);
+  assert.deepEqual(harness.clearedTimerIds, [harness.timers[0].id]);
+  assert.equal(harness.timers[0].cleared, true);
+  assert.equal(harness.timers.filter((timer) => !timer.cleared).length, 0);
+  observation.fetchCount = fetchCount;
+  observation.abortCount = harness.controllers[0].abortCount;
+  observation.finalAssertionReached = true;
+  assert.equal(fetchCount, 1);
+}
+
 const tests = [];
 function test(name, run) {
   tests.push({ name, run });
@@ -271,26 +311,23 @@ test("clears the exact timeout after HTTP JSON text and network failures", async
 });
 
 test("aborts at 12000 ms maps AbortError safely and never retries", async () => {
-  let fetchCount = 0;
-  const harness = loadAdminApi({
-    fetchImpl: async (_url, options) => {
-      fetchCount += 1;
-      return new Promise((_resolve, reject) => {
-        options.signal.addEventListener("abort", () => {
-          const error = new Error(`aborted ${TOKEN}`);
-          error.name = "AbortError";
-          reject(error);
-        });
-      });
-    }
-  });
-  const pending = harness.api.validateSession(TOKEN);
-  assert.equal(harness.timers[0].delay, 12000);
-  harness.timers[0].callback();
-  assertSafeError(await captureError(pending), "TIMEOUT", [TOKEN]);
-  assert.equal(harness.controllers[0].signal.aborted, true);
-  assert.equal(harness.timers[0].cleared, true);
-  assert.equal(fetchCount, 1);
+  const observation = {};
+  await assertAbortErrorSingleFetch(productionSource, observation);
+  assert.equal(observation.fetchCount, 1);
+  assert.equal(observation.abortCount, 1);
+  assert.equal(observation.finalAssertionReached, true);
+});
+
+test("AbortError single-fetch assertions reject an executable second-POST mutation", async () => {
+  const source = mutatedSource(
+    '        if (error && error.name === "AbortError") throw safeError("TIMEOUT");',
+    '        if (error && error.name === "AbortError") {\n          try { response = await global.fetch(endpoint, options); } catch (_secondError) { /* keep the first safe category */ }\n          throw safeError("TIMEOUT");\n        }'
+  );
+  const observation = {};
+  await proveContractRejects(() => assertAbortErrorSingleFetch(source, observation));
+  assert.equal(observation.fetchCount, 2);
+  assert.equal(observation.abortCount, 1);
+  assert.equal(observation.finalAssertionReached, true);
 });
 
 test("works without AbortController without inventing a retry or timer", async () => {
