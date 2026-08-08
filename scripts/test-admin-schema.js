@@ -64,6 +64,55 @@ function tableFieldNames(markdown) {
   return [...markdown.matchAll(/^\| `([a-z0-9_]+)` \|/gm)].map((match) => match[1]);
 }
 
+function assertNoAdminSessionLifecycleContradictions(lifecycle, logout) {
+  const scopedContract = `${lifecycle}\n${logout}`
+    .replace(/`/g, "")
+    .replace(/Automatic cleanup or retention deletion of session rows is outside Milestone 6/gi, "")
+    .replace(/the session row is not deleted on logout/gi, "")
+    .replace(/does not delete the row/gi, "")
+    .replace(/does not clear token_hash/gi, "")
+    .replace(/does not remove them/gi, "")
+    .replace(/are not removed merely because logout occurs/gi, "");
+  const contradictions = [
+    [
+      "define a scheduled, daily, background, automatic, or session cleanup job",
+      /\b(?:(?:scheduled|daily|background|automatic|session)\s+(?:admin_sessions?\s+)?(?:cleanup|purge)(?:\s+jobs?)?|admin_sessions?\s+(?:cleanup|purge)(?:\s+jobs?)?|(?:cleanup|purge)\s+jobs?)\b/i
+    ],
+    [
+      "clear, remove, or delete token_hash during logout",
+      /(?:\btoken_hash\b[^.\n]{0,80}\b(?:clear|remov|delet)\w*\b|\b(?:clear|remov|delet)\w*\b[^.\n]{0,80}\btoken_hash\b)/i
+    ],
+    [
+      "delete expired or revoked session rows",
+      /\b(?:expired|revoked)\s+(?:admin_sessions?\s+rows?|session(?:\s+rows)?s?|rows?)\b[^.\n]{0,120}\b(?:automatic(?:ally)?\s+)?(?:delet|remov|purg)\w*\b/i
+    ],
+    [
+      "delete expired or revoked session rows",
+      /\b(?:delet|remov|purg)\w*\b[^.\n]{0,80}\b(?:expired|revoked)\s+(?:admin_sessions?\s+rows?|session(?:\s+rows)?s?|rows?)\b/i
+    ],
+    [
+      "automatically delete, remove, purge, or clean up session rows",
+      /\b(?:automatic(?:ally)?\b[^.\n]{0,80}\b(?:cleanup|delet|remov|purg)|(?:cleanup|delet|remov|purg)\w*\b[^.\n]{0,80}\bautomatic(?:ally)?)\b/i
+    ],
+    [
+      "remove a session row during logout",
+      /\blogout\b[^.\n]{0,120}\b(?:delet|remov|purg)\w*\b/i
+    ],
+    [
+      "define a fixed retention duration",
+      /\b(?:delet|retain|purg|cleanup)\w*\b[^.\n]{0,60}\b(?:after|for)\s+\d+\s+(?:hours?|days?|weeks?|months?|years?)\b/i
+    ],
+    [
+      "define a fixed retention duration",
+      /\bretention\s+(?:period|duration)\b[^.\n]{0,60}\b\d+\s+(?:hours?|days?|weeks?|months?|years?)\b/i
+    ]
+  ];
+
+  for (const [description, pattern] of contradictions) {
+    assert.doesNotMatch(scopedContract, pattern, `Admin session lifecycle must not ${description}`);
+  }
+}
+
 function test(name, fn) {
   try {
     fn();
@@ -257,6 +306,8 @@ test("admin session retention preserves audit rows without an automatic Mileston
   const lifecycle = section(sessions, "### 14A.2 Lifecycle and retention contract");
   const logout = section(api, "## 7.2 `adminLogout`");
 
+  assertNoAdminSessionLifecycleContradictions(lifecycle, logout);
+
   assert.match(lifecycle, /^`admin_sessions` is append-and-revoke for Milestone 6\./mi);
   assert.match(lifecycle, /Logout updates only `revoked_at` as revocation metadata; the session row is not deleted on logout\./i);
   assert.match(lifecycle, /`token_hash` remains stored after revocation for lookup and audit/i);
@@ -273,6 +324,26 @@ test("admin session retention preserves audit rows without an automatic Mileston
   assert.match(logout, /already revoked, expired, or absent well-formed token remains safe and idempotent\./i);
   assert.match(logout, /Expired and revoked row retention is audit behavior, not authorization behavior\./i);
   assert.match(logout, /Authorization rejects revoked and expired rows\./i);
+});
+
+test("admin session lifecycle mutation detector rejects cleanup purge hash clearing and retention durations", () => {
+  const sessions = section(schema, "## 14A. Sheet: `admin_sessions`");
+  const lifecycle = section(sessions, "### 14A.2 Lifecycle and retention contract");
+  const logout = section(api, "## 7.2 `adminLogout`");
+  const mutations = [
+    ["A", `${lifecycle}\nExpired sessions are automatically deleted after 30 days.`, logout, /delete expired or revoked session rows/],
+    ["B", `${lifecycle}\nA daily cleanup job purges revoked sessions.`, logout, /cleanup job/],
+    ["C", lifecycle, `${logout}\nRevoked session token_hash is cleared during logout.`, /token_hash during logout/],
+    ["D", `${lifecycle}\nSession rows are retained for 90 days and then deleted.`, logout, /fixed retention duration/]
+  ];
+
+  for (const [name, mutatedLifecycle, mutatedLogout, expected] of mutations) {
+    assert.throws(
+      () => assertNoAdminSessionLifecycleContradictions(mutatedLifecycle, mutatedLogout),
+      expected,
+      `mutation ${name} must be rejected`
+    );
+  }
 });
 
 test("Admin errors are generic and token transport is POST-body-only", () => {
