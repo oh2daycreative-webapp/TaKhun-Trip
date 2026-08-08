@@ -145,6 +145,8 @@ if ($LASTEXITCODE -ne 0) { throw "Public API client behavior verification failed
 if ($LASTEXITCODE -ne 0) { throw "CryptoService verification failed." }
 & node (Join-Path $PSScriptRoot "test-sheet-service.js")
 if ($LASTEXITCODE -ne 0) { throw "SheetService verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-schema.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin auth schema verification failed." }
 & node (Join-Path $PSScriptRoot "test-settings-service.js")
 if ($LASTEXITCODE -ne 0) { throw "SettingsService verification failed." }
 & node (Join-Path $PSScriptRoot "test-category-service.js")

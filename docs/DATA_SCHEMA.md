@@ -57,6 +57,7 @@ Google Sheets ควรมีชีตดังนี้
 | `categories` | หมวดหมู่กลางของระบบ |
 | `settings` | ค่าตั้งค่าระบบ |
 | `admins` | ผู้ดูแลระบบ |
+| `admin_sessions` | session ฝั่งเซิร์ฟเวอร์สำหรับ Admin |
 | `activity_logs` | ประวัติการทำงานของ Admin |
 | `trip_templates` | แผนทริปสำเร็จรูปสำหรับ Trip Planner |
 | `form_submissions` | ข้อมูลฟอร์มติดต่อหรือประเมินความพึงพอใจ ถ้ามี |
@@ -522,22 +523,45 @@ Google Sheets ควรมีชีตดังนี้
 
 ใช้เก็บข้อมูลผู้ดูแลระบบ
 
-### 14.1 Fields
+### 14.1 Required headers
+
+ทุก header ด้านล่างต้อง present exactly once โดย backend ใช้ order-independent, header-name-based access ลำดับนี้เป็นเพียง preferred order สำหรับชีตว่างใหม่เท่านั้น การย้าย schema ต้องเป็น non-destructive: อาจ append header ที่ขาดเมื่อปลอดภัย แต่ต้อง never reorder คอลัมน์หรือแถวเดิมของชีตที่มีข้อมูลเพื่อให้ตรงกับลำดับนำเสนอ
+
+```text
+admin_id
+username
+display_name
+email
+password_algorithm
+password_hash
+password_salt
+password_iterations
+role
+status
+last_login_at
+created_at
+updated_at
+```
+
+### 14.2 Fields
 
 | Field | Type | Required | Example | Description |
 |---|---|---:|---|---|
-| `admin_id` | text | yes | `ADM-001` | รหัสผู้ดูแล |
-| `username` | text | yes | `admin` | username |
-| `display_name` | text | yes | `ผู้ดูแลระบบ` | ชื่อแสดง |
-| `email` | email | no | `oh2daycreative@gmail.com` | อีเมล |
-| `password_hash` | text | yes | - | hash ของรหัสผ่าน |
+| `admin_id` | text | yes | `ADM-123e4567-e89b-12d3-a456-426614174000` | `ADM-` และ UUID ที่ server สร้าง |
+| `username` | text | yes | `operator` | canonical username สำหรับ login |
+| `display_name` | text | yes | `ผู้ดูแลระบบ` | 1-100 Unicode code points |
+| `email` | email | no | `operator@example.test` | optional profile/contact value, at most 254 characters; not a login identifier |
+| `password_algorithm` | text | yes | `pbkdf2_sha256` | algorithm ที่ต้องตรงค่านี้เท่านั้น |
+| `password_hash` | text | yes | - | derived key 32 bytes เป็น unpadded base64url 43-character |
+| `password_salt` | text | yes | - | salt ใหม่ 16 bytes เป็น unpadded base64url 22-character |
+| `password_iterations` | integer | yes | `120000` | stored value ที่ valid อยู่ในช่วง `100000` ถึง `1000000` |
 | `role` | enum | yes | `super_admin` | สิทธิ์ |
 | `status` | enum | yes | `active` | สถานะ |
-| `last_login_at` | datetime text | no | - | เข้าใช้ล่าสุด |
-| `created_at` | datetime text | yes | - | วันที่สร้าง |
-| `updated_at` | datetime text | yes | - | วันที่แก้ไข |
+| `last_login_at` | RFC 3339 UTC text | no | - | เข้าใช้ล่าสุด |
+| `created_at` | RFC 3339 UTC text | yes | `2026-08-08T04:30:00.000Z` | วันที่สร้าง |
+| `updated_at` | RFC 3339 UTC text | yes | `2026-08-08T04:30:00.000Z` | วันที่แก้ไข |
 
-### 14.2 Admin Role Enum
+### 14.3 Admin Role Enum
 
 | Value | Meaning |
 |---|---|
@@ -546,13 +570,85 @@ Google Sheets ควรมีชีตดังนี้
 | `reviewer` | ตรวจรีวิวได้ |
 | `viewer` | ดูข้อมูลได้อย่างเดียว |
 
-### 14.3 Admin Status Enum
+### 14.4 Admin Status Enum
 
 | Value | Meaning |
 |---|---|
 | `active` | ใช้งานได้ |
 | `inactive` | ปิดใช้งาน |
 | `deleted` | ลบ |
+
+### 14.5 Credential, input, and write contracts
+
+- Login ใช้ username-only login; `email` is not accepted as a login identifier
+- canonical username ต้อง unique after trim and lowercase, มี 3-64 ASCII characters และตรง regex `^[a-z0-9][a-z0-9._-]{2,63}$`
+- `password_algorithm` ต้องเป็น `pbkdf2_sha256`; `ADMIN_PBKDF2_ITERATIONS_` สำหรับบัญชีใหม่เท่ากับ `120000`
+- salt ใหม่มี 16 bytes และ serialize เป็น 22-character unpadded base64url; hash มี 32 bytes และ serialize เป็น 43-character unpadded base64url
+- stored `password_iterations` ต้องเป็น safe integer ตั้งแต่ `100000` ถึง `1000000`
+- provisioning password มี 14-128 Unicode code points; login รับได้สูงสุด 128 Unicode code points และทุกกรณีไม่เกิน 256 UTF-8 bytes
+- password ใช้ตามที่กรอกโดยมี no Unicode normalization และ no case folding
+- plaintext/raw password is never stored ใน Sheets, logs, responses หรือ browser storage
+- role ที่อนุญาตมี exactly `super_admin`, `editor`, `reviewer`, `viewer`; status มี exactly `active`, `inactive`, `deleted`
+- human free text เช่น `display_name` และ `email` ต้อง formula-safe; strict security fields ต้อง validate แล้วเขียน unchanged โดยไม่เติม apostrophe
+- auth timestamps ทุก field เป็น strict canonical RFC 3339 UTC เช่น `2026-08-08T04:30:00.000Z` ไม่ใช้เวลาแสดงผลแบบ Asia/Bangkok
+
+Safe Admin projection มี exactly:
+
+```json
+{
+  "admin_id": "ADM-123e4567-e89b-12d3-a456-426614174000",
+  "username": "operator",
+  "display_name": "ผู้ดูแลระบบ",
+  "role": "super_admin"
+}
+```
+
+Projection นี้ห้ามมี `email`, `status`, `password_algorithm`, `password_hash`, `password_salt` หรือ `password_iterations`
+
+---
+
+## 14A. Sheet: `admin_sessions`
+
+`admin_sessions` เป็น authoritative session source บน every protected request; cache หรือข้อมูล identity จาก browser ใช้ยืนยันสิทธิ์แทนชีตนี้ไม่ได้
+
+### 14A.1 Required headers
+
+ทุก header ต้อง present exactly once และอ่านแบบ order-independent ตามชื่อ ห้ามมีคอลัมน์ `raw_token`
+
+```text
+session_id
+admin_id
+token_hash
+created_at
+expires_at
+revoked_at
+last_seen_at
+```
+
+| Field | Type | Required | Example | Description |
+|---|---|---:|---|---|
+| `session_id` | text | yes | `SES-123e4567-e89b-12d3-a456-426614174000` | `SES-` และ UUID |
+| `admin_id` | text | yes | `ADM-123e4567-e89b-12d3-a456-426614174000` | อ้างถึง Admin |
+| `token_hash` | text | yes | - | SHA-256 ของ raw token, 32 bytes เป็น 43-character unpadded base64url |
+| `created_at` | RFC 3339 UTC text | yes | `2026-08-08T04:30:00.000Z` | เวลาออก session |
+| `expires_at` | RFC 3339 UTC text | yes | `2026-08-08T12:30:00.000Z` | `created_at + 28,800,000` ms |
+| `revoked_at` | RFC 3339 UTC text | no | - | ว่างจนกว่าจะ revoke |
+| `last_seen_at` | RFC 3339 UTC text | yes | `2026-08-08T04:30:00.000Z` | เท่ากับ created_at ตอนออก session |
+
+- raw token มี 32 bytes และ serialize เป็น 43-character unpadded base64url แต่ raw token is never stored in a Sheet; ส่งออกได้ครั้งเดียวใน successful login response และ browser sessionStorage เท่านั้น
+- เก็บเฉพาะ `token_hash` ที่คำนวณด้วย SHA-256; ห้ามใช้ random key เป็น session lookup hash key
+- อายุเป็น absolute 8-hour expiry (`28,800,000` ms), with no sliding renewal; `last_seen_at` does not extend expiry
+- validation ปฏิเสธที่ exact expiry instant และอ่าน authoritative `admin_sessions` บน every protected request
+- security values และ strict RFC 3339 UTC timestamps เขียนและอ่าน unchanged
+
+---
+
+## 14B. Admin authentication property ownership
+
+- Human/operator supplies only `ADMIN_AUTH_RANDOM_KEY`: secret 32 bytes ในรูป 43-character unpadded base64url; documentation and source contain no production random key value
+- Code owns `ADMIN_AUTH_RANDOM_COUNTER` and `ADMIN_AUTH_STATE_VERSION`; `ADMIN_AUTH_STATE_VERSION` has exact value `1`, ทั้งสองเป็น not human-managed และห้าม reset/repair แบบเงียบ
+- temporary bootstrap properties มี `ADMIN_BOOTSTRAP_ENABLED`, `ADMIN_BOOTSTRAP_USERNAME`, `ADMIN_BOOTSTRAP_DISPLAY_NAME`, `ADMIN_BOOTSTRAP_EMAIL`, `ADMIN_BOOTSTRAP_PASSWORD`
+- There are no default credentials, default Admin username/password หรือ embedded secret; temporary values ต้องถูกล้างตาม bootstrap contract
 
 ---
 
@@ -718,7 +814,8 @@ Google Sheets ควรมีชีตดังนี้
 | Review | `REV` | `REV-001` |
 | Gallery | `GAL` | `GAL-001` |
 | Category | `CAT` | `CAT-PLACE-NATURE` |
-| Admin | `ADM` | `ADM-001` |
+| Admin | `ADM` | `ADM-123e4567-e89b-12d3-a456-426614174000` |
+| Admin Session | `SES` | `SES-123e4567-e89b-12d3-a456-426614174000` |
 | Log | `LOG` | `LOG-001` |
 | Trip Template | `TRIP` | `TRIP-001` |
 | Submission | `SUB` | `SUB-001` |
@@ -747,10 +844,9 @@ Google Sheets ควรมีชีตดังนี้
 
 ### 20.3 Admin Validation
 
-- `username` ห้ามว่าง
-- `password_hash` ห้ามว่าง
-- `role` ต้องอยู่ใน enum
-- `status` ต้องเป็น `active` จึง login ได้
+- ใช้ exact contracts ในหัวข้อ 14, 14A และ 14B
+- required headers ต้อง unique และเข้าถึงตามชื่อ ไม่อิงลำดับคอลัมน์
+- credential/session fields ที่ malformed ต้อง fail closed; เฉพาะ `status = active` จึง login ได้
 
 ### 20.4 Event Validation
 
@@ -775,11 +871,12 @@ places 1 ---- many events
 trip_templates many ---- many places ผ่าน field place_ids
 categories ใช้ประกอบ places/products/events/gallery
 admins 1 ---- many activity_logs
+admins 1 ---- many admin_sessions
 ```
 
 ---
 
-## 22. Frontend Local Storage Schema
+## 22. Frontend Browser Storage Schema
 
 ใช้ Local Storage เฉพาะข้อมูลชั่วคราวที่ไม่สำคัญ
 
@@ -814,13 +911,15 @@ admins 1 ---- many activity_logs
 
 ### 22.5 `TAKHUN_ADMIN_SESSION`
 
+Admin authentication ใช้ `sessionStorage only` ภายใต้ key `TAKHUN_ADMIN_SESSION`; มี no localStorage, no cookie auth token และ no URL/query token ค่าเก็บมี exactly ห้า fields ด้านล่างเท่านั้น
+
 ```json
 {
-  "admin_id": "ADM-001",
+  "admin_id": "ADM-123e4567-e89b-12d3-a456-426614174000",
   "display_name": "ผู้ดูแลระบบ",
   "role": "super_admin",
-  "token": "session-token",
-  "expires_at": "2026-07-11 18:00:00"
+  "token": "<43-character-base64url-token>",
+  "expires_at": "2026-08-08T12:30:00.000Z"
 }
 ```
 
