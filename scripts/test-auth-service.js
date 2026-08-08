@@ -313,7 +313,11 @@ function createRuntime(options = {}) {
 
   vm.createContext(context);
   vm.runInContext(configSource, context, { filename: "apps-script/Config.gs" });
-  vm.runInContext(serviceSource, context, { filename: "apps-script/AuthService.gs" });
+  vm.runInContext(
+    options.authServiceSourceOverride === undefined ? serviceSource : options.authServiceSourceOverride,
+    context,
+    { filename: "apps-script/AuthService.gs" }
+  );
   return { context, state };
 }
 
@@ -348,6 +352,49 @@ function login(options = {}, payload = { username: "operator", password: "Correc
 function validate(options = {}, token = RAW_TOKEN) {
   const runtime = createRuntime({ sessions: [makeSession()], ...options });
   return { ...runtime, response: runtime.context.adminValidateSession_(token) };
+}
+
+function requireAdminMutation_(replacement) {
+  const original = `function AuthService_requireAdmin_(token) {
+  if (!AuthService_validRawToken_(token)) throw new Error("UNAUTHORIZED");
+  var context = AuthService_validateSessionContext_(token);
+  if (!context) throw new Error("UNAUTHORIZED");
+  return context.admin;
+}`;
+  assert.equal(serviceSource.includes(original), true, "requireAdmin mutation target must match production source");
+  return serviceSource.replace(original, replacement);
+}
+
+function assertRequireAdminAuthoritativeEvidence_(runtime) {
+  assert.deepEqual(runtime.state.hashTokenCalls, [RAW_TOKEN], "requireAdmin must hash the raw token exactly once");
+  assert.deepEqual(
+    runtime.state.sheetReads.map((read) => read.sheetName),
+    ["admin_sessions", "admins"],
+    "requireAdmin must read authoritative session and Admin Sheets in order"
+  );
+  assert.deepEqual(runtime.state.readCounts, { admins: 1, admin_sessions: 1 });
+  assert.equal(runtime.state.cacheCalls.length, 0, "requireAdmin must not read or write CacheService");
+  assert.equal(runtime.state.writes.length, 0, "requireAdmin must remain read-only");
+}
+
+function assertRequireAdminRejectsRevokedSecondCall_(runtime) {
+  const first = plain(runtime.context.AuthService_requireAdmin_(RAW_TOKEN));
+  runtime.state.tables.admin_sessions[0].revoked_at = "2026-08-08T04:31:00.000Z";
+  assert.throws(() => runtime.context.AuthService_requireAdmin_(RAW_TOKEN), /^Error: UNAUTHORIZED$/);
+  assert.equal(first.admin_id, "ADM-11111111-1111-4111-8111-111111111111");
+  assert.deepEqual(runtime.state.readCounts, { admins: 1, admin_sessions: 2 });
+  assert.equal(runtime.state.cacheCalls.length, 0, "repeated requireAdmin calls must not use CacheService");
+  assert.equal(runtime.state.writes.length, 0);
+}
+
+function assertRequireAdminRejectsInactiveAdminSecondCall_(runtime) {
+  const first = plain(runtime.context.AuthService_requireAdmin_(RAW_TOKEN));
+  runtime.state.tables.admins[0].status = "inactive";
+  assert.throws(() => runtime.context.AuthService_requireAdmin_(RAW_TOKEN), /^Error: UNAUTHORIZED$/);
+  assert.equal(first.admin_id, "ADM-11111111-1111-4111-8111-111111111111");
+  assert.deepEqual(runtime.state.readCounts, { admins: 2, admin_sessions: 2 });
+  assert.equal(runtime.state.cacheCalls.length, 0, "repeated requireAdmin calls must not use CacheService");
+  assert.equal(runtime.state.writes.length, 0);
 }
 
 test("exports only the Task 4 public and reusable service entry points", () => {
@@ -864,6 +911,116 @@ test("AuthService_requireAdmin_ returns only trusted safe fields and throws a ca
   });
   const invalid = createRuntime({ sessions: [] });
   assert.throws(() => invalid.context.AuthService_requireAdmin_(RAW_TOKEN), /^Error: UNAUTHORIZED$/);
+});
+
+test("AuthService_requireAdmin_ hashes the token and reads both authoritative Sheets without cache or writes", () => {
+  const runtime = createRuntime({ sessions: [makeSession()] });
+  const sessionsBefore = plain(runtime.state.tables.admin_sessions);
+  const adminsBefore = plain(runtime.state.tables.admins);
+  runtime.context.AuthService_requireAdmin_(RAW_TOKEN);
+  assertRequireAdminAuthoritativeEvidence_(runtime);
+  assert.deepEqual(runtime.state.tables.admin_sessions, sessionsBefore);
+  assert.deepEqual(runtime.state.tables.admins, adminsBefore);
+
+  const malformed = createRuntime({ sessions: [makeSession()] });
+  assert.throws(() => malformed.context.AuthService_requireAdmin_("bad"), /^Error: UNAUTHORIZED$/);
+  assert.equal(malformed.state.hashTokenCalls.length, 0);
+  assert.deepEqual(malformed.state.readCounts, { admins: 0, admin_sessions: 0 });
+  assert.equal(malformed.state.cacheCalls.length, 0);
+});
+
+test("AuthService_requireAdmin_ revalidates authoritative revocation on every call", () => {
+  assertRequireAdminRejectsRevokedSecondCall_(createRuntime({ sessions: [makeSession()] }));
+});
+
+test("AuthService_requireAdmin_ revalidates linked Admin status on every call", () => {
+  assertRequireAdminRejectsInactiveAdminSecondCall_(createRuntime({ sessions: [makeSession()] }));
+});
+
+test("AuthService_requireAdmin_ rejects every required invalid session boundary without cache or writes", () => {
+  const cases = [
+    [],
+    [makeSession(), makeSession({ session_id: "SES-44444444-4444-4444-8444-444444444444" })],
+    [makeSession({ revoked_at: "2026-08-08T01:00:00.000Z" })],
+    [makeSession({ created_at: "2026-08-07T18:00:00.000Z", expires_at: "2026-08-08T02:00:00.000Z", last_seen_at: "2026-08-07T18:00:00.000Z" })],
+    [makeSession({ created_at: "2026-08-07T20:30:00.000Z", expires_at: "2026-08-08T04:30:00.000Z", last_seen_at: "2026-08-07T20:30:00.000Z" })]
+  ];
+  for (const sessions of cases) {
+    const runtime = createRuntime({ sessions });
+    const before = plain(runtime.state.tables.admin_sessions);
+    assert.throws(() => runtime.context.AuthService_requireAdmin_(RAW_TOKEN), /^Error: UNAUTHORIZED$/);
+    assert.equal(runtime.state.readCounts.admin_sessions, 1);
+    assert.equal(runtime.state.readCounts.admins, 0);
+    assert.equal(runtime.state.cacheCalls.length, 0);
+    assert.equal(runtime.state.writes.length, 0);
+    assert.deepEqual(runtime.state.tables.admin_sessions, before);
+  }
+});
+
+test("AuthService_requireAdmin_ rejects every required invalid linked Admin boundary without cache or writes", () => {
+  const cases = [
+    [],
+    [makeAdmin(), makeAdmin()],
+    [makeAdmin({ status: "inactive" })],
+    [makeAdmin({ status: "deleted" })]
+  ];
+  for (const admins of cases) {
+    const runtime = createRuntime({ admins, sessions: [makeSession()] });
+    const sessionBefore = plain(runtime.state.tables.admin_sessions[0]);
+    assert.throws(() => runtime.context.AuthService_requireAdmin_(RAW_TOKEN), /^Error: UNAUTHORIZED$/);
+    assert.deepEqual(runtime.state.readCounts, { admins: 1, admin_sessions: 1 });
+    assert.equal(runtime.state.cacheCalls.length, 0);
+    assert.equal(runtime.state.writes.length, 0);
+    assert.deepEqual(runtime.state.tables.admin_sessions[0], sessionBefore);
+  }
+});
+
+test("requireAdmin authoritative assertions reject cache-first and cache-after-first-call mutations", () => {
+  const cacheFirstSource = requireAdminMutation_(`function AuthService_requireAdmin_(token) {
+  if (!AuthService_validRawToken_(token)) throw new Error("UNAUTHORIZED");
+  var cached = CacheService.getScriptCache().get("auth-context");
+  if (cached) return JSON.parse(cached);
+  var context = AuthService_validateSessionContext_(token);
+  if (!context) throw new Error("UNAUTHORIZED");
+  return context.admin;
+}`);
+  const cachedAdmin = JSON.stringify({
+    admin_id: "ADM-11111111-1111-4111-8111-111111111111",
+    username: "operator",
+    display_name: "cached operator",
+    role: "super_admin"
+  });
+  assert.throws(() => {
+    const runtime = createRuntime({
+      sessions: [],
+      cacheValues: { "auth-context": cachedAdmin },
+      authServiceSourceOverride: cacheFirstSource
+    });
+    assert.deepEqual(plain(runtime.context.AuthService_requireAdmin_(RAW_TOKEN)), JSON.parse(cachedAdmin));
+    assertRequireAdminAuthoritativeEvidence_(runtime);
+  }, /requireAdmin must hash the raw token exactly once/);
+
+  const cacheAfterFirstSource = requireAdminMutation_(`function AuthService_requireAdmin_(token) {
+  if (!AuthService_validRawToken_(token)) throw new Error("UNAUTHORIZED");
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get("auth-context");
+  if (cached) return JSON.parse(cached);
+  var context = AuthService_validateSessionContext_(token);
+  if (!context) throw new Error("UNAUTHORIZED");
+  cache.put("auth-context", JSON.stringify(context.admin), 60);
+  return context.admin;
+}`);
+  const mutated = createRuntime({ sessions: [makeSession()], authServiceSourceOverride: cacheAfterFirstSource });
+  const first = plain(mutated.context.AuthService_requireAdmin_(RAW_TOKEN));
+  mutated.state.tables.admin_sessions[0].revoked_at = "2026-08-08T04:31:00.000Z";
+  assert.deepEqual(plain(mutated.context.AuthService_requireAdmin_(RAW_TOKEN)), first);
+  assert.equal(mutated.state.readCounts.admin_sessions, 1, "mutation proof must actually skip the second Sheet read");
+  assert.throws(
+    () => assertRequireAdminRejectsRevokedSecondCall_(
+      createRuntime({ sessions: [makeSession()], authServiceSourceOverride: cacheAfterFirstSource })
+    ),
+    /Missing expected exception/
+  );
 });
 
 test("logout hashes and revokes exactly one active session while preserving every audit field", () => {
