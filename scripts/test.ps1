@@ -147,6 +147,8 @@ if ($LASTEXITCODE -ne 0) { throw "Public API client behavior verification failed
 if ($LASTEXITCODE -ne 0) { throw "Admin API transport verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-auth.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin browser auth verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-shell.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin shell verification failed." }
 & node (Join-Path $PSScriptRoot "test-crypto-service.js")
 if ($LASTEXITCODE -ne 0) { throw "CryptoService verification failed." }
 & node (Join-Path $PSScriptRoot "test-auth-service.js")
