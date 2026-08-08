@@ -245,9 +245,34 @@ test("session validation and logout document immutable and idempotent contracts"
   const logout = section(api, "## 7.2 `adminLogout`");
   const logoutBlocks = jsonBlocks(logout);
   assert.deepEqual(logoutBlocks[0], { action: "adminLogout", token: "<43-character-base64url-token>" });
+  assert.equal(logoutBlocks[1].ok, true);
+  assert.deepEqual(logoutBlocks[1].data, {});
   assert.match(logout, /POST only/i);
   assert.match(logout, /idempotent/i);
   assert.match(logout, /repeated/i);
+});
+
+test("admin session retention preserves audit rows without an automatic Milestone 6 purge", () => {
+  const sessions = section(schema, "## 14A. Sheet: `admin_sessions`");
+  const lifecycle = section(sessions, "### 14A.2 Lifecycle and retention contract");
+  const logout = section(api, "## 7.2 `adminLogout`");
+
+  assert.match(lifecycle, /^`admin_sessions` is append-and-revoke for Milestone 6\./mi);
+  assert.match(lifecycle, /Logout updates only `revoked_at` as revocation metadata; the session row is not deleted on logout\./i);
+  assert.match(lifecycle, /`token_hash` remains stored after revocation for lookup and audit/i);
+  assert.match(lifecycle, /`session_id`, `admin_id`, `created_at`, `expires_at`, and `last_seen_at` are not removed merely because logout occurs\./i);
+  assert.match(lifecycle, /Expired session rows remain stored and revoked session rows remain stored for audit\./i);
+  assert.match(lifecycle, /Validation rejects revoked and expired rows but does not remove them\./i);
+  assert.match(lifecycle, /Automatic cleanup or retention deletion of session rows is outside Milestone 6/i);
+  assert.match(lifecycle, /any later purge or retention policy requires separate reviewed design and implementation\./i);
+
+  assert.match(logout, /hash(?:es)? the submitted raw token/i);
+  assert.match(logout, /matching session row remains in `admin_sessions`/i);
+  assert.match(logout, /logout sets `revoked_at`, does not delete the row/i);
+  assert.match(logout, /does not clear `token_hash`/i);
+  assert.match(logout, /already revoked, expired, or absent well-formed token remains safe and idempotent\./i);
+  assert.match(logout, /Expired and revoked row retention is audit behavior, not authorization behavior\./i);
+  assert.match(logout, /Authorization rejects revoked and expired rows\./i);
 });
 
 test("Admin errors are generic and token transport is POST-body-only", () => {

@@ -641,6 +641,12 @@ last_seen_at
 - validation ปฏิเสธที่ exact expiry instant และอ่าน authoritative `admin_sessions` บน every protected request
 - security values และ strict RFC 3339 UTC timestamps เขียนและอ่าน unchanged
 
+### 14A.2 Lifecycle and retention contract
+
+`admin_sessions` is append-and-revoke for Milestone 6. Logout updates only `revoked_at` as revocation metadata; the session row is not deleted on logout. `token_hash` remains stored after revocation for lookup and audit, and `session_id`, `admin_id`, `created_at`, `expires_at`, and `last_seen_at` are not removed merely because logout occurs.
+
+Expired session rows remain stored and revoked session rows remain stored for audit. Validation rejects revoked and expired rows but does not remove them. Automatic cleanup or retention deletion of session rows is outside Milestone 6; any later purge or retention policy requires separate reviewed design and implementation.
+
 ---
 
 ## 14B. Admin authentication property ownership

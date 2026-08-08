@@ -1225,6 +1225,10 @@ Error contract สำหรับ Admin auth:
 
 Validly shaped repeated logout ต้อง safe และ idempotent: session ที่ revoked/expired/unknown แล้วตอบ success แบบเดียวกันเพื่อไม่สร้าง token-validity oracle
 
+The server hashes the submitted raw token and looks up the matching session row. The matching session row remains in `admin_sessions`: logout sets `revoked_at`, does not delete the row, and does not clear `token_hash`. It also does not remove `session_id`, `admin_id`, `created_at`, `expires_at`, or `last_seen_at`. Repeated logout for an already revoked, expired, or absent well-formed token remains safe and idempotent.
+
+Expired and revoked row retention is audit behavior, not authorization behavior. Authorization rejects revoked and expired rows. `token_hash` is never exposed to the client.
+
 ---
 
 ## 7.2A `adminValidateSession`
