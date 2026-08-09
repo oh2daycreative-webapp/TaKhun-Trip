@@ -47,6 +47,8 @@ $required = @(
   "public/js/gallery.js",
   "public/js/favorites.js",
   "public/admin/js/admin-api.js",
+  "public/admin/js/admin-auth.js",
+  "public/admin/js/admin-shell.js",
   "public/favicon.svg",
   "public/assets/media/placeholders/hero.svg",
   "public/assets/media/placeholders/cover.svg",

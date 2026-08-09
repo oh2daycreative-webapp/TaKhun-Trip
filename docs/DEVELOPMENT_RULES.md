@@ -689,8 +689,9 @@ TAKHUN_LANG
 TAKHUN_FAVORITES
 TAKHUN_TRIP_PLAN
 TAKHUN_RECENT_PLACES
-TAKHUN_ADMIN_SESSION
 ```
+
+`TAKHUN_ADMIN_SESSION` is not a Local Storage key. Admin authentication uses session-scoped `sessionStorage` only, with the exact five-field projection in section 30B.
 
 ### 18.2 ห้ามเก็บ
 
@@ -1044,6 +1045,21 @@ If `bootstrapFirstAdmin()` throws, returns failure, or cleanup cannot be verifie
 8. Return to code/security review before authorizing another bootstrap attempt.
 
 These steps document future human operations only. Implementing or reviewing this repository does not authorize access to Apps Script, Google Sheets, Script Properties, credentials, deployments, or production systems.
+
+---
+
+## 30B. Milestone 6 Admin authentication engineering rules
+
+1. Never commit a credential or secret, provide a default Admin credential, add public registration, or place credential/property values in source. Never log a password or raw token.
+2. `ADMIN_PBKDF2_ITERATIONS_ = 120000` is fixed. A developer must not lower PBKDF2 iterations to make the benchmark pass.
+3. Browser state is not token authority. Every protected request must call `AuthService_requireAdmin_` for server-authoritative session and linked-Admin validation.
+4. Browser storage is `sessionStorage` key `TAKHUN_ADMIN_SESSION` with exactly `admin_id`, `display_name`, `role`, `token`, and `expires_at`; never add username, email, session ID, token hash, or credential fields.
+5. Session expiry is absolute. Protected validation must not renew `expires_at`, update `last_seen_at`, or write an auth Sheet.
+6. Auth Sheets are accessed by header name and are order-independent. Human `display_name` and `email` text is formula-escaped; security fields must be validated and written unchanged, never transformed by formula escaping.
+7. Successful login must update the Admin timestamps, derive the token, and append the complete session. The session append is the final security-state write, and the raw token may be returned only after that append succeeds.
+8. Protected services use `AuthService_requireAdmin_`. The Router POST allowlist remains exactly `submitReview`, `adminLogin`, `adminValidateSession`, and `adminLogout`.
+9. `setupAdminAuthSchema()`, `benchmarkAdminPbkdf2()`, and `bootstrapFirstAdmin()` are editor-only and must never be Router actions. The benchmark is isolated from Sheets, Script Properties, bootstrap credentials, CacheService, and auth random state.
+10. During Tasks 1-11 an agent performs no Apps Script, Google Sheets, Script Properties, credential, benchmark, bootstrap, deployment, or staging operation. Task 12 operations are human-only.
 
 ---
 

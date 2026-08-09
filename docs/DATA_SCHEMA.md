@@ -658,6 +658,20 @@ Expired session rows remain stored and revoked session rows remain stored for au
 
 ---
 
+## 14C. Milestone 6 authentication lifecycle
+
+Milestone 6 uses the exact `admins` and `admin_sessions` headers defined above. Required headers are unique, their order is independent, and authentication code resolves every column by header name. No additional authentication columns are implied. All authentication timestamps are canonical RFC3339 UTC values.
+
+The only roles are `super_admin`, `editor`, `reviewer`, and `viewer`. The only Admin statuses are `active`, `inactive`, and `deleted`. Human text fields (`display_name` and `email`) are formula-escaped when written to Sheets; validated security fields, identifiers, hashes, salts, counters, enums, and timestamps are written unchanged.
+
+`setupAdminAuthSchema()` validates the manually supplied `ADMIN_AUTH_RANDOM_KEY`, creates or validates `ADMIN_AUTH_RANDOM_COUNTER`, and creates or validates `ADMIN_AUTH_STATE_VERSION=1`. A caller-held script lock protects random derivation. For every derivation, the incremented counter is persisted before any derived bytes are released; the state version and purpose such as `admin-session-token` provide domain separation. Persistence failures return no bytes. There is no rollback: a skipped counter is never rolled back or reused.
+
+On successful login the critical write order is fixed: update `last_login_at` and `updated_at` on the Admin row, derive the token, then append the complete `admin_sessions` row containing the `token_hash`. The session append is the final security-state write. The raw token is returned only after the append succeeds; it is never stored in a Sheet or log.
+
+`admin_sessions` is append-and-revoke for Milestone 6. Logout updates `revoked_at` rather than deleting a row or clearing `token_hash`. The audit identifiers and timestamps (`session_id`, `admin_id`, `created_at`, `expires_at`, and `last_seen_at`) remain stored. Expired and revoked rows remain for audit, authorization rejects them without deletion, and Milestone 6 has no automatic purge or invented retention duration.
+
+---
+
 ## 15. Sheet: `activity_logs`
 
 ใช้บันทึกประวัติการทำงานของ Admin

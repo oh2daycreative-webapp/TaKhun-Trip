@@ -1266,6 +1266,57 @@ Response คืน original `expires_at`; there is no renewed expiry, sliding re
 
 ---
 
+## 7A. Milestone 6 transport and Router contract
+
+Exact POST action allowlist:
+
+```text
+submitReview
+adminLogin
+adminValidateSession
+adminLogout
+```
+
+`submitReview` retains its existing public POST behavior. The three Admin authentication actions are POST-only and accept credentials or bearer tokens in the POST body only. The browser sends JSON using `text/plain;charset=utf-8`, applies one 12,000 ms timeout, and performs no automatic transport retry. Authentication uses no cookies, no Authorization header, and no query token.
+
+The three request shapes are exact:
+
+```json
+{
+  "action": "adminLogin",
+  "payload": {
+    "username": "...",
+    "password": "..."
+  }
+}
+```
+
+```json
+{
+  "action": "adminValidateSession",
+  "token": "..."
+}
+```
+
+```json
+{
+  "action": "adminLogout",
+  "token": "..."
+}
+```
+
+Successful login and validation return the backend safe Admin projection (`admin_id`, `username`, `display_name`, and `role`) plus the immutable `expires_at`; login additionally returns the one-time raw `token`. The browser deliberately does not persist `username`: `TAKHUN_ADMIN_SESSION` contains exactly `admin_id`, `display_name`, `role`, `token`, and `expires_at`. Password fields, email, token hashes, and session identifiers are never browser response or storage fields. Logout is idempotent and safe for valid, revoked, expired, or absent sessions, and it never returns `token_hash`.
+
+The response envelope remains `{ "ok": true, "data": ... }` or `{ "ok": false, "error": { "code": "...", "message": "..." } }`. Documented backend categories are `VALIDATION_ERROR`, `UNAUTHORIZED`, `RATE_LIMITED`, `SERVER_ERROR`, and `FORBIDDEN`. The browser normalizes an unknown backend code to `SERVER_ERROR`; transport failures use `NETWORK_ERROR`, `TIMEOUT`, `HTTP_ERROR`, or `MALFORMED_RESPONSE` without leaking response bodies or secrets. Existing public GET behavior remains unchanged.
+
+All protected authorization is server-authoritative on every call. Session expiry is an absolute eight-hour deadline: validation does not extend `expires_at`, update `last_seen_at`, or write either auth Sheet.
+
+## 7B. Future Admin CMS API direction
+
+Sections 7.3 through 7.29 describe future Admin CMS direction. They are not Router actions or implemented CRUD/moderation features in Milestone 6.
+
+---
+
 ## 7.3 `adminGetDashboard`
 
 โหลดข้อมูลสรุป Dashboard
