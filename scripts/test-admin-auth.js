@@ -7,10 +7,10 @@ const vm = require("node:vm");
 
 const modulePath = path.join(__dirname, "../public/admin/js/admin-auth.js");
 assert.ok(fs.existsSync(modulePath), "public/admin/js/admin-auth.js must exist before Admin browser auth contracts can run");
-const productionSource = fs.readFileSync(modulePath, "utf8");
+const productionSource = fs.readFileSync(modulePath, "utf8").replace(/\r\n/g, "\n");
 const loginPagePath = path.join(__dirname, "../public/admin/login.html");
 const loginCssPath = path.join(__dirname, "../public/css/admin.css");
-const loginHtml = fs.readFileSync(loginPagePath, "utf8");
+const loginHtml = fs.readFileSync(loginPagePath, "utf8").replace(/\r\n/g, "\n");
 const loginCss = fs.readFileSync(loginCssPath, "utf8");
 
 const STORAGE_KEY = "TAKHUN_ADMIN_SESSION";

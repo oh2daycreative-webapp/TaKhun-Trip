@@ -15,7 +15,7 @@ assert.equal(
 );
 
 const configSource = fs.readFileSync(path.join(root, "apps-script/Config.gs"), "utf8");
-const serviceSource = fs.readFileSync(servicePath, "utf8");
+const serviceSource = fs.readFileSync(servicePath, "utf8").replace(/\r\n/g, "\n");
 
 const ADMIN_HEADERS = [
   "admin_id", "username", "display_name", "email", "password_algorithm", "password_hash",

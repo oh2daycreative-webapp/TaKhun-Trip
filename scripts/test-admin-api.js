@@ -7,7 +7,7 @@ const vm = require("node:vm");
 
 const modulePath = path.join(__dirname, "../public/admin/js/admin-api.js");
 assert.ok(fs.existsSync(modulePath), "public/admin/js/admin-api.js must exist before Admin transport contracts can run");
-const productionSource = fs.readFileSync(modulePath, "utf8");
+const productionSource = fs.readFileSync(modulePath, "utf8").replace(/\r\n/g, "\n");
 
 const ENDPOINT = "https://api.example/exec?deployment=approved";
 const TOKEN = "-".padEnd(43, "A");
