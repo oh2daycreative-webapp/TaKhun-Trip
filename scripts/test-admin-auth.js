@@ -62,7 +62,7 @@ function loginPageScript(html = loginHtml) {
   return match[1];
 }
 
-function makeLoginElement(initial = {}) {
+function makeLoginElement(initial = {}, attributeWrites = [], focusEvents = []) {
   const listeners = new Map();
   const attributes = new Map();
   return Object.assign({
@@ -72,10 +72,17 @@ function makeLoginElement(initial = {}) {
     disabled: false,
     focused: false,
     addEventListener(type, listener) { listeners.set(type, listener); },
-    setAttribute(name, value) { attributes.set(name, String(value)); },
+    setAttribute(name, value) {
+      const serialized = String(value);
+      attributes.set(name, serialized);
+      attributeWrites.push({ element: initial.testId || "unknown", name, value: serialized });
+    },
     getAttribute(name) { return attributes.has(name) ? attributes.get(name) : null; },
     removeAttribute(name) { attributes.delete(name); },
-    focus() { this.focused = true; },
+    focus() {
+      focusEvents.push({ element: initial.testId || "unknown", disabled: this.disabled });
+      this.focused = true;
+    },
     async dispatch(type) {
       const event = { defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
       const result = listeners.has(type) ? listeners.get(type)(event) : undefined;
@@ -85,21 +92,41 @@ function makeLoginElement(initial = {}) {
   }, initial);
 }
 
-function loadLoginPage({ rawReturn = null, returnValue = null, redirectOutcome = "unauthenticated", loginImpl } = {}) {
+function loadLoginPage({
+  rawReturn = null,
+  returnValue = null,
+  redirectOutcome = "unauthenticated",
+  loginImpl,
+  pageSource = loginPageScript()
+} = {}) {
+  const calls = {
+    safe: [],
+    redirects: [],
+    logins: [],
+    timers: [],
+    clears: [],
+    console: [],
+    location: [],
+    locationWrites: [],
+    storage: [],
+    persistenceWrites: [],
+    attributeWrites: [],
+    focusEvents: []
+  };
   const ids = {
-    "admin-login-form": makeLoginElement({ hidden: true }),
-    "admin-login-username": makeLoginElement(),
-    "admin-login-password": makeLoginElement(),
-    "admin-login-submit": makeLoginElement({ disabled: true }),
-    "admin-login-status": makeLoginElement(),
-    "admin-login-retry": makeLoginElement({ hidden: true, disabled: true })
+    "admin-login-form": makeLoginElement({ hidden: true, testId: "admin-login-form" }, calls.attributeWrites, calls.focusEvents),
+    "admin-login-username": makeLoginElement({ testId: "admin-login-username" }, calls.attributeWrites, calls.focusEvents),
+    "admin-login-password": makeLoginElement({ testId: "admin-login-password" }, calls.attributeWrites, calls.focusEvents),
+    "admin-login-submit": makeLoginElement({ disabled: true, testId: "admin-login-submit" }, calls.attributeWrites, calls.focusEvents),
+    "admin-login-status": makeLoginElement({ testId: "admin-login-status" }, calls.attributeWrites, calls.focusEvents),
+    "admin-login-retry": makeLoginElement({ hidden: true, disabled: true, testId: "admin-login-retry" }, calls.attributeWrites, calls.focusEvents)
   };
   ids["admin-login-form"].setAttribute("aria-busy", "false");
   ids["admin-login-form"].setAttribute("aria-hidden", "true");
   const windowListeners = new Map();
   const timers = new Map();
-  const calls = { safe: [], redirects: [], logins: [], timers: [], clears: [], console: [], location: [], storage: [] };
   let timerId = 0;
+  let timerNow = 0;
   const auth = {
     safeReturnPath(candidate) {
       calls.safe.push(candidate);
@@ -121,19 +148,47 @@ function loadLoginPage({ rawReturn = null, returnValue = null, redirectOutcome =
       return { status: "error", code: "UNAUTHORIZED" };
     }
   };
+  const document = { getElementById(id) { return ids[id] || null; } };
+  Object.defineProperty(document, "cookie", {
+    configurable: true,
+    get() { return ""; },
+    set(value) { calls.persistenceWrites.push({ surface: "cookie", value: String(value) }); }
+  });
+  const initialHref = `https://site.example/admin/login.html${rawReturn === null && returnValue === "reviews.html" ? "?return=reviews.html" : rawReturn === null ? "" : `?return=${encodeURIComponent(rawReturn)}`}`;
+  let currentHref = initialHref;
+  const location = {
+    replace(value) {
+      calls.location.push(String(value));
+      calls.locationWrites.push({ surface: "replace", value: String(value) });
+    },
+    assign(value) {
+      calls.location.push(String(value));
+      calls.locationWrites.push({ surface: "assign", value: String(value) });
+    }
+  };
+  for (const field of ["href", "pathname", "search", "hash"]) {
+    Object.defineProperty(location, field, {
+      configurable: true,
+      get() {
+        const parsed = new URL(currentHref);
+        return field === "href" ? currentHref : parsed[field];
+      },
+      set(value) {
+        calls.locationWrites.push({ surface: field, value: String(value) });
+        if (field === "href") currentHref = String(value);
+      }
+    });
+  }
   const context = {
     window: null,
-    document: { getElementById(id) { return ids[id] || null; } },
+    document,
     URL,
     URLSearchParams,
-    location: {
-      href: `https://site.example/admin/login.html${rawReturn === null && returnValue === "reviews.html" ? "?return=reviews.html" : rawReturn === null ? "" : `?return=${encodeURIComponent(rawReturn)}`}`,
-      replace(value) { calls.location.push(value); }
-    },
+    location,
     TakhunAdminAuth: auth,
     setTimeout(callback, delay) {
       const id = ++timerId;
-      timers.set(id, callback);
+      timers.set(id, { callback, due: timerNow + delay });
       calls.timers.push(delay);
       return id;
     },
@@ -141,18 +196,30 @@ function loadLoginPage({ rawReturn = null, returnValue = null, redirectOutcome =
     console: new Proxy({}, { get() { return (...args) => calls.console.push(args); } })
   };
   for (const storageName of ["sessionStorage", "localStorage"]) {
+    const storage = {
+      getItem(key) {
+        calls.storage.push({ surface: storageName, operation: "getItem", key: String(key) });
+        return null;
+      },
+      setItem(key, value) {
+        calls.persistenceWrites.push({ surface: storageName, operation: "setItem", key: String(key), value: String(value) });
+      },
+      removeItem(key) {
+        calls.persistenceWrites.push({ surface: storageName, operation: "removeItem", key: String(key) });
+      }
+    };
     Object.defineProperty(context, storageName, {
       configurable: true,
       get() {
-        calls.storage.push(storageName);
-        return new Proxy({}, { get() { throw new Error("login page must not access storage directly"); } });
+        calls.storage.push({ surface: storageName, operation: "access" });
+        return storage;
       }
     });
   }
   context.window = context;
   context.addEventListener = (type, listener) => windowListeners.set(type, listener);
   vm.createContext(context);
-  vm.runInContext(loginPageScript(), context, { filename: "public/admin/login.html" });
+  vm.runInContext(pageSource, context, { filename: "public/admin/login.html" });
   return {
     ids,
     calls,
@@ -163,12 +230,162 @@ function loadLoginPage({ rawReturn = null, returnValue = null, redirectOutcome =
       await Promise.resolve();
       await Promise.resolve();
     },
+    activeTimerCount() { return timers.size; },
+    async advanceTimersBy(milliseconds) {
+      const target = timerNow + milliseconds;
+      while (true) {
+        const ready = [...timers.entries()]
+          .filter((entry) => entry[1].due <= target)
+          .sort((left, right) => left[1].due - right[1].due || left[0] - right[0]);
+        if (!ready.length) break;
+        const [id, timer] = ready[0];
+        timers.delete(id);
+        timerNow = timer.due;
+        await Promise.resolve(timer.callback());
+      }
+      timerNow = target;
+    },
     async runTimers() {
-      const callbacks = [...timers.values()];
-      timers.clear();
-      for (const callback of callbacks) await Promise.resolve(callback());
+      if (!timers.size) return;
+      const latest = Math.max(...[...timers.values()].map((timer) => timer.due));
+      await this.advanceTimersBy(latest - timerNow);
     }
   };
+}
+
+function mutatedLoginPageSource(find, replacement, source = loginPageScript()) {
+  const mutated = source.replace(find, replacement);
+  assert.notEqual(mutated, source, `login-page mutation target must exist: ${find}`);
+  return mutated;
+}
+
+async function enterValidLogin(harness, passwordValue = "PasswordSentinel") {
+  harness.ids["admin-login-username"].value = "operator";
+  harness.ids["admin-login-password"].value = passwordValue;
+  await harness.ids["admin-login-username"].dispatch("input");
+  await harness.ids["admin-login-password"].dispatch("input");
+}
+
+async function assertRecoverableFocus(pageSource = loginPageScript()) {
+  const outcomes = [
+    { name: "UNAUTHORIZED", result: { status: "error", code: "UNAUTHORIZED" }, focus: "admin-login-username" },
+    ...["RATE_LIMITED", "NETWORK_ERROR", "TIMEOUT", "HTTP_ERROR", "SERVER_ERROR", "MALFORMED_RESPONSE"].map((code) => ({
+      name: code,
+      result: { status: "error", code },
+      focus: "admin-login-password"
+    })),
+    { name: "unexpected", error: new Error("internal PasswordSentinel detail"), focus: "admin-login-password" }
+  ];
+  for (const outcome of outcomes) {
+    const harness = loadLoginPage({
+      pageSource,
+      loginImpl: async () => {
+        if (outcome.error) throw outcome.error;
+        return outcome.result;
+      }
+    });
+    await harness.start();
+    await enterValidLogin(harness);
+    await harness.ids["admin-login-form"].dispatch("submit");
+    const focused = harness.ids[outcome.focus];
+    assert.equal(harness.ids["admin-login-password"].value, "", `${outcome.name} retained the password`);
+    assert.equal(harness.ids["admin-login-form"].getAttribute("aria-busy"), "false", `${outcome.name} left the form busy`);
+    assert.equal(focused.focused, true, `${outcome.name} did not restore actionable focus`);
+    assert.equal(focused.disabled, false, `${outcome.name} focused a disabled control`);
+    assert.deepEqual(harness.calls.focusEvents.at(-1), { element: outcome.focus, disabled: false });
+    assertNoSecrets(harness.calls.attributeWrites, ["PasswordSentinel"]);
+  }
+}
+
+async function assertPasswordBoundaryContract(pageSource = loginPageScript()) {
+  const harness = loadLoginPage({ pageSource });
+  await harness.start();
+  const username = harness.ids["admin-login-username"];
+  const password = harness.ids["admin-login-password"];
+  const submit = harness.ids["admin-login-submit"];
+  username.value = "operator";
+  await username.dispatch("input");
+  password.value = "A".repeat(128);
+  await password.dispatch("input");
+  assert.equal(submit.disabled, false, "128 ASCII code points and bytes must be accepted");
+  password.value = "A".repeat(129);
+  await password.dispatch("input");
+  assert.equal(submit.disabled, true, "129 ASCII code points must be rejected independently of byte count");
+  for (const malformed of ["\uD800", "\uDC00", "\uD800A", "\uDC00\uD800"]) {
+    password.value = malformed;
+    await password.dispatch("input");
+    assert.equal(submit.disabled, true, "malformed surrogate input must be rejected");
+  }
+}
+
+async function assertPasswordClearedFor(code, pageSource = loginPageScript()) {
+  const harness = loadLoginPage({ pageSource, loginImpl: async () => ({ status: "error", code }) });
+  await harness.start();
+  await enterValidLogin(harness);
+  await harness.ids["admin-login-form"].dispatch("submit");
+  assert.equal(harness.ids["admin-login-password"].value, "", `${code} retained the password`);
+  assert.equal(harness.ids["admin-login-form"].getAttribute("aria-busy"), "false");
+  assert.equal(harness.ids["admin-login-password"].disabled, false);
+  assert.doesNotMatch(harness.ids["admin-login-status"].textContent, /PasswordSentinel|internal|raw response/i);
+}
+
+async function assertCooldownContract(pageSource = loginPageScript()) {
+  const harness = loadLoginPage({ pageSource, loginImpl: async () => ({ status: "error", code: "RATE_LIMITED" }) });
+  await harness.start();
+  await enterValidLogin(harness, "FirstPassword");
+  await harness.ids["admin-login-form"].dispatch("submit");
+  assert.equal(harness.calls.logins.length, 1);
+  assert.deepEqual(harness.calls.timers, [60000]);
+  assert.equal(harness.activeTimerCount(), 1);
+  assert.equal(harness.ids["admin-login-submit"].disabled, true);
+  assert.equal(harness.calls.persistenceWrites.length, 0);
+  assert.equal(harness.calls.storage.length, 0);
+
+  harness.ids["admin-login-password"].value = "SecondPassword";
+  await harness.ids["admin-login-password"].dispatch("input");
+  await harness.advanceTimersBy(59999);
+  assert.equal(harness.ids["admin-login-submit"].disabled, true);
+  await harness.ids["admin-login-form"].dispatch("submit");
+  assert.equal(harness.calls.logins.length, 1, "cooldown handler allowed a blocked resubmit");
+  assert.equal(harness.activeTimerCount(), 1);
+
+  await harness.advanceTimersBy(1);
+  assert.equal(harness.activeTimerCount(), 0);
+  assert.equal(harness.ids["admin-login-submit"].disabled, false);
+  assert.equal(harness.calls.logins.length, 1, "cooldown expiry retried automatically");
+
+  await harness.ids["admin-login-form"].dispatch("submit");
+  assert.equal(harness.calls.logins.length, 2);
+  assert.deepEqual(harness.calls.timers, [60000, 60000]);
+  assert.equal(harness.activeTimerCount(), 1, "repeated rate limits must leave one active timer");
+  assert.equal(harness.calls.persistenceWrites.length, 0);
+  assert.equal(harness.calls.storage.length, 0);
+  harness.ids["admin-login-password"].value = "ThirdPassword";
+  await harness.ids["admin-login-password"].dispatch("input");
+  await harness.advanceTimersBy(60000);
+  assert.equal(harness.activeTimerCount(), 0);
+  assert.equal(harness.calls.logins.length, 2, "repeated cooldown expiry retried automatically");
+  assert.equal(harness.ids["admin-login-submit"].disabled, false);
+  assert.equal(harness.calls.persistenceWrites.length, 0);
+  assert.equal(harness.calls.storage.length, 0);
+}
+
+async function assertPageSecretSinks(pageSource = loginPageScript()) {
+  const sessionMarker = '{"session":"SESSION_JSON_SENTINEL"}';
+  const harness = loadLoginPage({
+    pageSource,
+    loginImpl: async () => ({ status: "error", code: "SERVER_ERROR", token: TOKEN, session: sessionMarker })
+  });
+  await harness.start();
+  await enterValidLogin(harness);
+  await harness.ids["admin-login-form"].dispatch("submit");
+  const secrets = ["PasswordSentinel", TOKEN, "SESSION_JSON_SENTINEL", sessionMarker];
+  assertNoSecrets(harness.calls.attributeWrites, secrets);
+  assertNoSecrets(harness.calls.locationWrites, secrets);
+  assertNoSecrets(harness.calls.location, secrets);
+  assertNoSecrets(harness.calls.console, secrets);
+  assertNoSecrets(harness.calls.persistenceWrites, secrets);
+  assertNoSecrets(harness.ids["admin-login-status"].textContent, secrets);
 }
 
 function apiError(code, secret = "server-internal-secret") {
@@ -1021,6 +1238,18 @@ test("login eligibility enforces raw and UTF-8 bounds without transforming crede
   assert.equal(submit.disabled, true, "malformed surrogates must be rejected");
 });
 
+test("password validation independently enforces 128 code points and every malformed surrogate edge", async () => {
+  await assertPasswordBoundaryContract();
+});
+
+test("password code-point assertions reject removing the independent 128-point ceiling", async () => {
+  const source = mutatedLoginPageSource(
+    "if (points > PASSWORD_CODE_POINT_MAX || bytes > PASSWORD_BYTE_MAX) return null;",
+    "if (bytes > PASSWORD_BYTE_MAX) return null;"
+  );
+  await proveContractRejects(() => assertPasswordBoundaryContract(source));
+});
+
 test("login submit is single-flight, delegates exact credentials, and always clears password", async () => {
   const gate = deferred();
   const harness = loadLoginPage({ returnValue: "reviews.html", loginImpl: () => gate.promise });
@@ -1048,7 +1277,16 @@ test("login submit is single-flight, delegates exact credentials, and always cle
   assert.doesNotMatch(harness.ids["admin-login-status"].textContent, /Sentinel/);
 });
 
-test("login failures use safe copy, focus unauthorized password, and rate-limit for exactly 60 seconds", async () => {
+test("every recoverable login completion restores focus to an enabled credential field", async () => {
+  await assertRecoverableFocus();
+});
+
+test("recoverable-focus assertions reject omitting post-busy focus restoration", async () => {
+  const source = mutatedLoginPageSource("if (focusTarget) focusTarget.focus();", "");
+  await proveContractRejects(() => assertRecoverableFocus(source));
+});
+
+test("login failures use safe copy, focus unauthorized username, and rate-limit for exactly 60 seconds", async () => {
   for (const code of ["UNAUTHORIZED", "NETWORK_ERROR", "TIMEOUT", "SERVER_ERROR"]) {
     const harness = loadLoginPage({ loginImpl: async () => ({ status: "error", code }) });
     await harness.start();
@@ -1060,7 +1298,7 @@ test("login failures use safe copy, focus unauthorized password, and rate-limit 
     assert.doesNotMatch(harness.ids["admin-login-status"].textContent, /SecretValue|server-internal/i);
     if (code === "UNAUTHORIZED") {
       assert.equal(harness.ids["admin-login-status"].textContent, "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง");
-      assert.equal(harness.ids["admin-login-password"].focused, true);
+      assert.equal(harness.ids["admin-login-username"].focused, true);
     }
   }
   const rate = loadLoginPage({ loginImpl: async () => ({ status: "error", code: "RATE_LIMITED" }) });
@@ -1082,7 +1320,7 @@ test("login failures use safe copy, focus unauthorized password, and rate-limit 
 test("password clearing and secret-safe recovery cover every completed outcome", async () => {
   const outcomes = [
     { name: "success", result: { status: "authenticated" } },
-    ...["UNAUTHORIZED", "RATE_LIMITED", "NETWORK_ERROR", "TIMEOUT", "SERVER_ERROR"].map((code) => ({ name: code, result: { status: "error", code } })),
+    ...["UNAUTHORIZED", "RATE_LIMITED", "NETWORK_ERROR", "TIMEOUT", "HTTP_ERROR", "SERVER_ERROR", "MALFORMED_RESPONSE"].map((code) => ({ name: code, result: { status: "error", code } })),
     { name: "unexpected", error: new Error("internal PasswordSentinel detail") }
   ];
   for (const outcome of outcomes) {
@@ -1112,6 +1350,42 @@ test("password clearing and secret-safe recovery cover every completed outcome",
   assert.equal(invalid.ids["admin-login-password"].value, "");
   assert.equal(invalid.calls.logins.length, 0);
   assert.doesNotMatch(invalid.ids["admin-login-status"].textContent, /PasswordSentinel/);
+});
+
+test("HTTP and malformed-response clearing assertions reject outcome-specific password retention", async () => {
+  for (const code of ["HTTP_ERROR", "MALFORMED_RESPONSE"]) {
+    await assertPasswordClearedFor(code);
+    const source = mutatedLoginPageSource(
+      'enteredPassword = "";\n          password.value = "";',
+      `password.value = result && result.code === "${code}" ? enteredPassword : "";\n          enteredPassword = "";`
+    );
+    await proveContractRejects(() => assertPasswordClearedFor(code, source));
+  }
+});
+
+test("rate cooldown blocks handler resubmit at 59999 and bounds repeated timers at 60000", async () => {
+  await assertCooldownContract();
+});
+
+test("rate cooldown assertions reject guard duration retry and overlapping-timer mutations", async () => {
+  const mutations = [
+    mutatedLoginPageSource(
+      "if (loginBusy || startupBusy || cooldownActive || !loginAvailable) return;",
+      "if (loginBusy || startupBusy || !loginAvailable) return;"
+    ),
+    ...[30000, 59000, 61000].map((duration) => mutatedLoginPageSource("var RATE_LIMIT_MS = 60000;", `var RATE_LIMIT_MS = ${duration};`)),
+    mutatedLoginPageSource(
+      'setStatus("ลองเข้าสู่ระบบได้อีกครั้ง", "ready");\n          updateSubmit();',
+      'setStatus("ลองเข้าสู่ระบบได้อีกครั้ง", "ready");\n          updateSubmit();\n          submitLogin({ preventDefault: function () {} });'
+    ),
+    mutatedLoginPageSource(
+      "cooldownTimer = global.setTimeout(function () {",
+      "global.setTimeout(function () {}, RATE_LIMIT_MS);\n        cooldownTimer = global.setTimeout(function () {"
+    )
+  ];
+  for (const source of mutations) {
+    await proveContractRejects(() => assertCooldownContract(source));
+  }
 });
 
 test("login startup transient failures require one explicit busy-safe retry", async () => {
@@ -1157,6 +1431,23 @@ test("login page passes only the facade-sanitized return to startup and credenti
     assert.equal(harness.calls.logins[0][2], "dashboard.html");
     assert.equal(harness.calls.location.length, 0);
   }
+});
+
+test("login secret scans cover every DOM attribute persistence API and location field", async () => {
+  await assertPageSecretSinks();
+});
+
+test("secret-sink assertions reject password leaks through attributes and location fields", async () => {
+  const attributeLeak = mutatedLoginPageSource(
+    "var result = await auth.login(enteredUsername, enteredPassword, returnPath);",
+    'var result = await auth.login(enteredUsername, enteredPassword, returnPath); form.setAttribute("data-secret", enteredPassword);'
+  );
+  const locationLeak = mutatedLoginPageSource(
+    "var result = await auth.login(enteredUsername, enteredPassword, returnPath);",
+    "var result = await auth.login(enteredUsername, enteredPassword, returnPath); global.location.hash = enteredPassword;"
+  );
+  await proveContractRejects(() => assertPageSecretSinks(attributeLeak));
+  await proveContractRejects(() => assertPageSecretSinks(locationLeak));
 });
 
 test("login page delegates return sanitization and has no alternate secret or navigation sink", async () => {

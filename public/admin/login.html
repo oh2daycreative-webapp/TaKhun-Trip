@@ -175,7 +175,7 @@
         }
         var enteredUsername = username.value;
         var enteredPassword = password.value;
-        var focusPasswordAfter = false;
+        var focusTarget = null;
         setLoginBusy(true);
         setStatus("กำลังเข้าสู่ระบบ…", "loading");
         try {
@@ -183,20 +183,23 @@
           if (!result || result.status !== "error") return;
           if (result.code === "UNAUTHORIZED") {
             setStatus("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง", "error");
-            focusPasswordAfter = true;
+            focusTarget = username;
           } else if (result.code === "RATE_LIMITED") {
             setStatus("มีการลองเข้าสู่ระบบหลายครั้ง กรุณารอแล้วลองใหม่อีกครั้ง", "error");
             beginCooldown();
+            focusTarget = password;
           } else {
             setStatus("ไม่สามารถเข้าสู่ระบบได้ กรุณาลองอีกครั้ง", "error");
+            focusTarget = password;
           }
         } catch (_error) {
           setStatus("ไม่สามารถเข้าสู่ระบบได้ กรุณาลองอีกครั้ง", "error");
+          focusTarget = password;
         } finally {
           enteredPassword = "";
           password.value = "";
           setLoginBusy(false);
-          if (focusPasswordAfter) password.focus();
+          if (focusTarget) focusTarget.focus();
         }
       }
 
