@@ -125,6 +125,8 @@
   function syncDrawerForViewport() {
     syncAccountForViewport();
     if (isDesktop()) {
+      elements.drawer.removeAttribute("role");
+      elements.drawer.removeAttribute("aria-modal");
       drawerOpen = false;
       elements.drawer.classList.remove("is-open");
       setHidden(elements.drawer, false);
@@ -133,7 +135,12 @@
       global.document.body.classList.remove("admin-drawer-open");
       setBackgroundInert(false);
     } else if (!drawerOpen) {
+      elements.drawer.setAttribute("role", "dialog");
+      elements.drawer.setAttribute("aria-modal", "true");
       setHidden(elements.drawer, true);
+    } else {
+      elements.drawer.setAttribute("role", "dialog");
+      elements.drawer.setAttribute("aria-modal", "true");
     }
   }
 

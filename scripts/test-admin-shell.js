@@ -33,6 +33,26 @@ function occurrences(value, pattern) {
   return (value.match(pattern) || []).length;
 }
 
+function minimumPixelsForSelector(cssText, selector, property) {
+  let minimum = null;
+  for (const match of cssText.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selectors = match[1].split(",").map((value) => value.trim());
+    if (!selectors.includes(selector)) continue;
+    const declaration = new RegExp(`${property}\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)px`, "gi");
+    for (const value of match[2].matchAll(declaration)) minimum = Number(value[1]);
+  }
+  return minimum;
+}
+
+function assertMinimumTarget(cssText, selector, widthRequired) {
+  const height = minimumPixelsForSelector(cssText, selector, "min-height");
+  assert.equal(height !== null && height >= 44, true, `${selector} must have an effective min-height of at least 44px`);
+  if (widthRequired) {
+    const width = minimumPixelsForSelector(cssText, selector, "min-width");
+    assert.equal(width !== null && width >= 44, true, `${selector} must have an effective min-width of at least 44px`);
+  }
+}
+
 function htmlFor(key) {
   return fs.readFileSync(path.join(root, `public/admin/${key}.html`), "utf8");
 }
@@ -143,7 +163,7 @@ function makeHarness(options) {
     guardMessage: makeElement("p", { "data-admin-guard-message": "" }),
     retry: makeElement("button", { "data-admin-retry": "", hidden: "" }),
     login: makeElement("a", { "data-admin-login-link": "", href: "login.html", hidden: "" }),
-    drawer: makeElement("aside", { "data-admin-drawer": "", id: "admin-drawer", hidden: "", "aria-hidden": "true" }),
+    drawer: makeElement("aside", { "data-admin-drawer": "", id: "admin-drawer", hidden: "", "aria-hidden": "true", role: "dialog", "aria-modal": "true", "aria-label": "แถบนำทางผู้ดูแล" }),
     opener: makeElement("button", { "data-admin-drawer-open": "", "aria-expanded": "false", "aria-controls": "admin-drawer" }),
     close: makeElement("button", { "data-admin-drawer-close": "" }),
     backdrop: makeElement("div", { "data-admin-backdrop": "", hidden: "" }),
@@ -204,14 +224,30 @@ function makeHarness(options) {
   };
   Object.values(elements).forEach((element) => { element.ownerDocument = document; });
   body.ownerDocument = document;
-  const authCalls = { guard: 0, logout: 0 };
+  body.appendChild(elements.skip);
+  body.appendChild(elements.guard);
+  body.appendChild(elements.shell);
+  elements.shell.appendChild(elements.header);
+  elements.shell.appendChild(elements.drawer);
+  elements.shell.appendChild(elements.backdrop);
+  elements.shell.appendChild(elements.main);
+  elements.main.appendChild(elements.content);
+  const authCalls = { guard: 0, authenticatedCallbacks: 0, retryCallbacks: 0, logout: 0 };
   const guardResults = (config.guardResults || [{ status: "authenticated", admin: { display_name: "ผู้ดูแล", role: "editor" } }]).slice();
   const auth = {
     async guardProtectedPage(callbacks) {
       authCalls.guard += 1;
-      const result = guardResults.shift() || { status: "unconfirmed", code: "NETWORK_ERROR" };
-      if (result.status === "authenticated") callbacks.onAuthenticated(result);
-      if (result.status === "unconfirmed") callbacks.onRetry(result);
+      const result = config.guardDeferred
+        ? await config.guardDeferred.promise
+        : guardResults.shift() || { status: "unconfirmed", code: "NETWORK_ERROR" };
+      if (result.status === "authenticated") {
+        authCalls.authenticatedCallbacks += 1;
+        callbacks.onAuthenticated(result);
+      }
+      if (result.status === "unconfirmed") {
+        authCalls.retryCallbacks += 1;
+        callbacks.onRetry(result);
+      }
       return result;
     },
     async logout() {
@@ -223,7 +259,7 @@ function makeHarness(options) {
   const media = { matches: Boolean(config.desktop), addEventListener() {} };
   const context = vm.createContext({ window: { document, TakhunAdminAuth: auth, matchMedia: () => media }, document, console });
   context.window.window = context.window;
-  vm.runInContext(source, context, { filename: "admin-shell.js" });
+  vm.runInContext(config.sourceOverride || source, context, { filename: "admin-shell.js" });
   return { shell: context.window.TakhunAdminShell, document, elements, authCalls };
 }
 
@@ -231,6 +267,25 @@ function deferred() {
   let resolve;
   const promise = new Promise((done) => { resolve = done; });
   return { promise, resolve };
+}
+
+function assertGuardPendingIsHidden(harness) {
+  assert.equal(harness.elements.shell.hidden, true, "pending guard must keep the shell hidden");
+  assert.equal(harness.elements.shell.getAttribute("aria-hidden"), "true", "pending shell must stay outside the accessibility tree");
+  assert.equal(harness.elements.content.hidden, true, "pending guard must keep protected content hidden");
+  assert.equal(harness.elements.content.getAttribute("aria-hidden"), "true", "pending content must stay outside the accessibility tree");
+  assert.equal(harness.document.body.classList.contains("admin-auth-pending"), true);
+  assert.equal(harness.document.body.classList.contains("admin-authenticated"), false);
+  assert.equal(harness.elements.displayName.textContent, "");
+  assert.equal(harness.elements.role.textContent, "");
+  assert.equal(harness.elements.guard.hidden, false);
+  assert.match(harness.elements.guardMessage.textContent, /กำลังตรวจสอบสิทธิ์ผู้ดูแล/);
+  assert.equal(harness.elements.skip.hidden, true);
+  assert.equal(harness.elements.shell.contains(harness.elements.nav), true);
+  assert.equal(harness.elements.shell.contains(harness.elements.account), true);
+  assert.equal(harness.elements.shell.contains(harness.elements.logout), true);
+  assert.equal(harness.elements.shell.contains(harness.elements.publicLink), true);
+  assert.equal(harness.authCalls.authenticatedCallbacks, 0);
 }
 
 test("all protected pages declare the source guard and one semantic shared shell contract", () => {
@@ -246,6 +301,7 @@ test("all protected pages declare the source guard and one semantic shared shell
     assert.match(html, new RegExp(`<h1 id="page-title" data-admin-page-title>${heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</h1>`));
     assert.match(html, /<div class="admin-shell" data-admin-shell hidden aria-hidden="true">/);
     assert.match(html, /<aside[^>]+data-admin-sidebar[^>]+data-admin-drawer[^>]+hidden[^>]+aria-hidden="true"/);
+    assert.match(html, /<aside[^>]+data-admin-drawer[^>]+role="dialog"[^>]+aria-modal="true"[^>]+aria-label="[^"]+"/);
     assert.match(html, /<nav[^>]+data-admin-nav/);
     assert.match(html, /<section[^>]+data-admin-content[^>]+hidden[^>]+aria-hidden="true"/);
     assert.match(html, /<section[^>]+data-admin-guard[^>]+role="status"[^>]+aria-live="polite"/);
@@ -336,6 +392,21 @@ test("one account block occupies the desktop header and returns to the mobile dr
   assert.equal(mobile.elements.drawer.hidden, true);
 });
 
+test("mobile drawer exposes modal semantics while the desktop sidebar does not", async () => {
+  const mobile = makeHarness({ desktop: false });
+  await mobile.shell.init();
+  await mobile.elements.opener.dispatch("click");
+  assert.equal(mobile.elements.drawer.getAttribute("role"), "dialog");
+  assert.equal(mobile.elements.drawer.getAttribute("aria-modal"), "true");
+  assert.equal(mobile.elements.drawer.getAttribute("aria-label"), "แถบนำทางผู้ดูแล");
+
+  const desktop = makeHarness({ desktop: true });
+  await desktop.shell.init();
+  assert.equal(desktop.elements.drawer.hasAttribute("role"), false);
+  assert.equal(desktop.elements.drawer.hasAttribute("aria-modal"), false);
+  assert.equal(desktop.elements.drawer.getAttribute("aria-label"), "แถบนำทางผู้ดูแล");
+});
+
 test("unconfirmed guard keeps both shell and content hidden and retry is explicit and busy-safe", async () => {
   const harness = makeHarness({
     guardResults: [
@@ -358,6 +429,65 @@ test("unconfirmed guard keeps both shell and content hidden and retry is explici
   assert.equal(harness.elements.shell.hidden, false);
   assert.equal(harness.elements.retry.disabled, false);
   assert.equal(harness.elements.retry.getAttribute("aria-busy"), "false");
+});
+
+test("an unresolved authoritative guard keeps every authenticated shell surface hidden until success", async () => {
+  const guardDeferred = deferred();
+  const harness = makeHarness({ guardDeferred });
+  const initialization = harness.shell.init();
+  await Promise.resolve();
+
+  assertGuardPendingIsHidden(harness);
+
+  guardDeferred.resolve({ status: "authenticated", admin: { display_name: "ผู้ดูแลภายหลัง", role: "editor" } });
+  assert.equal((await initialization).status, "authenticated");
+  assert.equal(harness.authCalls.authenticatedCallbacks, 1);
+  assert.equal(harness.elements.shell.hidden, false);
+  assert.equal(harness.elements.content.hidden, false);
+  assert.equal(harness.elements.displayName.textContent, "ผู้ดูแลภายหลัง");
+  assert.equal(harness.elements.role.textContent, "editor");
+  assert.equal(harness.elements.guard.hidden, true);
+  assert.equal(harness.document.body.classList.contains("admin-authenticated"), true);
+});
+
+test("an unresolved authoritative guard followed by a transient result never reveals protected content", async () => {
+  const guardDeferred = deferred();
+  const harness = makeHarness({ guardDeferred });
+  const initialization = harness.shell.init();
+  await Promise.resolve();
+
+  assertGuardPendingIsHidden(harness);
+
+  guardDeferred.resolve({ status: "unconfirmed", code: "NETWORK_ERROR" });
+  assert.equal((await initialization).status, "unconfirmed");
+  assert.equal(harness.authCalls.authenticatedCallbacks, 0);
+  assert.equal(harness.authCalls.retryCallbacks, 1);
+  assert.equal(harness.elements.shell.hidden, true);
+  assert.equal(harness.elements.content.hidden, true);
+  assert.equal(harness.elements.retry.hidden, false);
+  assert.equal(harness.elements.login.hidden, false);
+});
+
+test("pending-state assertions reject an executable premature-reveal mutation", async () => {
+  const mutantSource = source.replace(
+    /showPending\(\);\r?\n    try \{/,
+    'showPending();\n    showAuthenticated({ admin: { display_name: "premature", role: "mutant" } });\n    try {'
+  );
+  assert.notEqual(mutantSource, source, "premature-reveal mutation must be installed");
+  const guardDeferred = deferred();
+  const harness = makeHarness({ guardDeferred, sourceOverride: mutantSource });
+  const initialization = harness.shell.init();
+  await Promise.resolve();
+
+  let pendingAssertionReached = false;
+  assert.throws(() => {
+    pendingAssertionReached = true;
+    assertGuardPendingIsHidden(harness);
+  }, /pending guard must keep the shell hidden/);
+  assert.equal(pendingAssertionReached, true);
+
+  guardDeferred.resolve({ status: "authenticated", admin: { display_name: "ภายหลัง", role: "editor" } });
+  await initialization;
 });
 
 test("mobile drawer synchronizes ARIA overlay scroll focus and traps Tab in both directions", async () => {
@@ -491,6 +621,28 @@ test("Admin CSS provides source hiding, desktop and mobile layouts, touch target
   assert.match(css, /@media\s*\(min-width:\s*900px\)/i);
   assert.match(css, /@media\s*\(prefers-reduced-motion:\s*reduce\)/i);
   assert.match(css, /prefers-reduced-motion[^}]+transition:\s*none\s*!important/is);
+});
+
+test("each required Admin shell control has its own applicable minimum target rule", () => {
+  assertMinimumTarget(css, ".admin-drawer-toggle", true);
+  assertMinimumTarget(css, ".admin-drawer-close", true);
+  assertMinimumTarget(css, ".admin-logout", true);
+  assertMinimumTarget(css, ".admin-nav__link", false);
+});
+
+test("drawer-close target assertions reject removal from the shared 44px sizing rule", () => {
+  const mutantCss = css.replace(
+    /\.admin-drawer-toggle,\s*\.admin-drawer-close(?=\s*\{)/,
+    ".admin-drawer-toggle"
+  );
+  assert.notEqual(mutantCss, css, "drawer-close sizing mutation must be installed");
+  assertMinimumTarget(mutantCss, ".admin-drawer-toggle", true);
+  assertMinimumTarget(mutantCss, ".admin-logout", true);
+  assertMinimumTarget(mutantCss, ".admin-nav__link", false);
+  assert.throws(
+    () => assertMinimumTarget(mutantCss, ".admin-drawer-close", true),
+    /\.admin-drawer-close must have an effective min-height of at least 44px/
+  );
 });
 
 test("Admin focus indicators use surface-specific high-contrast outlines", () => {
