@@ -11,23 +11,62 @@
   <link rel="stylesheet" href="../css/mobile.css">
   <link rel="stylesheet" href="../css/admin.css">
 </head>
-<body class="admin-body">
-  <header class="admin-header"><a class="brand" href="dashboard.html">Takhun Trip Admin</a></header>
-  <nav class="admin-nav" aria-label="เมนูผู้ดูแล">
-      <a href="dashboard.html">แดชบอร์ด</a>
-      <a href="places.html">สถานที่</a>
-      <a href="routes.html">เส้นทาง</a>
-      <a href="products.html">สินค้า</a>
-      <a href="events.html">กิจกรรม</a>
-      <a href="reviews.html">รีวิว</a>
-      <a href="gallery.html">แกลเลอรี</a>
-      <a href="settings.html">ตั้งค่า</a>
-    </nav>
-  <main class="admin-main">
-    <section class="placeholder" aria-labelledby="page-title">
-      <h1 id="page-title">จัดการแกลเลอรี</h1>
-      <p>หน้านี้อยู่ระหว่างการจัดเตรียม</p>
-    </section>
-  </main>
+<body class="admin-body admin-auth-pending" data-admin-page="gallery">
+  <a class="admin-skip-link" href="#admin-main" data-admin-skip hidden>ข้ามไปยังเนื้อหาหลัก</a>
+
+  <section class="admin-guard" data-admin-guard role="status" aria-live="polite" aria-atomic="true">
+    <p class="admin-guard__message" data-admin-guard-message>กำลังตรวจสอบสิทธิ์ผู้ดูแล กรุณารอสักครู่</p>
+    <div class="admin-guard__actions">
+      <button class="button admin-guard__retry" type="button" data-admin-retry hidden>ลองอีกครั้ง</button>
+      <a class="button admin-guard__login" href="login.html" data-admin-login-link hidden>กลับหน้าเข้าสู่ระบบ</a>
+    </div>
+  </section>
+
+  <div class="admin-shell" data-admin-shell hidden aria-hidden="true">
+    <header class="admin-shell__header" data-admin-header>
+      <button class="admin-drawer-toggle" type="button" data-admin-drawer-open aria-controls="admin-drawer" aria-expanded="false" aria-label="เปิดเมนูผู้ดูแล">เมนู</button>
+      <div class="admin-shell__title">
+        <p><a class="admin-shell__brand" href="dashboard.html">Takhun Trip Admin</a></p>
+        <h1 id="page-title" data-admin-page-title>จัดการแกลเลอรี</h1>
+      </div>
+      <div class="admin-shell__header-actions" data-admin-account-desktop></div>
+    </header>
+
+    <aside class="admin-shell__sidebar" id="admin-drawer" data-admin-sidebar data-admin-drawer role="dialog" aria-modal="true" hidden aria-hidden="true" aria-label="แถบนำทางผู้ดูแล" tabindex="-1">
+      <div class="admin-shell__sidebar-header">
+        <span class="admin-shell__sidebar-title">Takhun Trip Admin</span>
+        <button class="admin-drawer-close" type="button" data-admin-drawer-close aria-label="ปิดเมนูผู้ดูแล">ปิด</button>
+      </div>
+      <nav class="admin-nav" aria-label="เมนูผู้ดูแล" data-admin-nav></nav>
+      <div class="admin-shell__account-mobile" data-admin-account-mobile>
+        <div class="admin-shell__account" data-admin-account>
+          <div class="admin-identity" data-admin-identity>
+            <span class="admin-identity__name" data-admin-display-name></span>
+            <span class="admin-identity__role" data-admin-role></span>
+          </div>
+          <a class="admin-public-link" data-admin-public-link href="../index.html">เปิดเว็บไซต์</a>
+          <button class="admin-logout" type="button" data-admin-logout>ออกจากระบบ</button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="admin-shell__backdrop" data-admin-backdrop hidden></div>
+
+    <main class="admin-main" id="admin-main" data-admin-main tabindex="-1" aria-labelledby="page-title">
+      <section class="placeholder" data-admin-content hidden aria-hidden="true">
+        <p>หน้านี้อยู่ระหว่างการจัดเตรียม</p>
+      </section>
+    </main>
+  </div>
+
+  <script src="../js/config.js" defer></script>
+  <script src="js/admin-api.js" defer></script>
+  <script src="js/admin-auth.js" defer></script>
+  <script src="js/admin-shell.js" defer></script>
+  <script>
+    window.addEventListener("DOMContentLoaded", function () {
+      window.TakhunAdminShell.init();
+    });
+  </script>
 </body>
 </html>

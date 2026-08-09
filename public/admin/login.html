@@ -12,15 +12,204 @@
 </head>
 <body class="admin-body">
   <main class="login-shell">
-    <form class="login-card">
-      <h1>เข้าสู่ระบบผู้ดูแล</h1>
-      <label for="username">ชื่อผู้ใช้</label>
-      <input id="username" name="username" type="text" autocomplete="username">
-      <label for="password">รหัสผ่าน</label>
-      <input id="password" name="password" type="password" autocomplete="current-password">
-      <button class="button" type="submit" disabled>ระบบเข้าสู่ระบบอยู่ระหว่างการจัดเตรียม</button>
-      <a href="../index.html">กลับหน้าเว็บไซต์</a>
-    </form>
+    <section class="login-card" aria-labelledby="admin-login-title">
+      <h1 id="admin-login-title">เข้าสู่ระบบผู้ดูแล</h1>
+      <p class="login-intro">จัดการข้อมูล Takhun Trip ด้วยบัญชีผู้ดูแลของคุณ</p>
+      <p id="admin-login-status" class="login-status" role="status" aria-live="polite" aria-atomic="true">กำลังตรวจสอบสถานะการเข้าสู่ระบบ…</p>
+      <button id="admin-login-retry" class="button login-retry" type="button" hidden disabled>ลองตรวจสอบอีกครั้ง</button>
+      <form id="admin-login-form" class="login-form" hidden aria-hidden="true" aria-busy="false" novalidate>
+        <label for="admin-login-username">ชื่อผู้ใช้</label>
+        <input id="admin-login-username" name="username" type="text" autocomplete="username" required maxlength="64">
+        <label for="admin-login-password">รหัสผ่าน</label>
+        <input id="admin-login-password" type="password" name="password" autocomplete="current-password" required maxlength="256">
+        <button id="admin-login-submit" class="button login-submit" type="submit" disabled>เข้าสู่ระบบ</button>
+      </form>
+      <a class="login-back-link" href="../index.html">กลับหน้าเว็บไซต์</a>
+    </section>
   </main>
+  <script src="../js/config.js" defer></script>
+  <script src="js/admin-api.js" defer></script>
+  <script src="js/admin-auth.js" defer></script>
+  <script data-admin-login-script>
+  (function (global) {
+    "use strict";
+
+    var USERNAME_MAX = 64;
+    var PASSWORD_CODE_POINT_MAX = 128;
+    var PASSWORD_BYTE_MAX = 256;
+    var PASSWORD_RAW_MAX = 256;
+    var RATE_LIMIT_MS = 60000;
+
+    global.addEventListener("DOMContentLoaded", function () {
+      var form = document.getElementById("admin-login-form");
+      var username = document.getElementById("admin-login-username");
+      var password = document.getElementById("admin-login-password");
+      var submit = document.getElementById("admin-login-submit");
+      var status = document.getElementById("admin-login-status");
+      var retry = document.getElementById("admin-login-retry");
+      var auth = global.TakhunAdminAuth;
+      var rawReturn = new URL(global.location.href).searchParams.get("return");
+      var returnPath = auth.safeReturnPath(rawReturn);
+      var loginAvailable = false;
+      var startupBusy = false;
+      var loginBusy = false;
+      var cooldownActive = false;
+      var cooldownTimer = null;
+
+      function setStatus(message, kind) {
+        status.textContent = message;
+        status.setAttribute("data-state", kind || "info");
+      }
+
+      function passwordShape(value) {
+        if (!value || value.length > PASSWORD_RAW_MAX) return null;
+        var points = 0;
+        var bytes = 0;
+        for (var index = 0; index < value.length; index += 1) {
+          var unit = value.charCodeAt(index);
+          var codePoint = unit;
+          if (unit >= 0xD800 && unit <= 0xDBFF) {
+            if (index + 1 >= value.length) return null;
+            var low = value.charCodeAt(index + 1);
+            if (low < 0xDC00 || low > 0xDFFF) return null;
+            codePoint = 0x10000 + ((unit - 0xD800) * 0x400) + (low - 0xDC00);
+            index += 1;
+          } else if (unit >= 0xDC00 && unit <= 0xDFFF) {
+            return null;
+          }
+          points += 1;
+          bytes += codePoint <= 0x7F ? 1 : codePoint <= 0x7FF ? 2 : codePoint <= 0xFFFF ? 3 : 4;
+          if (points > PASSWORD_CODE_POINT_MAX || bytes > PASSWORD_BYTE_MAX) return null;
+        }
+        return { points: points, bytes: bytes };
+      }
+
+      function usernameValid(value) {
+        return typeof value === "string" && value.length > 0 && value.length <= USERNAME_MAX;
+      }
+
+      function fieldsValid() {
+        return usernameValid(username.value) && passwordShape(password.value) !== null;
+      }
+
+      function updateSubmit() {
+        submit.disabled = !loginAvailable || startupBusy || loginBusy || cooldownActive || !fieldsValid();
+      }
+
+      function setLoginBusy(busy) {
+        loginBusy = busy;
+        form.setAttribute("aria-busy", busy ? "true" : "false");
+        username.disabled = busy;
+        password.disabled = busy;
+        updateSubmit();
+      }
+
+      function revealLogin() {
+        loginAvailable = true;
+        form.hidden = false;
+        form.setAttribute("aria-hidden", "false");
+        retry.hidden = true;
+        retry.disabled = true;
+        setStatus("กรอกชื่อผู้ใช้และรหัสผ่านเพื่อเข้าสู่ระบบ", "ready");
+        updateSubmit();
+      }
+
+      function offerRetry() {
+        loginAvailable = false;
+        form.hidden = true;
+        form.setAttribute("aria-hidden", "true");
+        retry.hidden = false;
+        retry.disabled = false;
+        setStatus("ยังไม่สามารถตรวจสอบสถานะได้ กรุณาลองอีกครั้ง", "error");
+        updateSubmit();
+      }
+
+      async function checkSession() {
+        if (startupBusy) return;
+        startupBusy = true;
+        retry.disabled = true;
+        setStatus("กำลังตรวจสอบสถานะการเข้าสู่ระบบ…", "loading");
+        updateSubmit();
+        try {
+          await auth.redirectAuthenticatedLogin({
+            returnPath: returnPath,
+            onLoginAvailable: revealLogin,
+            onRetry: offerRetry
+          });
+        } catch (_error) {
+          offerRetry();
+        } finally {
+          startupBusy = false;
+          updateSubmit();
+        }
+      }
+
+      function beginCooldown() {
+        cooldownActive = true;
+        if (cooldownTimer !== null) global.clearTimeout(cooldownTimer);
+        cooldownTimer = global.setTimeout(function () {
+          cooldownTimer = null;
+          cooldownActive = false;
+          setStatus("ลองเข้าสู่ระบบได้อีกครั้ง", "ready");
+          updateSubmit();
+        }, RATE_LIMIT_MS);
+        updateSubmit();
+      }
+
+      async function submitLogin(event) {
+        event.preventDefault();
+        if (loginBusy || startupBusy || cooldownActive || !loginAvailable) return;
+        if (!usernameValid(username.value)) {
+          password.value = "";
+          setStatus("กรุณากรอกชื่อผู้ใช้ให้ถูกต้อง", "error");
+          username.focus();
+          updateSubmit();
+          return;
+        }
+        if (passwordShape(password.value) === null) {
+          password.value = "";
+          setStatus("กรุณากรอกรหัสผ่านให้ถูกต้อง", "error");
+          password.focus();
+          updateSubmit();
+          return;
+        }
+        var enteredUsername = username.value;
+        var enteredPassword = password.value;
+        var focusTarget = null;
+        setLoginBusy(true);
+        setStatus("กำลังเข้าสู่ระบบ…", "loading");
+        try {
+          var result = await auth.login(enteredUsername, enteredPassword, returnPath);
+          if (!result || result.status !== "error") return;
+          if (result.code === "UNAUTHORIZED") {
+            setStatus("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง", "error");
+            focusTarget = username;
+          } else if (result.code === "RATE_LIMITED") {
+            setStatus("มีการลองเข้าสู่ระบบหลายครั้ง กรุณารอแล้วลองใหม่อีกครั้ง", "error");
+            beginCooldown();
+            focusTarget = password;
+          } else {
+            setStatus("ไม่สามารถเข้าสู่ระบบได้ กรุณาลองอีกครั้ง", "error");
+            focusTarget = password;
+          }
+        } catch (_error) {
+          setStatus("ไม่สามารถเข้าสู่ระบบได้ กรุณาลองอีกครั้ง", "error");
+          focusTarget = password;
+        } finally {
+          enteredPassword = "";
+          password.value = "";
+          setLoginBusy(false);
+          if (focusTarget) focusTarget.focus();
+        }
+      }
+
+      username.addEventListener("input", updateSubmit);
+      password.addEventListener("input", updateSubmit);
+      form.addEventListener("submit", submitLogin);
+      retry.addEventListener("click", checkSession);
+      checkSession();
+    });
+  }(window));
+  </script>
 </body>
 </html>

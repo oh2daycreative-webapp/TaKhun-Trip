@@ -989,3 +989,100 @@ Admin แก้ข้อมูลได้
 ```
 
 เมื่อผ่าน checklist นี้แล้ว จึงค่อยถือว่าแต่ละส่วนพร้อมสำหรับใช้งานจริงหรือส่งต่อให้ Codex ทำขั้นถัดไป
+
+---
+
+## 24. Milestone 6 automated local verification
+
+Task 11 is complete only when all local checks pass without contacting external services:
+
+- CryptoService primitives and independent vectors: `node scripts/test-crypto-service.js`
+- SheetService header-safe reads/writes: `node scripts/test-sheet-service.js`
+- Admin schema/docs contract: `node scripts/test-admin-schema.js`
+- AuthService login, sessions, random state, setup, benchmark, bootstrap, and rate limits: `node scripts/test-auth-service.js`
+- Router and static Apps Script contract: `node scripts/test-apps-script.js`
+- Admin API transport: `node scripts/test-admin-api.js`
+- browser auth guard, safe return, logout, and Admin login: `node scripts/test-admin-auth.js`
+- Admin shell/accessibility: `node scripts/test-admin-shell.js`
+- public regressions, including ReviewService submission compatibility: `npm test` and `powershell -ExecutionPolicy Bypass -File scripts/test.ps1`
+- production build: `npm run build`
+- JavaScript syntax for every tracked `.js` file with `node --check`
+- secret scan for committed credentials, private keys, and secret-bearing logs
+- changed-file allowlist against the approved Milestone 6 responsibility map
+- whitespace/error-marker validation with `git diff --check`
+
+These are deterministic local checks. They do not replace the future real Apps Script benchmark or authorize any remote setup, credential, Sheet, deployment, or staging action.
+
+---
+
+## 25. Future human-only Milestone 6 gates
+
+**DO NOT PERFORM THESE MANUAL GATES UNTIL TASKS 1-11 ARE REVIEWED AND COMPLETE.** The gates are sequential; a human records each result before continuing.
+
+### Gate A - Reviewed code and tests complete
+
+A human confirms reviewed code, focused tests, full regression, build, syntax, security scans, and documentation are complete and approved.
+
+### Gate B - Install reviewed backend in non-production
+
+A human installs the reviewed backend into a **NON-PRODUCTION Apps Script environment**. Do not begin in production.
+
+### Gate C - Create only the permanent random key
+
+A human manually creates only `ADMIN_AUTH_RANDOM_KEY` using 32 cryptographically random bytes encoded as 43-character unpadded base64url. The value must not be printed, logged, copied into source, or included in evidence. At this point the human must not create `ADMIN_AUTH_RANDOM_COUNTER`, `ADMIN_AUTH_STATE_VERSION`, `ADMIN_BOOTSTRAP_ENABLED`, or any bootstrap credential properties.
+
+### Gate D - Run setup
+
+A human runs `setupAdminAuthSchema()` in the editor. Verify the random key is valid without printing it, state version is `1`, the counter is initialized and valid, required auth headers are unique, and no credentials or Admin account were created. A partial or malformed established state stops the gate; do not manually repair code-owned state.
+
+### Gate E - Run the real PBKDF2 benchmark
+
+A human runs `benchmarkAdminPbkdf2()` in the real non-production Apps Script V8 environment. Require one warm-up plus five measured derivations, exactly 120000 iterations, all correctness checks passing, median <= 3000 ms, max <= 5000 ms, and `passed=true`.
+
+If ANY benchmark requirement fails: **STOP. NO bootstrap. NO manual iteration reduction.** Return to code/performance review. Local Node timing is not approval for this gate.
+
+### Gate F - Set temporary bootstrap properties
+
+Only after the benchmark is a PASS, a human sets temporary `ADMIN_BOOTSTRAP_ENABLED=true`, `ADMIN_BOOTSTRAP_USERNAME`, `ADMIN_BOOTSTRAP_DISPLAY_NAME`, optional `ADMIN_BOOTSTRAP_EMAIL`, and `ADMIN_BOOTSTRAP_PASSWORD`. Do not calculate or paste hash, salt, or iteration fields.
+
+### Gate G - Run bootstrap once
+
+A human runs `bootstrapFirstAdmin()` once in the editor. There is no automated retry. If it does not report success, follow the failure procedure in section 26.
+
+### Gate H - Verify bootstrap state
+
+A human verifies exactly one active `super_admin`; its PBKDF2 algorithm, salt, hash, and iteration fields are valid; no plaintext password exists in Sheets, logs, source, or output; all temporary credential properties are removed; `ADMIN_BOOTSTRAP_ENABLED=false`; no session row was created; and random state remains valid. Do not display secret values while verifying categories/state.
+
+### Gate I - Deploy the backend
+
+Only after Gate H passes, a human deploys and versions the reviewed Apps Script backend in the approved environment.
+
+### Gate J - Verify backend compatibility
+
+A human verifies unauthenticated `adminValidateSession` returns safe `UNAUTHORIZED` JSON with no secret details, and verifies the existing public GET API remains healthy.
+
+### Gate K - Deploy the frontend
+
+Only after the reviewed backend verification passes, a human deploys the reviewed static frontend.
+
+### Gate L - Manual desktop and mobile QA
+
+A human performs desktop and mobile login, protected-page session validation, safe navigation/return behavior, timeout/rate feedback, and logout QA. Verify logout revocation makes the old token unauthorized and the responsive shell, keyboard focus, drawer, and protected 404 remain usable.
+
+---
+
+## 26. Bootstrap failure recovery procedure
+
+If `bootstrapFirstAdmin()` throws, returns failure, or cleanup cannot be verified: **STOP.** Do NOT blindly rerun `bootstrapFirstAdmin()`, do NOT deploy, do not assume there is no partial state, and do not manually alter a generated hash, salt, or iteration count.
+
+A human must inspect only non-secret state/categories: whether an Admin row exists, whether temporary bootstrap properties remain, whether the enabled flag remains true, and whether random state, counter, and version remain valid. Do not expose secret material in output or evidence. Inspection is limited to presence and validity categories; all underlying values remain undisclosed.
+
+During controlled recovery, manually delete any remaining `ADMIN_BOOTSTRAP_USERNAME`, `ADMIN_BOOTSTRAP_DISPLAY_NAME`, `ADMIN_BOOTSTRAP_EMAIL`, and `ADMIN_BOOTSTRAP_PASSWORD`. Set `ADMIN_BOOTSTRAP_ENABLED=false` if it is still true. Never edit generated `password_hash`, `password_salt`, or `password_iterations`; never reset or roll back the auth counter. Return to security/code review before any rerun is authorized.
+
+---
+
+## 27. Agent operation boundary
+
+During Tasks 1-11, an agent must not access Apps Script remotely, open or edit a remote Apps Script project, read or modify Google Sheets, read or modify Script Properties, create or read credentials, create `ADMIN_AUTH_RANDOM_KEY`, run `setupAdminAuthSchema()`, run `benchmarkAdminPbkdf2()`, run `bootstrapFirstAdmin()`, deploy backend or frontend, send staging requests, push, or create a pull request.
+
+Task 12 and Gates A-L are **HUMAN-ONLY** operations after Tasks 1-11 implementation and review are approved. Documentation of a future operation is not authorization to perform it.

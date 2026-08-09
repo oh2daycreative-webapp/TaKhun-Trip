@@ -27,6 +27,30 @@
 
 ระบบ Admin / CMS รุ่นแรกต้องเน้น **ใช้งานจริง เรียบง่าย ไม่ซับซ้อนเกินไป**
 
+## 2A. Milestone 6 implemented Admin foundation
+
+Milestone 6 implements the authentication foundation and shared protected-page shell only. There is no public Admin registration and no default credentials. The first Admin is provisioned manually through the editor-only bootstrap after setup and benchmark gates pass. The Milestone 6 interface is a Thai-only Admin UI; an Admin language switch is not implemented.
+
+The browser stores authentication in `sessionStorage` only, under `TAKHUN_ADMIN_SESSION`, with exactly this projection and no username or email:
+
+```json
+{
+  "admin_id": "ADM-...",
+  "display_name": "ผู้ดูแลระบบ",
+  "role": "super_admin",
+  "token": "<raw bearer token>",
+  "expires_at": "2026-08-08T12:30:00.000Z"
+}
+```
+
+Sessions have an absolute 8-hour expiry with no sliding renewal. Browser state is never authentication authority: every protected page performs server-authoritative validation. Protected content remains hidden until server validation succeeds. Invalid, missing, expired, revoked, malformed, or inactive-linked sessions are cleared and redirected to login.
+
+The protected pages are `dashboard.html`, `places.html`, `routes.html`, `products.html`, `events.html`, `reviews.html`, `gallery.html`, `settings.html`, and `404.html`; the Admin 404 remains protected. They share one responsive shell: desktop uses a sidebar and top identity/actions area, while mobile uses a modal drawer. The drawer includes a focus trap, closes with Escape or backdrop activation, and provides focus restoration to its trigger while exposing correct modal state. Controls have visible focus treatment and reduced motion is respected. Identity display uses only safe `display_name` and `role` fields.
+
+Login uses bounded Thai feedback and a 60-second client cooldown for `RATE_LIMITED`. Return navigation uses a safe return allowlist containing only the protected page filenames. Logout makes the bounded backend call; only the transient network failure path gets one bounded retry, and local session clearing plus redirect occur in `finally` even when the request fails.
+
+Milestone 6 non-goals are Dashboard metrics, CRUD, moderation implementation, upload CMS, role-management UI, Admin language switch, and production deployment during Tasks 1-11. The remainder of this document preserves future Admin CMS direction, which is not implemented by Milestone 6.
+
 ### 2.1 Must Have
 
 ต้องมีในรุ่นแรก:
@@ -245,7 +269,8 @@ public/admin/login.html
 → Validate form
 → เรียก API adminLogin
 → ถ้าสำเร็จ:
-   → บันทึก session/token ใน Local Storage
+   → ลดรูป response เป็นห้า browser-safe fields แล้วบันทึกใน sessionStorage เท่านั้น
+   → ตรวจ server-authoritative session ก่อนเปิด protected content
    → redirect ไป admin/dashboard.html
 → ถ้าไม่สำเร็จ:
    → แสดง error message
@@ -265,13 +290,13 @@ TAKHUN_ADMIN_SESSION
   "display_name": "ผู้ดูแลระบบ",
   "role": "super_admin",
   "token": "session-token",
-  "expires_at": "2026-07-11 18:00:00"
+  "expires_at": "2026-07-11T11:00:00.000Z"
 }
 ```
 
 ### 7.6 Protected Page Rule
 
-ทุกหน้าใน `/admin/` ยกเว้น `login.html` ต้องตรวจ session ก่อนแสดงผล
+ทุกหน้าใน `/admin/` ยกเว้น `login.html` ต้องซ่อน protected content และตรวจ session กับ server ก่อนแสดงผล; browser storage อย่างเดียวไม่ใช่ authority
 
 ถ้าไม่มี session:
 

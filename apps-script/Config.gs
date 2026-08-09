@@ -1,3 +1,62 @@
+var ADMIN_SHEET_NAME_ = "admins";
+var ADMIN_SESSION_SHEET_NAME_ = "admin_sessions";
+
+var ADMIN_REQUIRED_HEADERS_ = [
+  "admin_id",
+  "username",
+  "display_name",
+  "email",
+  "password_algorithm",
+  "password_hash",
+  "password_salt",
+  "password_iterations",
+  "role",
+  "status",
+  "last_login_at",
+  "created_at",
+  "updated_at"
+];
+
+var ADMIN_SESSION_REQUIRED_HEADERS_ = [
+  "session_id",
+  "admin_id",
+  "token_hash",
+  "created_at",
+  "expires_at",
+  "revoked_at",
+  "last_seen_at"
+];
+
+var ADMIN_ALLOWED_ROLES_ = ["super_admin", "editor", "reviewer", "viewer"];
+var ADMIN_ALLOWED_STATUSES_ = ["active", "inactive", "deleted"];
+var ADMIN_PASSWORD_ALGORITHM_ = "pbkdf2_sha256";
+var ADMIN_STORED_ITERATIONS_MIN_ = 100000;
+var ADMIN_STORED_ITERATIONS_MAX_ = 1000000;
+var ADMIN_PASSWORD_SALT_BYTES_ = 16;
+var ADMIN_PASSWORD_HASH_BYTES_ = 32;
+var ADMIN_SESSION_TOKEN_BYTES_ = 32;
+var ADMIN_SESSION_LIFETIME_MS_ = 28800000;
+var ADMIN_USERNAME_PATTERN_ = "^[a-z0-9][a-z0-9._-]{2,63}$";
+var ADMIN_USERNAME_MIN_CHARACTERS_ = 3;
+var ADMIN_USERNAME_MAX_CHARACTERS_ = 64;
+var ADMIN_DISPLAY_NAME_MIN_CODE_POINTS_ = 1;
+var ADMIN_DISPLAY_NAME_MAX_CODE_POINTS_ = 100;
+var ADMIN_EMAIL_MAX_CHARACTERS_ = 254;
+var ADMIN_PASSWORD_PROVISIONING_MIN_CODE_POINTS_ = 14;
+var ADMIN_PASSWORD_MAX_CODE_POINTS_ = 128;
+var ADMIN_PASSWORD_MAX_UTF8_BYTES_ = 256;
+
+var ADMIN_AUTH_RANDOM_KEY_PROPERTY_ = "ADMIN_AUTH_RANDOM_KEY";
+var ADMIN_AUTH_RANDOM_COUNTER_PROPERTY_ = "ADMIN_AUTH_RANDOM_COUNTER";
+var ADMIN_AUTH_STATE_VERSION_PROPERTY_ = "ADMIN_AUTH_STATE_VERSION";
+var ADMIN_AUTH_STATE_VERSION_VALUE_ = 1;
+
+var ADMIN_BOOTSTRAP_ENABLED_PROPERTY_ = "ADMIN_BOOTSTRAP_ENABLED";
+var ADMIN_BOOTSTRAP_USERNAME_PROPERTY_ = "ADMIN_BOOTSTRAP_USERNAME";
+var ADMIN_BOOTSTRAP_DISPLAY_NAME_PROPERTY_ = "ADMIN_BOOTSTRAP_DISPLAY_NAME";
+var ADMIN_BOOTSTRAP_EMAIL_PROPERTY_ = "ADMIN_BOOTSTRAP_EMAIL";
+var ADMIN_BOOTSTRAP_PASSWORD_PROPERTY_ = "ADMIN_BOOTSTRAP_PASSWORD";
+
 function getAppConfig_() {
   var properties = PropertiesService.getScriptProperties();
 

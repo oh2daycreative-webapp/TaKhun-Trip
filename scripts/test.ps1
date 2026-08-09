@@ -46,6 +46,9 @@ $required = @(
   "public/js/search.js",
   "public/js/gallery.js",
   "public/js/favorites.js",
+  "public/admin/js/admin-api.js",
+  "public/admin/js/admin-auth.js",
+  "public/admin/js/admin-shell.js",
   "public/favicon.svg",
   "public/assets/media/placeholders/hero.svg",
   "public/assets/media/placeholders/cover.svg",
@@ -54,6 +57,8 @@ $required = @(
   "public/assets/media/manifest/media-manifest.json",
   "apps-script/Code.gs",
   "apps-script/Config.gs",
+  "apps-script/CryptoService.gs",
+  "apps-script/AuthService.gs",
   "apps-script/Router.gs",
   "apps-script/ApiResponse.gs",
   "apps-script/SheetService.gs",
@@ -140,6 +145,20 @@ if ($LASTEXITCODE -ne 0) { throw "Public Reviews behavior verification failed." 
 if ($LASTEXITCODE -ne 0) { throw "i18n behavior verification failed." }
 & node (Join-Path $PSScriptRoot "test-api.js")
 if ($LASTEXITCODE -ne 0) { throw "Public API client behavior verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-api.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin API transport verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-auth.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin browser auth verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-shell.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin shell verification failed." }
+& node (Join-Path $PSScriptRoot "test-crypto-service.js")
+if ($LASTEXITCODE -ne 0) { throw "CryptoService verification failed." }
+& node (Join-Path $PSScriptRoot "test-auth-service.js")
+if ($LASTEXITCODE -ne 0) { throw "AuthService verification failed." }
+& node (Join-Path $PSScriptRoot "test-sheet-service.js")
+if ($LASTEXITCODE -ne 0) { throw "SheetService verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-schema.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin auth schema verification failed." }
 & node (Join-Path $PSScriptRoot "test-settings-service.js")
 if ($LASTEXITCODE -ne 0) { throw "SettingsService verification failed." }
 & node (Join-Path $PSScriptRoot "test-category-service.js")

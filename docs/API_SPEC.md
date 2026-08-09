@@ -67,9 +67,9 @@ Content-Type: application/json; charset=utf-8
 
 1. ทุก response ต้องมีรูปแบบเดียวกัน
 2. ทุก request ต้องมี `action`
-3. ทุก POST ต้องมี `payload`
+3. POST ใช้ body shape ตาม action: data submissions ใช้ `payload`; Admin session validation/logout ใช้ top-level `token`
 4. Public API อ่านข้อมูลได้โดยไม่ต้อง login
-5. Admin API ต้องตรวจ session/token
+5. Protected Admin actions ต้องตรวจ authoritative session token except `adminLogin`
 6. ห้ามให้หน้า Public เห็นข้อมูล `hidden`, `draft`, `deleted`
 7. รีวิวใหม่ต้องเข้าสถานะ `pending`
 8. ต้อง validate ข้อมูลก่อนบันทึก
@@ -144,6 +144,7 @@ Content-Type: application/json; charset=utf-8
 | `NOT_FOUND` | ไม่พบข้อมูล |
 | `UNAUTHORIZED` | ยังไม่ได้เข้าสู่ระบบ |
 | `FORBIDDEN` | ไม่มีสิทธิ์ทำรายการ |
+| `RATE_LIMITED` | มีคำขอ authentication มากเกินไป ให้ลองใหม่ภายหลัง |
 | `DUPLICATE_ID` | id ซ้ำ |
 | `SAVE_FAILED` | บันทึกข้อมูลไม่สำเร็จ |
 | `DELETE_FAILED` | ลบข้อมูลไม่สำเร็จ |
@@ -179,6 +180,8 @@ getSettings
 
 ```text
 adminLogin
+adminValidateSession
+adminLogout
 createPlace
 updatePlace
 deletePlace
@@ -1122,13 +1125,27 @@ Searchable fields ต้องมาจาก public builder projection ที�
 
 ## 7. Admin API
 
-Admin API ต้องตรวจสอบ session/token ทุกครั้ง ยกเว้น `adminLogin`
+Milestone 6 เพิ่มเฉพาะ `adminLogin`, `adminValidateSession` และ `adminLogout` เป็น Admin auth actions ทั้งสามเป็น POST only และรับ credential/token ผ่าน JSON POST body only. GET never accepts Admin tokens or Admin actions; this milestone defines no token in query/URL, no Authorization header contract และ no cookie auth token
+
+`admin_sessions` เป็น authoritative source ทุก protected request. Raw token อยู่ได้เฉพาะ successful login response และ browser `sessionStorage`; server เก็บ SHA-256 token hash เท่านั้น
+
+Error contract สำหรับ Admin auth:
+
+- `VALIDATION_ERROR`: malformed non-credential request shape หรือ malformed logout token
+- `UNAUTHORIZED`: credential/session mismatch ทุกแบบ
+- `RATE_LIMITED`: authentication attempt budget เกินกำหนด
+- `SERVER_ERROR`: configuration, schema, lock, crypto หรือ unexpected failure
+- `FORBIDDEN`: reserved for future authorized-role checks หลัง session ถูกต้องเท่านั้น ไม่ใช้กับ login mismatch
+
+`unknown username`, `wrong password`, `inactive Admin`, `deleted Admin`, `malformed stored credential state` และ `duplicate matching username` ต้องใช้ same generic `UNAUTHORIZED` with no account-existence detail หรือ internal verification detail
+
+ไม่มี registration endpoint และ setup/bootstrap/benchmark functions ไม่ใช่ HTTP actions. Dashboard/CRUD sections หลัง auth contracts เป็น future API design และไม่ได้ถูกเพิ่มใน Router โดย Milestone 6
 
 ---
 
 ## 7.1 `adminLogin`
 
-ใช้เข้าสู่ระบบ Admin
+ใช้เข้าสู่ระบบ Admin ด้วย username-only identifier ผ่าน POST only
 
 ### Request
 
@@ -1136,8 +1153,8 @@ Admin API ต้องตรวจสอบ session/token ทุกครั้�
 {
   "action": "adminLogin",
   "payload": {
-    "username": "admin",
-    "password": "password"
+    "username": "<username>",
+    "password": "<password>"
   }
 }
 ```
@@ -1148,11 +1165,14 @@ Admin API ต้องตรวจสอบ session/token ทุกครั้�
 {
   "ok": true,
   "data": {
-    "admin_id": "ADM-001",
-    "display_name": "ผู้ดูแลระบบ",
-    "role": "super_admin",
-    "token": "session-token",
-    "expires_at": "2026-07-11 18:00:00"
+    "admin": {
+      "admin_id": "ADM-123e4567-e89b-12d3-a456-426614174000",
+      "username": "operator",
+      "display_name": "ผู้ดูแลระบบ",
+      "role": "super_admin"
+    },
+    "token": "<raw-token-returned-once>",
+    "expires_at": "2026-08-08T12:30:00.000Z"
   },
   "message": "เข้าสู่ระบบสำเร็จ"
 }
@@ -1172,24 +1192,24 @@ Admin API ต้องตรวจสอบ session/token ทุกครั้�
 
 ### Rules
 
-- ตรวจ `username`
-- ตรวจ password กับ `password_hash`
-- Admin ต้องมี `status = active`
-- บันทึก `last_login_at`
-- สร้าง session/token ที่มีวันหมดอายุ
+- canonicalize username ด้วย trim/lowercase; `email` ไม่ใช่ login identifier
+- password ใช้ตามที่กรอกโดยไม่ normalize หรือ case-fold และตรวจเพดาน code point/UTF-8 ก่อน hash
+- raw token ออกเฉพาะ successful response หลัง complete session row ถูก append สำเร็จ
+- `admin` เป็น safe projection exactly `admin_id`, `username`, `display_name`, `role`; ห้าม expose `email`, `status`, `password_algorithm`, `password_hash`, `password_salt`, `password_iterations`
+- expiry เป็น immutable `created_at + 28,800,000` ms
 
 ---
 
 ## 7.2 `adminLogout`
 
-ใช้ logout
+ใช้ revoke server session ผ่าน POST only
 
 ### Request
 
 ```json
 {
   "action": "adminLogout",
-  "token": "session-token"
+  "token": "<43-character-base64url-token>"
 }
 ```
 
@@ -1202,6 +1222,98 @@ Admin API ต้องตรวจสอบ session/token ทุกครั้�
   "message": "ออกจากระบบแล้ว"
 }
 ```
+
+Validly shaped repeated logout ต้อง safe และ idempotent: session ที่ revoked/expired/unknown แล้วตอบ success แบบเดียวกันเพื่อไม่สร้าง token-validity oracle
+
+The server hashes the submitted raw token and looks up the matching session row. The matching session row remains in `admin_sessions`: logout sets `revoked_at`, does not delete the row, and does not clear `token_hash`. It also does not remove `session_id`, `admin_id`, `created_at`, `expires_at`, or `last_seen_at`. Repeated logout for an already revoked, expired, or absent well-formed token remains safe and idempotent.
+
+Expired and revoked row retention is audit behavior, not authorization behavior. Authorization rejects revoked and expired rows. `token_hash` is never exposed to the client.
+
+---
+
+## 7.2A `adminValidateSession`
+
+ตรวจ raw token กับ authoritative `admin_sessions` ทุกครั้งและไม่เชื่อ identity/role จาก browser
+
+### Request
+
+```json
+{
+  "action": "adminValidateSession",
+  "token": "<43-character-base64url-token>"
+}
+```
+
+### Response
+
+```json
+{
+  "ok": true,
+  "data": {
+    "admin": {
+      "admin_id": "ADM-123e4567-e89b-12d3-a456-426614174000",
+      "username": "operator",
+      "display_name": "ผู้ดูแลระบบ",
+      "role": "super_admin"
+    },
+    "expires_at": "2026-08-08T12:30:00.000Z"
+  },
+  "message": "success"
+}
+```
+
+Response คืน original `expires_at`; there is no renewed expiry, sliding renewal หรือ `last_seen_at` update ใน Milestone 6
+
+---
+
+## 7A. Milestone 6 transport and Router contract
+
+Exact POST action allowlist:
+
+```text
+submitReview
+adminLogin
+adminValidateSession
+adminLogout
+```
+
+`submitReview` retains its existing public POST behavior. The three Admin authentication actions are POST-only and accept credentials or bearer tokens in the POST body only. The browser sends JSON using `text/plain;charset=utf-8`, applies one 12,000 ms timeout, and performs no automatic transport retry. Authentication uses no cookies, no Authorization header, and no query token.
+
+The three request shapes are exact:
+
+```json
+{
+  "action": "adminLogin",
+  "payload": {
+    "username": "...",
+    "password": "..."
+  }
+}
+```
+
+```json
+{
+  "action": "adminValidateSession",
+  "token": "..."
+}
+```
+
+```json
+{
+  "action": "adminLogout",
+  "token": "..."
+}
+```
+
+Successful login and validation return the backend safe Admin projection (`admin_id`, `username`, `display_name`, and `role`) plus the immutable `expires_at`; login additionally returns the one-time raw `token`. The browser deliberately does not persist `username`: `TAKHUN_ADMIN_SESSION` contains exactly `admin_id`, `display_name`, `role`, `token`, and `expires_at`. Password fields, email, token hashes, and session identifiers are never browser response or storage fields. Logout is idempotent and safe for valid, revoked, expired, or absent sessions, and it never returns `token_hash`.
+
+The response envelope remains `{ "ok": true, "data": ... }` or `{ "ok": false, "error": { "code": "...", "message": "..." } }`. Documented backend categories are `VALIDATION_ERROR`, `UNAUTHORIZED`, `RATE_LIMITED`, `SERVER_ERROR`, and `FORBIDDEN`. The browser normalizes an unknown backend code to `SERVER_ERROR`; transport failures use `NETWORK_ERROR`, `TIMEOUT`, `HTTP_ERROR`, or `MALFORMED_RESPONSE` without leaking response bodies or secrets. Existing public GET behavior remains unchanged.
+
+All protected authorization is server-authoritative on every call. Session expiry is an absolute eight-hour deadline: validation does not extend `expires_at`, update `last_seen_at`, or write either auth Sheet.
+
+## 7B. Future Admin CMS API direction
+
+Sections 7.3 through 7.29 describe future Admin CMS direction. They are not Router actions or implemented CRUD/moderation features in Milestone 6.
 
 ---
 
@@ -2074,34 +2186,49 @@ GET ?action=getTripTemplates&duration_type=one_day&style=nature&lang=th
 
 ## 11. Authentication and Session
 
-### 11.1 Token
+### 11.1 Browser token storage
 
-หลัง Login สำเร็จ ระบบควรคืน `token`
-
-Frontend เก็บไว้ใน Local Storage หรือ Session Storage:
-
-```text
-TAKHUN_ADMIN_SESSION
-```
-
-### 11.2 Token Payload Example
+หลัง login สำเร็จ raw token อยู่เฉพาะ response และ `sessionStorage` key `TAKHUN_ADMIN_SESSION`; ห้ามใช้ local storage, cookie หรือ URL/query. Stored object มี exactly:
 
 ```json
 {
-  "admin_id": "ADM-001",
+  "admin_id": "ADM-123e4567-e89b-12d3-a456-426614174000",
   "display_name": "ผู้ดูแลระบบ",
   "role": "super_admin",
-  "token": "session-token",
-  "expires_at": "2026-07-11 18:00:00"
+  "token": "<43-character-base64url-token>",
+  "expires_at": "2026-08-08T12:30:00.000Z"
 }
 ```
 
-### 11.3 Token Validation Rules
+### 11.2 Session validation rules
 
-- ทุก Admin API ต้องส่ง `token`
-- ถ้า token ไม่มี ให้ส่ง `UNAUTHORIZED`
-- ถ้า token หมดอายุ ให้ส่ง `UNAUTHORIZED`
-- ถ้า role ไม่มีสิทธิ์ ให้ส่ง `FORBIDDEN`
+- raw token เป็น 32 bytes / 43-character unpadded base64url; server เก็บเฉพาะ SHA-256 hash
+- `admin_sessions` เป็น authoritative ทุก protected request
+- lifetime เท่ากับ `ADMIN_SESSION_LIFETIME_MS_ = 28800000`: absolute 8 hours, exact expiry instant ไม่ valid
+- `expires_at` immutable, ไม่มี sliding renewal และ `last_seen_at` ไม่ต่ออายุ
+- auth timestamps เป็น strict canonical RFC 3339 UTC ไม่ใช้ local Asia/Bangkok display timestamps
+- invalid/expired/revoked/malformed session หรือ linked Admin ที่ไม่ active ตอบ generic `UNAUTHORIZED`
+
+### 11.3 Bootstrap boundary
+
+`setupAdminAuthSchema()`, `benchmarkAdminPbkdf2()` และ `bootstrapFirstAdmin()` เป็น editor-only global functions with no Router or public action. There is no public registration หรือ default credential. Operator ต้องรันตามลำดับ setup, benchmark, bootstrap เท่านั้น; create no credential before benchmark passes. First account เป็น `super_admin` และ operator never calculates PBKDF2/hash manually
+
+Bootstrap contract:
+
+- require exact `ADMIN_BOOTSTRAP_ENABLED=true`
+- an existing active Admin causes fail closed
+- an existing canonical username in any status causes fail closed
+- require already initialized and validated auth random state; bootstrap never initializes or resets it
+- code สร้าง salt/hash เอง, append และ reread verified source-of-truth row
+- after verified success, delete `ADMIN_BOOTSTRAP_USERNAME`, `ADMIN_BOOTSTRAP_DISPLAY_NAME`, `ADMIN_BOOTSTRAP_EMAIL`, `ADMIN_BOOTSTRAP_PASSWORD`, then set `ADMIN_BOOTSTRAP_ENABLED=false`
+
+### 11.4 PBKDF2 benchmark gate
+
+`benchmarkAdminPbkdf2()` เป็น editor-only และไม่ routed. ใช้ fixed non-secret material เท่านั้น โดย `ADMIN_PBKDF2_ITERATIONS_` คงที่ `120000`
+
+Real Apps Script gate ทำ one warm-up plus five measured derivations. Measured runs ต้องเป็น five correct derivations, median ไม่เกิน 3,000 ms, maximum ไม่เกิน 5,000 ms และ `passed=true`. Failure หยุด provisioning/deployment; มี no silent iteration reduction
+
+Benchmark does not depend on production random key, random counter/state, Sheets, or bootstrap credentials และไม่อ่าน/สร้าง credential ใด
 
 ---
 
@@ -2251,7 +2378,7 @@ async function adminPost(action, payload = {}) {
 ควรมี Router กลาง เช่น
 
 ```javascript
-function handleAction_(action, params, payload, context) {
+function handleAction_(action, params, body, context) {
   switch (action) {
     case "getSettings":
       return SettingsService_getPublicSettings();
@@ -2266,14 +2393,20 @@ function handleAction_(action, params, payload, context) {
       return PlaceService_getPlaceDetail(params.place_id, params.lang);
 
     case "submitReview":
-      return ReviewService_submitReview(payload);
+      return submitReview_(body.payload);
 
     case "adminLogin":
-      return AuthService_login(payload);
+      return adminLogin_(body.payload);
+
+    case "adminValidateSession":
+      return adminValidateSession_(body.token);
+
+    case "adminLogout":
+      return adminLogout_(body.token);
 
     case "createPlace":
       AuthService_requireAdmin(context.token);
-      return PlaceService_createPlace(payload, context);
+      return PlaceService_createPlace(body.payload, context);
 
     default:
       return ApiResponse_error("UNKNOWN_ACTION", "ไม่พบ action ที่เรียก");
@@ -2281,11 +2414,13 @@ function handleAction_(action, params, payload, context) {
 }
 ```
 
+โค้ดด้านบนเป็น contract สำหรับ Router integration task ภายหลัง; Task 3 ยังไม่แก้ runtime Router
+
 ---
 
 ## 16. Security Rules
 
-1. Admin API ต้องตรวจ token ทุกครั้ง
+1. `adminLogin` is the only Admin auth action without a token; every protected Admin action ต้องตรวจ authoritative session token
 2. ห้ามส่ง `password_hash` กลับไป Frontend
 3. ห้ามให้ Public API เห็นข้อมูล Admin
 4. ห้ามให้ Public API เห็นรีวิว `pending`
@@ -2293,7 +2428,7 @@ function handleAction_(action, params, payload, context) {
 6. ต้อง sanitize ข้อความก่อนแสดงผล
 7. ห้าม eval ข้อมูลจาก API
 8. ห้ามเก็บรหัสผ่านจริงใน Local Storage
-9. หากใช้ password hash ใน Apps Script ให้ใช้วิธี hash ที่สอดคล้องกับข้อจำกัดของระบบ
+9. Password hashing ใช้ PBKDF2-HMAC-SHA256 ด้วย `ADMIN_PBKDF2_ITERATIONS_ = 120000`, exact UTF-8 bytes และ no Unicode normalization
 10. ข้อมูลที่ไม่จำเป็นไม่ต้องส่งออกไปใน response
 
 ---
@@ -2351,7 +2486,7 @@ API จะถือว่าผ่านเมื่อ:
 7. Public API ไม่แสดงข้อมูล `hidden`, `draft`, `deleted`
 8. Public API ไม่แสดงรีวิวที่ยังไม่อนุมัติ
 9. `adminLogin` ใช้งานได้
-10. Admin API ปฏิเสธ request ที่ไม่มี token
+10. Protected Admin actions ปฏิเสธ request ที่ไม่มี token except `adminLogin`
 11. Admin สามารถสร้าง/แก้ไข/ลบแบบ soft delete ได้
 12. เมื่อแก้ข้อมูลแล้ว cache ถูกล้าง
 13. Frontend ใช้ `api.js` และ `admin-api.js` เรียก API ได้
@@ -2368,7 +2503,7 @@ API จะถือว่าผ่านเมื่อ:
 3. ใช้ response format มาตรฐานทุกครั้ง
 4. ห้ามเปลี่ยนชื่อ field ที่กำหนดใน DATA_SCHEMA
 5. Public API ต้องกรองเฉพาะ `published`
-6. Admin API ต้องตรวจ token
+6. Protected Admin actions ต้องตรวจ authoritative token except `adminLogin`
 7. ใช้ Lock Service กับการเขียนข้อมูล
 8. ใช้ Cache Service กับ Public API ที่อ่านบ่อย
 9. ห้ามสร้าง endpoint ใหม่ซ้ำซ้อน
