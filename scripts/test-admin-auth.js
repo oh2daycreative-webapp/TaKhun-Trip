@@ -8,6 +8,10 @@ const vm = require("node:vm");
 const modulePath = path.join(__dirname, "../public/admin/js/admin-auth.js");
 assert.ok(fs.existsSync(modulePath), "public/admin/js/admin-auth.js must exist before Admin browser auth contracts can run");
 const productionSource = fs.readFileSync(modulePath, "utf8");
+const loginPagePath = path.join(__dirname, "../public/admin/login.html");
+const loginCssPath = path.join(__dirname, "../public/css/admin.css");
+const loginHtml = fs.readFileSync(loginPagePath, "utf8");
+const loginCss = fs.readFileSync(loginCssPath, "utf8");
 
 const STORAGE_KEY = "TAKHUN_ADMIN_SESSION";
 const NOW = Date.parse("2026-08-08T04:00:00.000Z");
@@ -50,6 +54,121 @@ function deferred() {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
+}
+
+function loginPageScript(html = loginHtml) {
+  const match = html.match(/<script\s+data-admin-login-script[^>]*>([\s\S]*?)<\/script>/i);
+  assert.ok(match, "login page must contain its executable page-local integration script");
+  return match[1];
+}
+
+function makeLoginElement(initial = {}) {
+  const listeners = new Map();
+  const attributes = new Map();
+  return Object.assign({
+    value: "",
+    textContent: "",
+    hidden: false,
+    disabled: false,
+    focused: false,
+    addEventListener(type, listener) { listeners.set(type, listener); },
+    setAttribute(name, value) { attributes.set(name, String(value)); },
+    getAttribute(name) { return attributes.has(name) ? attributes.get(name) : null; },
+    removeAttribute(name) { attributes.delete(name); },
+    focus() { this.focused = true; },
+    async dispatch(type) {
+      const event = { defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+      const result = listeners.has(type) ? listeners.get(type)(event) : undefined;
+      await Promise.resolve(result);
+      return event;
+    }
+  }, initial);
+}
+
+function loadLoginPage({ rawReturn = null, returnValue = null, redirectOutcome = "unauthenticated", loginImpl } = {}) {
+  const ids = {
+    "admin-login-form": makeLoginElement({ hidden: true }),
+    "admin-login-username": makeLoginElement(),
+    "admin-login-password": makeLoginElement(),
+    "admin-login-submit": makeLoginElement({ disabled: true }),
+    "admin-login-status": makeLoginElement(),
+    "admin-login-retry": makeLoginElement({ hidden: true, disabled: true })
+  };
+  ids["admin-login-form"].setAttribute("aria-busy", "false");
+  ids["admin-login-form"].setAttribute("aria-hidden", "true");
+  const windowListeners = new Map();
+  const timers = new Map();
+  const calls = { safe: [], redirects: [], logins: [], timers: [], clears: [], console: [], location: [], storage: [] };
+  let timerId = 0;
+  const auth = {
+    safeReturnPath(candidate) {
+      calls.safe.push(candidate);
+      return returnValue || (candidate === "reviews.html" ? candidate : "dashboard.html");
+    },
+    async redirectAuthenticatedLogin(options) {
+      calls.redirects.push(options.returnPath);
+      if (redirectOutcome === "authenticated") return { status: "authenticated" };
+      if (redirectOutcome === "unconfirmed") {
+        if (options.onRetry) options.onRetry();
+        return { status: "unconfirmed" };
+      }
+      if (options.onLoginAvailable) options.onLoginAvailable();
+      return { status: "unauthenticated" };
+    },
+    async login(username, password, returnPath) {
+      calls.logins.push([username, password, returnPath]);
+      if (loginImpl) return loginImpl(username, password, returnPath);
+      return { status: "error", code: "UNAUTHORIZED" };
+    }
+  };
+  const context = {
+    window: null,
+    document: { getElementById(id) { return ids[id] || null; } },
+    URL,
+    URLSearchParams,
+    location: {
+      href: `https://site.example/admin/login.html${rawReturn === null && returnValue === "reviews.html" ? "?return=reviews.html" : rawReturn === null ? "" : `?return=${encodeURIComponent(rawReturn)}`}`,
+      replace(value) { calls.location.push(value); }
+    },
+    TakhunAdminAuth: auth,
+    setTimeout(callback, delay) {
+      const id = ++timerId;
+      timers.set(id, callback);
+      calls.timers.push(delay);
+      return id;
+    },
+    clearTimeout(id) { calls.clears.push(id); timers.delete(id); },
+    console: new Proxy({}, { get() { return (...args) => calls.console.push(args); } })
+  };
+  for (const storageName of ["sessionStorage", "localStorage"]) {
+    Object.defineProperty(context, storageName, {
+      configurable: true,
+      get() {
+        calls.storage.push(storageName);
+        return new Proxy({}, { get() { throw new Error("login page must not access storage directly"); } });
+      }
+    });
+  }
+  context.window = context;
+  context.addEventListener = (type, listener) => windowListeners.set(type, listener);
+  vm.createContext(context);
+  vm.runInContext(loginPageScript(), context, { filename: "public/admin/login.html" });
+  return {
+    ids,
+    calls,
+    timers,
+    auth,
+    async start() {
+      await Promise.resolve(windowListeners.get("DOMContentLoaded")());
+      await Promise.resolve();
+      await Promise.resolve();
+    },
+    async runTimers() {
+      const callbacks = [...timers.values()];
+      timers.clear();
+      for (const callback of callbacks) await Promise.resolve(callback());
+    }
+  };
 }
 
 function apiError(code, secret = "server-internal-secret") {
@@ -831,6 +950,224 @@ test("authenticated-login assertions reject redirecting to the raw requested ret
     candidate: "https://evil.example/x",
     target: "https://evil.example/x"
   });
+});
+
+test("login page exposes the approved accessible form and dependency order", async () => {
+  assert.match(loginHtml, /<html\s+lang=["']th["']/i);
+  assert.equal((loginHtml.match(/<main\b/gi) || []).length, 1);
+  assert.equal((loginHtml.match(/<h1\b/gi) || []).length, 1);
+  assert.match(loginHtml, /<form[^>]+id=["']admin-login-form["'][^>]+hidden[^>]+aria-hidden=["']true["'][^>]+aria-busy=["']false["']/i);
+  assert.match(loginHtml, /<label[^>]+for=["']admin-login-username["']/i);
+  assert.match(loginHtml, /id=["']admin-login-username["'][^>]+name=["']username["'][^>]+autocomplete=["']username["'][^>]+required[^>]+maxlength=["']64["']/i);
+  assert.match(loginHtml, /<label[^>]+for=["']admin-login-password["']/i);
+  assert.match(loginHtml, /id=["']admin-login-password["'][^>]+type=["']password["'][^>]+name=["']password["'][^>]+autocomplete=["']current-password["'][^>]+required[^>]+maxlength=["']256["']/i);
+  assert.match(loginHtml, /id=["']admin-login-status["'][^>]+role=["']status["'][^>]+aria-live=["']polite["'][^>]+aria-atomic=["']true["']/i);
+  assert.match(loginHtml, /id=["']admin-login-submit["'][^>]+disabled/i);
+  assert.match(loginHtml, /href=["']\.\.\/index\.html["']/i);
+  const scripts = [...loginHtml.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map((match) => match[1]);
+  assert.deepEqual(scripts, ["../js/config.js", "js/admin-api.js", "js/admin-auth.js"]);
+  assert.doesNotMatch(loginHtml, /สมัคร|register|default password|ตัวอย่างรหัส|name=["']email["']|language/i);
+  loginPageScript();
+});
+
+test("login startup stays hidden until authoritative validation permits login", async () => {
+  const pending = deferred();
+  const harness = loadLoginPage({ redirectOutcome: "authenticated" });
+  harness.auth.redirectAuthenticatedLogin = async (options) => {
+    harness.calls.redirects.push(options.returnPath);
+    return pending.promise;
+  };
+  const starting = harness.start();
+  await Promise.resolve();
+  assert.equal(harness.ids["admin-login-form"].hidden, true);
+  assert.equal(harness.ids["admin-login-submit"].disabled, true);
+  assert.match(harness.ids["admin-login-status"].textContent, /กำลัง|ตรวจสอบ/);
+  pending.resolve({ status: "authenticated" });
+  await starting;
+  assert.equal(harness.ids["admin-login-form"].hidden, true);
+
+  const available = loadLoginPage();
+  await available.start();
+  assert.equal(available.ids["admin-login-form"].hidden, false);
+  assert.equal(available.ids["admin-login-form"].getAttribute("aria-hidden"), "false");
+});
+
+test("login eligibility enforces raw and UTF-8 bounds without transforming credentials", async () => {
+  const harness = loadLoginPage({ returnValue: "reviews.html" });
+  await harness.start();
+  const username = harness.ids["admin-login-username"];
+  const password = harness.ids["admin-login-password"];
+  const submit = harness.ids["admin-login-submit"];
+  username.value = " operator ";
+  password.value = " Exact Password ";
+  await username.dispatch("input");
+  await password.dispatch("input");
+  assert.equal(submit.disabled, false);
+  username.value = "x".repeat(65);
+  await username.dispatch("input");
+  assert.equal(submit.disabled, true);
+  username.value = "operator";
+  password.value = "😀".repeat(64);
+  await password.dispatch("input");
+  assert.equal(submit.disabled, false, "64 emoji are 64 code points and exactly 256 UTF-8 bytes");
+  password.value = "😀".repeat(65);
+  await password.dispatch("input");
+  assert.equal(submit.disabled, true, "260 UTF-8 bytes must be rejected");
+  password.value = "ก".repeat(86);
+  await password.dispatch("input");
+  assert.equal(submit.disabled, true, "258 UTF-8 bytes must be rejected");
+  password.value = "\uD800";
+  await password.dispatch("input");
+  assert.equal(submit.disabled, true, "malformed surrogates must be rejected");
+});
+
+test("login submit is single-flight, delegates exact credentials, and always clears password", async () => {
+  const gate = deferred();
+  const harness = loadLoginPage({ returnValue: "reviews.html", loginImpl: () => gate.promise });
+  await harness.start();
+  const form = harness.ids["admin-login-form"];
+  const username = harness.ids["admin-login-username"];
+  const password = harness.ids["admin-login-password"];
+  username.value = " operator ";
+  password.value = " Password Sentinel ";
+  await username.dispatch("input");
+  await password.dispatch("input");
+  const first = form.dispatch("submit");
+  const second = form.dispatch("submit");
+  await Promise.resolve();
+  assert.equal(harness.calls.logins.length, 1);
+  assert.deepEqual(harness.calls.logins[0], [" operator ", " Password Sentinel ", "reviews.html"]);
+  assert.equal(form.getAttribute("aria-busy"), "true");
+  assert.equal(username.disabled, true);
+  assert.equal(password.disabled, true);
+  gate.resolve({ status: "error", code: "SERVER_ERROR" });
+  await Promise.all([first, second]);
+  assert.equal(password.value, "");
+  assert.equal(form.getAttribute("aria-busy"), "false");
+  assert.equal(username.disabled, false);
+  assert.doesNotMatch(harness.ids["admin-login-status"].textContent, /Sentinel/);
+});
+
+test("login failures use safe copy, focus unauthorized password, and rate-limit for exactly 60 seconds", async () => {
+  for (const code of ["UNAUTHORIZED", "NETWORK_ERROR", "TIMEOUT", "SERVER_ERROR"]) {
+    const harness = loadLoginPage({ loginImpl: async () => ({ status: "error", code }) });
+    await harness.start();
+    harness.ids["admin-login-username"].value = "operator";
+    harness.ids["admin-login-password"].value = "SecretValue";
+    await harness.ids["admin-login-password"].dispatch("input");
+    await harness.ids["admin-login-form"].dispatch("submit");
+    assert.equal(harness.ids["admin-login-password"].value, "");
+    assert.doesNotMatch(harness.ids["admin-login-status"].textContent, /SecretValue|server-internal/i);
+    if (code === "UNAUTHORIZED") {
+      assert.equal(harness.ids["admin-login-status"].textContent, "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง");
+      assert.equal(harness.ids["admin-login-password"].focused, true);
+    }
+  }
+  const rate = loadLoginPage({ loginImpl: async () => ({ status: "error", code: "RATE_LIMITED" }) });
+  await rate.start();
+  rate.ids["admin-login-username"].value = "operator";
+  rate.ids["admin-login-password"].value = "Password";
+  await rate.ids["admin-login-password"].dispatch("input");
+  await rate.ids["admin-login-form"].dispatch("submit");
+  assert.deepEqual(rate.calls.timers, [60000]);
+  assert.equal(rate.ids["admin-login-submit"].disabled, true);
+  rate.ids["admin-login-password"].value = "NewPassword";
+  await rate.ids["admin-login-password"].dispatch("input");
+  assert.equal(rate.ids["admin-login-submit"].disabled, true);
+  await rate.runTimers();
+  assert.equal(rate.ids["admin-login-submit"].disabled, false);
+  assert.equal(rate.calls.logins.length, 1);
+});
+
+test("password clearing and secret-safe recovery cover every completed outcome", async () => {
+  const outcomes = [
+    { name: "success", result: { status: "authenticated" } },
+    ...["UNAUTHORIZED", "RATE_LIMITED", "NETWORK_ERROR", "TIMEOUT", "SERVER_ERROR"].map((code) => ({ name: code, result: { status: "error", code } })),
+    { name: "unexpected", error: new Error("internal PasswordSentinel detail") }
+  ];
+  for (const outcome of outcomes) {
+    const harness = loadLoginPage({
+      loginImpl: async () => {
+        if (outcome.error) throw outcome.error;
+        return outcome.result;
+      }
+    });
+    await harness.start();
+    harness.ids["admin-login-username"].value = "operator";
+    harness.ids["admin-login-password"].value = "PasswordSentinel";
+    await harness.ids["admin-login-password"].dispatch("input");
+    await harness.ids["admin-login-form"].dispatch("submit");
+    assert.equal(harness.ids["admin-login-password"].value, "", `${outcome.name} retained the password`);
+    assert.equal(harness.calls.logins.length, 1);
+    assert.equal(harness.calls.console.length, 0);
+    assert.equal(harness.calls.location.length, 0);
+    assert.equal(harness.calls.storage.length, 0);
+    assert.doesNotMatch(harness.ids["admin-login-status"].textContent, /PasswordSentinel|internal/i);
+  }
+  const invalid = loadLoginPage();
+  await invalid.start();
+  invalid.ids["admin-login-username"].value = "operator";
+  invalid.ids["admin-login-password"].value = "\uD800PasswordSentinel";
+  await invalid.ids["admin-login-form"].dispatch("submit");
+  assert.equal(invalid.ids["admin-login-password"].value, "");
+  assert.equal(invalid.calls.logins.length, 0);
+  assert.doesNotMatch(invalid.ids["admin-login-status"].textContent, /PasswordSentinel/);
+});
+
+test("login startup transient failures require one explicit busy-safe retry", async () => {
+  const harness = loadLoginPage({ redirectOutcome: "unconfirmed" });
+  await harness.start();
+  assert.equal(harness.ids["admin-login-form"].hidden, true);
+  assert.equal(harness.ids["admin-login-retry"].hidden, false);
+  assert.equal(harness.ids["admin-login-retry"].disabled, false);
+  await harness.ids["admin-login-retry"].dispatch("click");
+  assert.equal(harness.calls.redirects.length, 2);
+});
+
+test("login startup retry permits only one authoritative validation while pending", async () => {
+  const harness = loadLoginPage({ redirectOutcome: "unconfirmed" });
+  await harness.start();
+  const gate = deferred();
+  harness.auth.redirectAuthenticatedLogin = async (options) => {
+    harness.calls.redirects.push(options.returnPath);
+    await gate.promise;
+    options.onRetry();
+    return { status: "unconfirmed" };
+  };
+  const first = harness.ids["admin-login-retry"].dispatch("click");
+  const second = harness.ids["admin-login-retry"].dispatch("click");
+  await Promise.resolve();
+  assert.equal(harness.calls.redirects.length, 2, "startup plus exactly one explicit retry expected");
+  assert.equal(harness.ids["admin-login-retry"].disabled, true);
+  gate.resolve();
+  await Promise.all([first, second]);
+  assert.equal(harness.ids["admin-login-retry"].disabled, false);
+});
+
+test("login page passes only the facade-sanitized return to startup and credential login", async () => {
+  for (const candidate of UNSAFE_RETURN_CANDIDATES) {
+    const harness = loadLoginPage({ rawReturn: candidate, returnValue: "dashboard.html" });
+    await harness.start();
+    harness.ids["admin-login-username"].value = "operator";
+    harness.ids["admin-login-password"].value = "Password";
+    await harness.ids["admin-login-password"].dispatch("input");
+    await harness.ids["admin-login-form"].dispatch("submit");
+    assert.deepEqual(harness.calls.safe, [candidate]);
+    assert.deepEqual(harness.calls.redirects, ["dashboard.html"]);
+    assert.equal(harness.calls.logins[0][2], "dashboard.html");
+    assert.equal(harness.calls.location.length, 0);
+  }
+});
+
+test("login page delegates return sanitization and has no alternate secret or navigation sink", async () => {
+  const source = loginPageScript();
+  assert.doesNotMatch(source, /sessionStorage|localStorage|document\s*\.\s*cookie|TakhunAdminApi|\bfetch\s*\(|console\s*\.|setInterval|location\s*\.\s*(?:replace|assign)\s*\(|location\s*\.\s*href\s*=/i);
+  assert.match(source, /safeReturnPath/);
+  assert.match(source, /redirectAuthenticatedLogin/);
+  assert.match(source, /(?:TakhunAdminAuth|auth)\.login/);
+  assert.match(loginCss, /\.login-form[\s\S]*?gap/i);
+  assert.match(loginCss, /\.login-(?:form|card)[\s\S]*?:focus-visible/i);
+  assert.match(loginCss, /\.login-(?:submit|retry)[\s\S]*?min-height:\s*(?:44px|2\.75rem)/i);
 });
 
 test("production source excludes alternate auth persistence retries and secret sinks", async () => {

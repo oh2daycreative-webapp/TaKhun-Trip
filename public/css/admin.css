@@ -49,8 +49,29 @@
 .admin-skip-link:focus-visible { outline: 3px solid var(--color-primary-dark); outline-offset: 3px; }
 .admin-shell__sidebar a:focus-visible,
 .admin-shell__sidebar button:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 3px; }
-.login-shell { display: grid; min-height: 100vh; padding: 1rem; place-items: center; }
-.login-card { display: grid; width: min(100%, 28rem); gap: 0.75rem; padding: 2rem; border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-card); }
+.login-shell { display: grid; min-height: 100vh; padding: 1rem; place-items: center; background: linear-gradient(145deg, #f8fafc 0%, #eef6f3 100%); }
+.login-card { display: grid; width: min(100%, 28rem); gap: 1rem; padding: 2rem; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-card); }
+.login-card h1,
+.login-card p { margin: 0; }
+.login-intro,
+.login-status { color: var(--color-muted); }
+.login-status { min-height: 1.5em; }
+.login-status[data-state="error"] { color: #9f1239; }
+.login-form { display: grid; gap: .75rem; }
+.login-form label { color: var(--color-primary-dark); font-weight: 700; }
+.login-form input { min-height: 2.75rem; padding: .625rem .75rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: #fff; color: var(--color-text); font: inherit; }
+.login-submit,
+.login-retry { min-height: 44px; }
+.login-submit:disabled,
+.login-retry:disabled { cursor: not-allowed; opacity: .6; }
+.login-card input:focus-visible,
+.login-card button:focus-visible,
+.login-card a:focus-visible { outline: 3px solid var(--color-primary-dark); outline-offset: 3px; }
+.login-back-link { justify-self: start; color: var(--color-primary-dark); font-weight: 700; }
+
+@media (max-width: 30rem) {
+  .login-card { padding: 1.25rem; }
+}
 
 @media (max-width: 899px) {
   .admin-shell__title { grid-column: 2; }
