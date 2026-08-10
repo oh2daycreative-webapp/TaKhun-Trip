@@ -30,6 +30,11 @@ function makeSheet(initialValues) {
     },
     getRange(row, column, height = 1, width = 1) {
       return {
+        getValues() {
+          return Array.from({ length: height }, (_, rowOffset) =>
+            Array.from({ length: width }, (_, columnOffset) =>
+              cells[row + rowOffset - 1]?.[column + columnOffset - 1] ?? ""));
+        },
         setValue(value) {
           assert.equal(height, 1);
           assert.equal(width, 1);
@@ -47,6 +52,15 @@ function makeSheet(initialValues) {
             }
           }
           writes.push({ method: "setValues", row, column, height, width, values: values.map((valuesRow) => valuesRow.slice()) });
+        },
+        clearContent() {
+          for (let rowOffset = 0; rowOffset < height; rowOffset += 1) {
+            for (let columnOffset = 0; columnOffset < width; columnOffset += 1) {
+              ensureCell(row + rowOffset, column + columnOffset);
+              cells[row + rowOffset - 1][column + columnOffset - 1] = "";
+            }
+          }
+          writes.push({ method: "clearContent", row, column, height, width });
         }
       };
     }
@@ -104,6 +118,9 @@ test("approved SheetService interfaces exist", () => {
     "SheetService_readTable_",
     "SheetService_assertUniqueHeaders_",
     "SheetService_updateObjectAtRow_",
+    "SheetService_appendObjectWithRow_",
+    "SheetService_replaceObjectAtRow_",
+    "SheetService_clearRow_",
     "SheetService_ensureHeaders_",
     "SheetService_escapeHumanText_",
     "SheetService_writeValue_"
@@ -230,6 +247,96 @@ test("updateObjectAtRow rejects invalid rows and fields before any write", () =>
   }
   assert.throws(() => update("admins", 2, { token_hash: HASH }), /header/i);
   assert.throws(() => update("admins", 2, {}));
+  assert.equal(sheet.writes.length, 0);
+});
+
+test("legacy header-keyed Place reads remain stable when M7 columns are appended", () => {
+  const original = makeSheet([
+    ["place_id", "name_th", "status"],
+    ["P-1", "Original", "published"]
+  ]);
+  const extended = makeSheet([
+    ["place_id", "name_th", "status", "entity_version", "unknown_future_column"],
+    ["P-1", "Original", "published", 7, "private"]
+  ]);
+  const originalRow = plain(load({ places: original }).readSheetObjects_("places"))[0];
+  const extendedRow = plain(load({ places: extended }).readSheetObjects_("places"))[0];
+  assert.deepEqual(
+    { place_id: extendedRow.place_id, name_th: extendedRow.name_th, status: extendedRow.status },
+    originalRow
+  );
+});
+
+test("appendObjectWithRow writes one full row and returns its physical source row", () => {
+  const sheet = makeSheet([
+    ["place_id", "status", "unknown"],
+    ["P-1", "published", "preserve"]
+  ]);
+  const context = load({ places: sheet });
+  const result = plain(required(context, "SheetService_appendObjectWithRow_")(
+    "places",
+    ["place_id", "status"],
+    { place_id: "P-2", status: "draft" }
+  ));
+  assert.deepEqual(result, {
+    sourceRowNumber: 3,
+    values: { place_id: "P-2", status: "draft", unknown: "" }
+  });
+  assert.deepEqual(sheet.cells[2], ["P-2", "draft", ""]);
+  assert.deepEqual(plain(sheet.writes), [{
+    method: "setValues", row: 3, column: 1, height: 1, width: 3,
+    values: [["P-2", "draft", ""]]
+  }]);
+});
+
+test("replaceObjectAtRow preserves unknown columns and uses one rectangular write", () => {
+  const sheet = makeSheet([
+    ["status", "place_id", "unknown", "entity_version"],
+    ["published", "P-1", "keep", 1],
+    ["draft", "P-2", "also-keep", 2]
+  ]);
+  const context = load({ places: sheet });
+  const result = plain(required(context, "SheetService_replaceObjectAtRow_")(
+    "places", 2, { status: "archived", entity_version: 3 }
+  ));
+  assert.deepEqual(result, {
+    sourceRowNumber: 2,
+    values: { status: "archived", place_id: "P-1", unknown: "keep", entity_version: 3 }
+  });
+  assert.deepEqual(sheet.cells[1], ["archived", "P-1", "keep", 3]);
+  assert.deepEqual(sheet.cells[2], ["draft", "P-2", "also-keep", 2]);
+  assert.deepEqual(plain(sheet.writes), [{
+    method: "setValues", row: 2, column: 1, height: 1, width: 4,
+    values: [["archived", "P-1", "keep", 3]]
+  }]);
+});
+
+test("clearRow clears only the target row across the exact captured header width", () => {
+  const sheet = makeSheet([
+    ["place_id", "status", "unknown"],
+    ["P-1", "published", "keep"],
+    ["P-2", "draft", "clear"]
+  ]);
+  const context = load({ place_drafts: sheet });
+  required(context, "SheetService_clearRow_")("place_drafts", 3);
+  assert.deepEqual(sheet.cells[1], ["P-1", "published", "keep"]);
+  assert.deepEqual(sheet.cells[2], ["", "", ""]);
+  assert.deepEqual(plain(sheet.writes), [{
+    method: "clearContent", row: 3, column: 1, height: 1, width: 3
+  }]);
+});
+
+test("full-row helpers reject bad rows and fields before writing", () => {
+  const sheet = makeSheet([["place_id", "status"], ["P-1", "published"]]);
+  const context = load({ places: sheet });
+  const append = required(context, "SheetService_appendObjectWithRow_");
+  const replace = required(context, "SheetService_replaceObjectAtRow_");
+  const clear = required(context, "SheetService_clearRow_");
+  assert.throws(() => append("places", ["place_id"], { unknown: "x" }), /header/i);
+  assert.throws(() => replace("places", 1, { status: "draft" }));
+  assert.throws(() => replace("places", 2, { unknown: "x" }), /header/i);
+  assert.throws(() => clear("places", 1));
+  assert.throws(() => clear("places", 3));
   assert.equal(sheet.writes.length, 0);
 });
 

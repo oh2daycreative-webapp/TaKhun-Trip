@@ -62,6 +62,7 @@ $required = @(
   "apps-script/Router.gs",
   "apps-script/ApiResponse.gs",
   "apps-script/SheetService.gs",
+  "apps-script/AdminPlaceSchema.gs",
   "apps-script/SettingsService.gs",
   "apps-script/CategoryService.gs",
   "apps-script/PlaceService.gs",
@@ -72,6 +73,7 @@ $required = @(
   "apps-script/HomeService.gs"
   "apps-script/ReviewService.gs"
   "apps-script/SearchService.gs"
+  "scripts/test-admin-place-schema.js"
 )
 
 $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root $_)) })
@@ -157,6 +159,8 @@ if ($LASTEXITCODE -ne 0) { throw "CryptoService verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "AuthService verification failed." }
 & node (Join-Path $PSScriptRoot "test-sheet-service.js")
 if ($LASTEXITCODE -ne 0) { throw "SheetService verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-place-schema.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Place schema verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-schema.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin auth schema verification failed." }
 & node (Join-Path $PSScriptRoot "test-settings-service.js")
