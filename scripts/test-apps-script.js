@@ -36,7 +36,10 @@ for (const { name, source } of sources) {
   }
 }
 
-const postActions = ["submitReview", "adminLogin", "adminValidateSession", "adminLogout"];
+const postActions = [
+  "submitReview", "adminLogin", "adminValidateSession", "adminLogout",
+  "adminGetPlaces", "adminGetPlaceDetail"
+];
 
 function assertStaticPostActionAllowlist(source) {
   const dispatchSource = source.replace(
@@ -110,10 +113,28 @@ function createRouterRuntime({ routerSource = router, json = JSON } = {}) {
       return { ok: true, data: { action } };
     };
   }
+  for (const action of ["adminGetPlaces", "adminGetPlaceDetail"]) {
+    context[`${action}_`] = (...args) => {
+      calls.push({ action, args });
+      return { ok: true, data: { action } };
+    };
+  }
   vm.createContext(context);
   vm.runInContext(apiResponse, context, { filename: "apps-script/ApiResponse.gs" });
   vm.runInContext(routerSource, context, { filename: "apps-script/Router.gs" });
   return { context, calls };
+}
+
+// Admin Place reads forward only the body token and payload, never query/header authority.
+for (const action of ["adminGetPlaces", "adminGetPlaceDetail"]) {
+  const runtime = createRouterRuntime();
+  const token = "BODY_TOKEN";
+  const payload = action === "adminGetPlaces" ? { status: "draft" } : { place_id: "P-1", view: "working" };
+  assert.deepEqual(post(runtime, { action, token, payload }, {
+    parameter: { action: "adminLogout", token: "QUERY_TOKEN", payload: "QUERY_PAYLOAD" },
+    headers: { Authorization: "Bearer HEADER_TOKEN" }, token: "EVENT_TOKEN", payload: "EVENT_PAYLOAD"
+  }), { ok: true, data: { action } });
+  assert.deepEqual(runtime.calls, [{ action, args: [token, payload] }]);
 }
 
 function response(output) {
@@ -165,7 +186,7 @@ function assertSafeError(output, code) {
   assert.equal("data" in output, false);
 }
 
-// The direct-body mutation is a real fifth dispatch path, and the static allowlist rejects its source.
+// The direct-body mutation is a real additional dispatch path, and the static allowlist rejects its source.
 {
   const directBodyMutation = router.replace(
     '        if (action === "adminLogout") return createJsonResponse_(adminLogout_(body.token));',
@@ -215,7 +236,7 @@ function assertSafeError(output, code) {
   assert.equal(runtime.calls.length, 0);
 }
 
-// Each permitted POST action reaches exactly one bounded service argument from the JSON body.
+// Each pre-Task-3 POST action reaches exactly one bounded service argument from the JSON body.
 {
   const runtime = createRouterRuntime();
   const loginPayload = { username: "  MiXeD_User  ", password: "\tP@ss Word  \n" };
@@ -407,7 +428,7 @@ for (const action of publicGetActions) {
 }
 
 // GET and query values cannot activate Admin actions or deliver URL/header tokens.
-for (const action of ["adminLogin", "adminValidateSession", "adminLogout"]) {
+for (const action of ["adminLogin", "adminValidateSession", "adminLogout", "adminGetPlaces", "adminGetPlaceDetail"]) {
   for (const parameter of [
     { action, token: "T".repeat(43) },
     { method: action, token: "T".repeat(43) },
@@ -433,7 +454,7 @@ for (const editorOnlyName of ["setupAdminAuthSchema", "benchmarkAdminPbkdf2", "b
 }
 
 // Every Admin exception is converted to the existing fixed server-safe envelope with no leak.
-for (const action of ["adminLogin", "adminValidateSession", "adminLogout"]) {
+for (const action of ["adminLogin", "adminValidateSession", "adminLogout", "adminGetPlaces", "adminGetPlaceDetail"]) {
   for (const thrown of [
     new Error("ordinary failure"),
     "string failure",
@@ -446,7 +467,7 @@ for (const action of ["adminLogin", "adminValidateSession", "adminLogout"]) {
     runtime.context[`${action}_`] = () => { throw thrown; };
     const body = action === "adminLogin"
       ? { action, payload: { username: "operator", password: "SENTINEL_PASSWORD_DO_NOT_LOG" } }
-      : { action, token: "SENTINEL_RAW_TOKEN_DO_NOT_LOG" };
+      : { action, token: "SENTINEL_RAW_TOKEN_DO_NOT_LOG", payload: {} };
     const output = post(runtime, body);
     assert.deepEqual(output, safeServerError);
     for (const secret of ["SENTINEL_PASSWORD_DO_NOT_LOG", "SENTINEL_RAW_TOKEN_DO_NOT_LOG", "ordinary failure", "string failure", "object failure", "spreadsheetId", "internal Sheet", "stack"]) {
