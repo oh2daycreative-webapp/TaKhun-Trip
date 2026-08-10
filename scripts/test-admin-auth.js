@@ -28,6 +28,10 @@ const UNSAFE_RETURN_CANDIDATES = Object.freeze([
   "dashboard.html?password=SECRET",
   "//evil.example/x"
 ]);
+const EXISTING_RETURN_PAGES = Object.freeze([
+  "dashboard.html", "places.html", "routes.html", "products.html", "events.html",
+  "reviews.html", "gallery.html", "settings.html", "404.html"
+]);
 const ADMIN = Object.freeze({
   admin_id: ADMIN_ID,
   username: "operator",
@@ -512,6 +516,75 @@ async function proveContractRejects(check) {
   await assert.rejects(check, (error) => error instanceof assert.AssertionError);
 }
 
+async function assertPlaceEditReturnGrammar(source = productionSource, observation = {}) {
+  const { auth } = loadAuth({ source, href: "https://site.example/admin/login.html" });
+  const sixtyFour = `A${"b".repeat(63)}`;
+  const accepted = [
+    ["place-edit.html", "place-edit.html"],
+    ["place-edit.html?place_id=A", "place-edit.html?place_id=A"],
+    [`place-edit.html?place_id=${sixtyFour}`, `place-edit.html?place_id=${sixtyFour}`],
+    ["place-edit.html?place_id=BTK-001_alpha", "place-edit.html?place_id=BTK-001_alpha"],
+    ["place-edit.html?place_id=BTK%2D001", "place-edit.html?place_id=BTK-001"],
+    ["https://site.example/admin/place-edit.html?place_id=BTK-001", "place-edit.html?place_id=BTK-001"]
+  ];
+  observation.accepted = [];
+  for (const [candidate, expected] of accepted) {
+    const actual = auth.safeReturnPath(candidate);
+    observation.accepted.push({ candidate, actual });
+    assert.equal(actual, expected, `rejected or failed to canonicalize ${JSON.stringify(candidate)}`);
+  }
+
+  const tokenLikeId = "-".padEnd(43, "A");
+  const rejected = [
+    " place-edit.html",
+    "place-edit.html ",
+    "place-edit.html?",
+    "place-edit.html?place_id=",
+    `place-edit.html?place_id=${"A".repeat(65)}`,
+    "place-edit.html?place_id=_ABC",
+    "place-edit.html?place_id=-ABC",
+    "place-edit.html?place_id=A.B",
+    "place-edit.html?place_id=A/B",
+    "place-edit.html?place_id=A%2FB",
+    "place-edit.html?place_id=à¸",
+    "place-edit.html?place_id=%E0%B8%81",
+    "place-edit.html?place_id=A&place_id=B",
+    "place-edit.html?place_id=A&extra=B",
+    "place-edit.html?extra=A",
+    "place-edit.html#fragment",
+    "place-edit.html#",
+    "place-edit.html?place_id=A#fragment",
+    "place-edit.html?place_id=..",
+    "place-edit.html?place_id=%2e%2e",
+    "place-edit.html?place_id=%252e%252e",
+    "place-edit.html?place_id=..%2FA",
+    "place-edit.html?place_id=%00A",
+    "place-edit.html?place_id=A%5cB",
+    "place-edit.html\\..\\dashboard.html",
+    "place-edit.html%5c..%5cdashboard.html",
+    "place-edit.html\u0000",
+    "place-edit.html?token=SECRET",
+    "place-edit.html?password=SECRET",
+    "place-edit.html?session=SECRET",
+    `place-edit.html?place_id=${tokenLikeId}`,
+    "place-edit.html?return=login.html",
+    "place-edit.html/login.html",
+    "../place-edit.html?place_id=A",
+    "%2e%2e/place-edit.html?place_id=A",
+    "%252e%252e/place-edit.html?place_id=A",
+    "https://evil.example/admin/place-edit.html?place_id=A",
+    "//evil.example/admin/place-edit.html?place_id=A",
+    "https://user:pass@site.example/admin/place-edit.html?place_id=A"
+  ];
+  observation.rejected = [];
+  for (const candidate of rejected) {
+    const actual = auth.safeReturnPath(candidate);
+    observation.rejected.push({ candidate, actual });
+    assert.equal(actual, "places.html", `unsafe Place Edit return did not use safe fallback: ${JSON.stringify(candidate)}`);
+  }
+  observation.completed = true;
+}
+
 async function assertStaleSuccessIgnored(source = productionSource, observation = {}) {
   const pending = deferred();
   const storage = makeStorage({ initial: JSON.stringify(SESSION) });
@@ -736,6 +809,30 @@ test("safeReturnPath accepts only exact same-directory allowlisted destinations"
     const expected = new URL(candidate, "https://site.example/admin/login.html");
     assert.equal(auth.safeReturnPath(candidate), `${path.posix.basename(expected.pathname)}${expected.search}${expected.hash}`);
   }
+});
+
+test("safeReturnPath admits only the bounded canonical Place Edit grammar", async () => {
+  await assertPlaceEditReturnGrammar();
+});
+
+test("Place Edit return assertions reject preserving raw query text", async () => {
+  const source = mutatedSource(
+    "    return `${PLACE_EDIT_PAGE}?place_id=${encodeURIComponent(placeId)}`;",
+    "    return `${PLACE_EDIT_PAGE}${target.search}`;"
+  );
+  const observation = {};
+  await proveContractRejects(() => assertPlaceEditReturnGrammar(source, observation));
+  assert.equal(observation.accepted.some((item) => item.candidate.includes("%2D") && item.actual.includes("%2D")), true);
+});
+
+test("all existing allowlisted pages retain query and fragment behavior without becoming Place Edit aliases", async () => {
+  const { auth } = loadAuth({ href: "https://site.example/admin/login.html" });
+  for (const page of EXISTING_RETURN_PAGES) {
+    const candidate = `${page}?view=approved#section`;
+    assert.equal(auth.safeReturnPath(candidate), candidate);
+  }
+  assert.equal(auth.safeReturnPath("places.html?edit=BTK-001"), "places.html?edit=BTK-001");
+  assert.equal(auth.safeReturnPath("login.html?return=place-edit.html%3Fplace_id%3DBTK-001"), "dashboard.html");
 });
 
 test("safeReturnPath rejects traversal schemes credentials loops and auth material", async () => {
