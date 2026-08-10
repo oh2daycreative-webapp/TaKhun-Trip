@@ -300,7 +300,7 @@ This action-specific rule is the final targeted-review refinement of the approve
 **File allowlist**
 
 - Create: `apps-script/AdminPlaceService.gs`, `scripts/test-admin-place-service.js`
-- Modify: `apps-script/Router.gs`, `scripts/test.ps1`
+- Modify: `apps-script/Router.gs`, `scripts/test.ps1`, `scripts/test-apps-script.js`
 - Test: `scripts/test-admin-place-service.js`, `scripts/test-auth-service.js`, `scripts/test-apps-script.js`
 
 **Interfaces**
@@ -308,11 +308,11 @@ This action-specific rule is the final targeted-review refinement of the approve
 - Consumes: `AuthService_requireAdmin_(token)`, schema constants, `SheetService_readTable_`, existing Place category/ID rules and safe envelopes.
 - Produces: POST Router actions `adminGetPlaces` and `adminGetPlaceDetail`, with exact read contracts above; internal `AdminPlaceService_requireContext_`, `AdminPlaceService_buildList_`, `AdminPlaceService_buildDetail_`.
 
-- [ ] **RED:** Build a VM harness and tests for POST-only routing, exact payload keys, authoritative auth on each request, all roles allowed to read, invalid/missing session `UNAUTHORIZED`, missing Place `NOT_FOUND`, safe pagination/filtering, default archived exclusion, working-vs-published selection, read-without-write, derived state/capabilities, no draft/raw/security/row leakage, and Public-unpublished hiding unchanged. Include mutation proof that bypassing `AuthService_requireAdmin_` or returning raw rows fails. Run `node scripts/test-admin-place-service.js`; failure must be missing service/actions.
-- [ ] **GREEN:** Implement explicit safe projections and route dispatch. Detail reads `place_drafts` only for authorized Admin working view; published view reads only the retained snapshot. Before Task 14 the stable media keys are present as `cover:null` and `gallery:[]`; Task 14 populates them from the approved manifest without changing the detail shape. Catch internal auth/service failures into bounded safe codes/messages; never expose thrown text.
+- [ ] **RED:** Build a VM harness and tests for POST-only routing, exact payload keys, authoritative auth on each request, all roles allowed to read, invalid/missing session `UNAUTHORIZED`, missing Place `NOT_FOUND`, safe pagination/filtering, default archived exclusion, working-vs-published selection, read-without-write, derived state/capabilities, no draft/raw/security/row leakage, and Public-unpublished hiding unchanged. Include mutation proof that bypassing `AuthService_requireAdmin_` or returning raw rows fails. Before changing the Router POST expectation, run `node scripts/test-apps-script.js` against the pre-Task-3 Router and prove its exact approved action set is `submitReview`, `adminLogin`, `adminValidateSession`, and `adminLogout`, with `adminGetPlaces` and `adminGetPlaceDetail` absent. Only after that proof, update `scripts/test-apps-script.js` to expect exactly those four existing actions plus `adminGetPlaces` and `adminGetPlaceDetail`; do not use a broad regex or permissive pattern, and do not admit any Task 4+ write action. Run `node scripts/test-admin-place-service.js` and `node scripts/test-apps-script.js`; both failures must be caused by the missing service/read routes.
+- [ ] **GREEN:** Implement explicit safe projections and route dispatch, then make the strict six-action Router POST allowlist assertion pass without adding write actions. Detail reads `place_drafts` only for authorized Admin working view; published view reads only the retained snapshot. Before Task 14 the stable media keys are present as `cover:null` and `gallery:[]`; Task 14 populates them from the approved manifest without changing the detail shape. Catch internal auth/service failures into bounded safe codes/messages; never expose thrown text.
 - [ ] Focused verification: `node scripts/test-admin-place-service.js`.
 - [ ] Dependency regressions: `node scripts/test-auth-service.js`; `node scripts/test-place-service.js`; `node scripts/test-apps-script.js`.
-- [ ] Run `git diff --check`; stage only the four allowlisted files; run and inspect `git diff --cached --name-only` and `git diff --cached`.
+- [ ] Run `git diff --check`; stage only the five allowlisted files, including `scripts/test-apps-script.js`; run and inspect `git diff --cached --name-only` and `git diff --cached`.
 - [ ] Commit: `git commit -m "feat: add Admin Place read API"`.
 - [ ] **REVIEW GATE:** Require review of role/auth boundaries, projections, default filter semantics, no read writes, and Router safety.
 
