@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="../css/components.css">
   <link rel="stylesheet" href="../css/mobile.css">
   <link rel="stylesheet" href="../css/admin.css">
+  <link rel="stylesheet" href="../css/admin-places.css">
 </head>
 <body class="admin-body admin-auth-pending" data-admin-page="places">
   <a class="admin-skip-link" href="#admin-main" data-admin-skip hidden>ข้ามไปยังเนื้อหาหลัก</a>
@@ -53,8 +54,21 @@
     <div class="admin-shell__backdrop" data-admin-backdrop hidden></div>
 
     <main class="admin-main" id="admin-main" data-admin-main tabindex="-1" aria-labelledby="page-title">
-      <section class="placeholder" data-admin-content hidden aria-hidden="true">
-        <p>หน้านี้อยู่ระหว่างการจัดเตรียม</p>
+      <section class="admin-places" data-admin-content hidden aria-hidden="true" aria-labelledby="admin-places-results-title">
+        <div class="admin-places__toolbar">
+          <form class="admin-places__filters" data-admin-places-filters aria-label="ค้นหาและกรองสถานที่">
+            <div class="admin-places__field admin-places__field--search"><label for="admin-places-keyword">ค้นหาสถานที่</label><input id="admin-places-keyword" name="keyword" type="search" autocomplete="off" placeholder="ค้นหาชื่อสถานที่"></div>
+            <div class="admin-places__field"><label for="admin-places-category">หมวดหมู่</label><select id="admin-places-category" name="category"><option value="">ทุกหมวดหมู่</option><option value="main_point">จุดหลัก</option><option value="community_tourism">ท่องเที่ยวชุมชน</option><option value="nature">ธรรมชาติ</option><option value="viewpoint">จุดชมวิว</option><option value="lake">เขื่อนและทะเลสาบ</option><option value="activity">กิจกรรม</option><option value="food_cafe">อาหารและคาเฟ่</option><option value="accommodation">ที่พัก</option><option value="temple_culture">วัดและวัฒนธรรม</option><option value="product_shop">ร้านผลิตภัณฑ์</option><option value="waterfall">น้ำตก</option><option value="cave">ถ้ำ</option><option value="service">บริการ</option></select></div>
+            <div class="admin-places__field"><label for="admin-places-status">สถานะ</label><select id="admin-places-status" name="status"><option value="">ทั้งหมด (ไม่รวมรายการที่เก็บถาวร)</option><option value="draft">ฉบับร่าง</option><option value="published">เผยแพร่แล้ว</option><option value="archived">เก็บถาวร</option><option value="all">ทั้งหมดรวมเก็บถาวร</option></select></div>
+            <button class="button admin-places__search" type="submit">ค้นหา</button>
+          </form>
+          <a class="button admin-places__create" data-admin-places-create href="place-edit.html" hidden>เพิ่มสถานที่</a>
+        </div>
+        <p class="admin-places__announcement" data-admin-places-announcement role="status" aria-live="polite" aria-atomic="true">กำลังเตรียมรายการสถานที่</p>
+        <div class="admin-places__state" data-admin-places-state></div>
+        <div class="admin-places__table-wrap" data-admin-places-table-wrap><table class="admin-places__table" data-admin-places-table><caption class="sr-only" id="admin-places-results-title">รายการสถานที่</caption><thead><tr><th scope="col">สถานที่</th><th scope="col">หมวดหมู่</th><th scope="col">สถานะ</th><th scope="col">ปรับปรุงล่าสุด</th><th scope="col"><span class="sr-only">การทำงาน</span></th></tr></thead><tbody data-admin-places-table-body></tbody></table></div>
+        <ul class="admin-places__cards" data-admin-places-cards aria-label="รายการสถานที่"></ul>
+        <nav class="admin-places__pagination" data-admin-places-pagination aria-label="แบ่งหน้ารายการสถานที่"></nav>
       </section>
     </main>
   </div>
@@ -63,9 +77,10 @@
   <script src="js/admin-api.js" defer></script>
   <script src="js/admin-auth.js" defer></script>
   <script src="js/admin-shell.js" defer></script>
+  <script src="js/admin-places.js" defer></script>
   <script>
     window.addEventListener("DOMContentLoaded", function () {
-      window.TakhunAdminShell.init();
+      window.TakhunAdminPlaces.init();
     });
   </script>
 </body>

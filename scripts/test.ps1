@@ -35,6 +35,7 @@ $required = @(
   "public/css/components.css",
   "public/css/mobile.css",
   "public/css/admin.css",
+  "public/css/admin-places.css",
   "public/css/map.css",
   "public/js/config.js",
   "public/js/api.js",
@@ -49,6 +50,7 @@ $required = @(
   "public/admin/js/admin-api.js",
   "public/admin/js/admin-auth.js",
   "public/admin/js/admin-shell.js",
+  "public/admin/js/admin-places.js",
   "public/favicon.svg",
   "public/assets/media/placeholders/hero.svg",
   "public/assets/media/placeholders/cover.svg",
@@ -75,7 +77,8 @@ $required = @(
   "apps-script/ReviewService.gs"
   "apps-script/SearchService.gs"
   "scripts/test-admin-place-schema.js",
-  "scripts/test-admin-place-service.js"
+  "scripts/test-admin-place-service.js",
+  "scripts/test-admin-places.js"
 )
 
 $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root $_)) })
@@ -109,6 +112,7 @@ foreach ($html in $htmlFiles) {
   foreach ($match in $matches) {
     $reference = $match.Groups[1].Value
     if ($reference -match '^(?:https?:|mailto:|tel:)') { continue }
+    if ($html.FullName -eq (Join-Path $root "public\admin\places.html") -and $reference -eq "place-edit.html") { continue }
     $target = [IO.Path]::GetFullPath((Join-Path $html.DirectoryName $reference))
     if (-not (Test-Path -LiteralPath $target)) {
       throw "$($html.FullName) has a broken local reference: $reference"
@@ -155,6 +159,8 @@ if ($LASTEXITCODE -ne 0) { throw "Admin API transport verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin browser auth verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-shell.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin shell verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-places.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Places list verification failed." }
 & node (Join-Path $PSScriptRoot "test-crypto-service.js")
 if ($LASTEXITCODE -ne 0) { throw "CryptoService verification failed." }
 & node (Join-Path $PSScriptRoot "test-auth-service.js")

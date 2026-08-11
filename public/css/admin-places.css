@@ -1,0 +1,37 @@
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.admin-places { display: grid; gap: 1rem; }
+.admin-places__toolbar { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 1rem; }
+.admin-places__filters { display: grid; flex: 1 1 42rem; grid-template-columns: minmax(14rem, 2fr) repeat(2, minmax(11rem, 1fr)) auto; gap: .75rem; }
+.admin-places__field { display: grid; gap: .35rem; color: var(--color-primary-dark); font-weight: 750; }
+.admin-places__field input, .admin-places__field select { min-width: 0; min-height: 44px; padding: .6rem .75rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-primary-dark); font: inherit; }
+.admin-places__search, .admin-places__create, .admin-places__retry, .admin-places__page, .admin-places__action { min-width: 44px; min-height: 44px; }
+.admin-places__create { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; white-space: nowrap; }
+.admin-places__announcement { margin: 0; color: var(--color-muted); }
+.admin-places__state { min-height: 1px; }
+.admin-places__message { margin: 0; padding: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-primary-dark); }
+.admin-places__retry { margin-top: .75rem; }
+.admin-places__table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); }
+.admin-places__table { width: 100%; border-collapse: collapse; }
+.admin-places__table th, .admin-places__table td { padding: .8rem; border-bottom: 1px solid var(--color-border); text-align: left; vertical-align: top; }
+.admin-places__table tbody tr:last-child > * { border-bottom: 0; }
+.admin-places__name { color: var(--color-primary-dark); }
+.admin-places__area { display: block; margin-top: .2rem; color: var(--color-muted); font-weight: 400; }
+.admin-places__statuses { display: flex; flex-wrap: wrap; gap: .35rem; }
+.admin-places__status { display: inline-flex; min-height: 1.75rem; align-items: center; padding: .15rem .5rem; border: 1px solid currentColor; border-radius: 999px; font-size: .82rem; font-weight: 800; white-space: nowrap; }
+.admin-places__status--draft { color: #8a4b00; background: #fff4d6; }
+.admin-places__status--published { color: #08633a; background: #dcfce7; }
+.admin-places__status--archived { color: #5c4b40; background: #eee7e1; }
+.admin-places__status--revision { color: #5a3d87; background: #f1e8ff; }
+.admin-places__action { display: inline-flex; align-items: center; justify-content: center; color: var(--color-primary-dark); font-weight: 800; }
+.admin-places__cards { display: none; margin: 0; padding: 0; list-style: none; }
+.admin-places__card { display: grid; gap: .7rem; padding: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); }
+.admin-places__card-title, .admin-places__card p { margin: 0; }
+.admin-places__card-details { display: grid; gap: .45rem; margin: 0; }
+.admin-places__card-details dd, .admin-places__actions { margin: 0; }
+.admin-places__pagination { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
+.admin-places__page { padding: .5rem .75rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-primary-dark); font: inherit; font-weight: 750; cursor: pointer; }
+.admin-places__page:disabled { cursor: not-allowed; opacity: .55; }
+.admin-places__page-summary { color: var(--color-muted); font-weight: 700; }
+.admin-places input:focus-visible, .admin-places select:focus-visible, .admin-places a:focus-visible, .admin-places button:focus-visible { outline: 3px solid var(--color-primary-dark); outline-offset: 3px; }
+@media (max-width: 699px) { .admin-places__filters { grid-template-columns: 1fr; } .admin-places__table-wrap { display: none; } .admin-places__cards { display: grid; gap: .75rem; } }
+@media (prefers-reduced-motion: reduce) { .admin-places * { scroll-behavior: auto; transition: none !important; animation: none !important; } }
