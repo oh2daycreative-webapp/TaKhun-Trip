@@ -286,18 +286,21 @@ function transactionFixture(action, options = {}) {
     };
   }
   if (action === "UNPUBLISH") {
-    return { places: [place("TX-PLACE", { entity_version: 2, published_version: 2 })], drafts: [] };
+    return {
+      places: [place("TX-PLACE", { entity_version: 2, published_version: 2, name_th: "retained published" })],
+      drafts: options.unpublishWithDraft ? [draft("TX-PLACE", 2, 2, { name_th: "preserved working draft" })] : []
+    };
   }
   if (action === "ARCHIVE") {
     return {
       places: [place("TX-PLACE", options.archiveDraftSource ? { status: "draft", entity_version: 4, published_version: 0 } : { entity_version: 4, published_version: 3 })],
-      drafts: [draft("TX-PLACE", 4, options.archiveDraftSource ? 0 : 3, { name_th: "retained draft" })]
+      drafts: options.archiveWithoutDraft ? [] : [draft("TX-PLACE", 4, options.archiveDraftSource ? 0 : 3, { name_th: "retained draft" })]
     };
   }
   if (action === "RESTORE") {
     return {
       places: [place("TX-PLACE", { status: "archived", entity_version: 4, published_version: 3 })],
-      drafts: []
+      drafts: options.restoreWithDraft ? [draft("TX-PLACE", 4, 3, { name_th: "retained archived draft" })] : []
     };
   }
   throw new Error(`unknown synthetic action: ${action}`);
@@ -316,7 +319,14 @@ function loadTransactionBackend(action, options = {}) {
   const sheets = {
     places: makeSheet(PLACE_HEADERS, fixture.places),
     place_drafts: makeSheet(DRAFT_HEADERS, fixture.drafts),
-    activity_logs: makeSheet(AUDIT_HEADERS, [])
+    activity_logs: makeSheet(AUDIT_HEADERS, []),
+    routes: makeSheet(DEPENDENCY_HEADERS.routes, options.routes || []),
+    route_places: makeSheet(DEPENDENCY_HEADERS.route_places, options.route_places || []),
+    products: makeSheet(DEPENDENCY_HEADERS.products, options.products || []),
+    events: makeSheet(DEPENDENCY_HEADERS.events, options.events || []),
+    gallery: makeSheet(DEPENDENCY_HEADERS.gallery, options.gallery || []),
+    trip_templates: makeSheet(DEPENDENCY_HEADERS.trip_templates, options.trip_templates || []),
+    reviews: makeSheet(DEPENDENCY_HEADERS.reviews, options.reviews || [])
   };
   if (options.publishedFormulaField) sheets.places.formulas[0].add(options.publishedFormulaField);
   for (const [sheetName, cells] of Object.entries(options.formulaCells || {})) {
@@ -631,6 +641,12 @@ function callPublish(runtime, payloadOverrides = {}) {
   }));
 }
 
+function callLifecycle(runtime, action, payloadOverrides = {}) {
+  const payload = { place_id: "TX-PLACE", expected_version: action === "UNPUBLISH" ? 2 : 4, ...payloadOverrides };
+  if (action === "ARCHIVE" && !Object.prototype.hasOwnProperty.call(payload, "confirmed")) payload.confirmed = true;
+  return plain(runtime.context[`admin${action[0]}${action.slice(1).toLowerCase()}Place_`]("TOKEN", payload));
+}
+
 function populatedRows(runtime, sheetName) {
   const sheet = runtime.sheets[sheetName];
   return sheet.rows.filter((row) => row.some((cell) => cell !== null && cell !== undefined && String(cell).trim() !== ""));
@@ -797,16 +813,16 @@ function inspect(runtime, payload = { place_id: "PLC-PUBLISHED" }) {
   return plain(runtime.context.adminInspectPlaceDependencies_("TOKEN", payload));
 }
 
-test("Task 8 exports dependency inspection but no later lifecycle action", () => {
+test("Task 9 exports dependency inspection and exact lifecycle actions but no later action", () => {
   const create = loadTransactionBackend("CREATE");
   assert.equal(typeof create.context.adminCreatePlace_, "function");
   assert.equal(typeof create.context.adminSavePlaceDraft_, "function");
   assert.equal(typeof create.context.adminPublishPlace_, "function");
   assert.equal(typeof create.context.adminInspectPlaceDependencies_, "function");
-  for (const forbidden of [
-    "adminUnpublishPlace_", "adminArchivePlace_", "adminRestorePlace_",
-    "adminGetPlaceMediaOptions_"
-  ]) assert.equal(typeof create.context[forbidden], "undefined", forbidden);
+  for (const action of ["adminUnpublishPlace_", "adminArchivePlace_", "adminRestorePlace_"]) {
+    assert.equal(typeof create.context[action], "function", action);
+  }
+  assert.equal(typeof create.context.adminGetPlaceMediaOptions_, "undefined");
 });
 
 test("dependencies authorize all Admin roles and reject fake role invalid session and noncanonical payloads", () => {
@@ -918,12 +934,12 @@ test("dependencies fail closed for unknown duplicate malformed unsupported and o
   }
 });
 
-test("dependency inspection Router is POST-only and cannot archive or persist confirmation", () => {
+test("dependency inspection remains advisory and cannot persist lifecycle confirmation", () => {
   const runtime = loadBackend({ data: dependencyFixtures() });
   assert.equal(post(runtime.context, { action: "adminInspectPlaceDependencies", token: "TOKEN", payload: { place_id: "PLC-PUBLISHED" } }).ok, true);
   assert.equal(response(runtime.context.routeRequest_("GET", { parameter: { action: "adminInspectPlaceDependencies", token: "TOKEN" } })).error.code, "UNKNOWN_ACTION");
   for (const action of ["adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace"]) {
-    assert.equal(post(runtime.context, { action, token: "TOKEN", payload: { place_id: "PLC-PUBLISHED", confirmed: true } }).error.code, "UNKNOWN_ACTION");
+    assert.equal(post(runtime.context, { action, token: "TOKEN", payload: { place_id: "PLC-PUBLISHED", confirmed: true } }).error.code, "VALIDATION_ERROR");
   }
   assert.equal(runtime.data.places.find((row) => row.place_id === "PLC-PUBLISHED").status, "published");
   assert.equal(runtime.calls.writes.length, 0);
@@ -1773,6 +1789,216 @@ test("Publish mutation proofs catch skipped validation epoch audit and draft con
   }
 });
 
+test("Task 9 lifecycle actions authorize only super_admin and editor and require exact payloads", () => {
+  for (const action of ["UNPUBLISH", "ARCHIVE", "RESTORE"]) {
+    for (const role of ["super_admin", "editor"]) {
+      assert.equal(callLifecycle(loadTransactionBackend(action, { role }), action).ok, true, `${action} ${role}`);
+    }
+    for (const role of ["reviewer", "viewer"]) {
+      const runtime = loadTransactionBackend(action, { role });
+      assertError(callLifecycle(runtime, action), "FORBIDDEN");
+      assert.deepEqual(runtime.calls.sequence, ["auth"]);
+      assert.deepEqual(runtime.calls.writes, []);
+    }
+    const unauthorized = loadTransactionBackend(action, { authError: "UNAUTHORIZED" });
+    assertError(callLifecycle(unauthorized, action), "UNAUTHORIZED");
+  }
+  for (const [action, payload] of [
+    ["UNPUBLISH", { place_id: " TX-PLACE", expected_version: 2 }],
+    ["UNPUBLISH", { place_id: "TX-PLACE", expected_version: 2, force: true }],
+    ["ARCHIVE", { place_id: "TX-PLACE", expected_version: 4 }],
+    ["ARCHIVE", { place_id: "TX-PLACE", expected_version: 4, confirmed: "true" }],
+    ["ARCHIVE", { place_id: "TX-PLACE", expected_version: 4, confirmed: true, dependency_count: 0 }],
+    ["RESTORE", { place_id: "TX-PLACE", expected_version: "4" }]
+  ]) {
+    const runtime = loadTransactionBackend(action);
+    const method = runtime.context[`admin${action[0]}${action.slice(1).toLowerCase()}Place_`];
+    assertError(plain(method("TOKEN", payload)), "VALIDATION_ERROR");
+    assert.equal(runtime.calls.events.includes("tryLock:10000"), false);
+    assert.deepEqual(runtime.calls.writes, []);
+  }
+});
+
+test("Unpublish preserves or reconstructs one draft synchronizes versions hides Public bumps epoch and audits", () => {
+  for (const withDraft of [false, true]) {
+    const runtime = loadTransactionBackend("UNPUBLISH", { unpublishWithDraft: withDraft });
+    const priorPlace = sheetRecord(runtime, "places");
+    const priorDraft = withDraft ? sheetRecord(runtime, "place_drafts") : null;
+    assert.equal(publicPlaceDetail(runtime).ok, true);
+    const result = callLifecycle(runtime, "UNPUBLISH");
+    assert.equal(result.ok, true);
+    assert.deepEqual(Object.keys(result.data), WRITE_SUCCESS_KEYS);
+    assert.deepEqual({ status: result.data.status, entity: result.data.entity_version, working: result.data.working_version,
+      published: result.data.published_version, draft: result.data.has_active_draft },
+    { status: "draft", entity: 3, working: 3, published: 2, draft: true });
+    const afterPlace = sheetRecord(runtime, "places");
+    const afterDraft = sheetRecord(runtime, "place_drafts");
+    assert.equal(afterPlace.status, "draft");
+    assert.equal(afterPlace.entity_version, 3);
+    assert.equal(afterPlace.published_version, 2);
+    assert.equal(afterDraft.draft_version, 3);
+    assert.equal(afterDraft.base_published_version, 2);
+    assert.equal(afterDraft.name_th, withDraft ? priorDraft.name_th : priorPlace.name_th);
+    assert.equal(runtime.properties.get("PLACE_PUBLIC_CACHE_EPOCH"), "42");
+    assert.equal(runtime.calls.propertyWrites.filter((entry) => entry.phase === "action").length, 1);
+    assert.equal(sheetRecord(runtime, "activity_logs").action, "UNPUBLISH");
+    assertError(publicPlaceDetail(runtime), "NOT_FOUND");
+  }
+});
+
+test("Archive re-inspects dependencies under lock and applies exact published and draft epoch rules", () => {
+  for (const draftSource of [false, true]) {
+    const runtime = loadTransactionBackend("ARCHIVE", { archiveDraftSource: draftSource });
+    const result = callLifecycle(runtime, "ARCHIVE");
+    assert.equal(result.ok, true);
+    assert.equal(result.data.status, "archived");
+    assert.equal(result.data.entity_version, 5);
+    assert.equal(result.data.published_version, draftSource ? null : 3);
+    assert.equal(sheetRecord(runtime, "place_drafts").draft_version, 5);
+    assert.equal(sheetRecord(runtime, "activity_logs").action, "ARCHIVE");
+    for (const name of Object.keys(DEPENDENCY_HEADERS)) {
+      assert.equal(runtime.calls.reads.some((entry) => entry.name === name), true, `${name} must be freshly inspected`);
+    }
+    if (draftSource) {
+      assert.deepEqual(runtime.calls.propertyReads, []);
+      assert.deepEqual(runtime.calls.propertyWrites, []);
+    } else {
+      assert.equal(runtime.properties.get("PLACE_PUBLIC_CACHE_EPOCH"), "42");
+      assertError(publicPlaceDetail(runtime), "NOT_FOUND");
+    }
+  }
+
+  const noDraft = loadTransactionBackend("ARCHIVE", { archiveWithoutDraft: true });
+  const noDraftResult = callLifecycle(noDraft, "ARCHIVE");
+  assert.equal(noDraftResult.ok, true);
+  assert.equal(noDraftResult.data.has_active_draft, false);
+  assert.equal(populatedRows(noDraft, "place_drafts").length, 0, "published Archive retains verified draft absence");
+
+  const appeared = loadTransactionBackend("ARCHIVE", {
+    routes: [{ route_id: "ROUTE-NEW", name_th: "New dependency", name_en: "", status: "published" }],
+    route_places: [{ route_place_id: "RP-NEW", route_id: "ROUTE-NEW", place_id: "TX-PLACE", status: "published" }]
+  });
+  assert.equal(callLifecycle(appeared, "ARCHIVE").ok, true, "fresh valid dependency is detected and confirmed server-side");
+  assert.equal(appeared.calls.reads.some((entry) => entry.name === "route_places"), true);
+
+  const stalePreview = loadTransactionBackend("ARCHIVE", {
+    route_places: [{ route_place_id: "RP-NEW", route_id: "ROUTE-MISSING", place_id: "TX-PLACE", status: "published" }]
+  });
+  const before = transactionBefore(stalePreview);
+  assertError(callLifecycle(stalePreview, "ARCHIVE"), "SERVER_ERROR");
+  assertRestored(stalePreview, before);
+});
+
+test("Restore returns archived content to draft only while preserving retained drafts and never touching epoch", () => {
+  for (const withDraft of [false, true]) {
+    const runtime = loadTransactionBackend("RESTORE", { restoreWithDraft: withDraft });
+    const retained = withDraft ? sheetRecord(runtime, "place_drafts") : sheetRecord(runtime, "places");
+    const result = callLifecycle(runtime, "RESTORE");
+    assert.equal(result.ok, true);
+    assert.deepEqual({ status: result.data.status, entity: result.data.entity_version, published: result.data.published_version,
+      draft: result.data.has_active_draft }, { status: "draft", entity: 5, published: 3, draft: true });
+    assert.equal(sheetRecord(runtime, "place_drafts").name_th, retained.name_th);
+    assert.equal(sheetRecord(runtime, "place_drafts").draft_version, 5);
+    assert.equal(sheetRecord(runtime, "place_drafts").base_published_version, 3);
+    assert.equal(sheetRecord(runtime, "places").status, "draft");
+    assert.deepEqual(runtime.calls.propertyReads, []);
+    assert.deepEqual(runtime.calls.propertyWrites, []);
+    assert.equal(sheetRecord(runtime, "activity_logs").action, "RESTORE");
+    assertError(publicPlaceDetail(runtime), "NOT_FOUND");
+  }
+});
+
+test("Lifecycle conflicts invalid transitions and post-mutation failures never return false success", () => {
+  for (const action of ["UNPUBLISH", "ARCHIVE", "RESTORE"]) {
+    const stale = loadTransactionBackend(action);
+    assertError(callLifecycle(stale, action, { expected_version: 1 }), "CONFLICT");
+    assert.deepEqual(stale.calls.writes, []);
+    assert.deepEqual(stale.calls.propertyWrites, []);
+  }
+  for (const [action, status] of [["UNPUBLISH", "draft"], ["UNPUBLISH", "archived"], ["ARCHIVE", "archived"], ["RESTORE", "published"], ["RESTORE", "draft"]]) {
+    const runtime = loadTransactionBackend(action, action === "UNPUBLISH" && status === "draft" ? { unpublishWithDraft: true } : {});
+    runtime.sheets.places.rows[0][PLACE_HEADERS.indexOf("status")] = status;
+    if (status === "draft" && runtime.sheets.place_drafts.rows.length === 0) {
+      runtime.sheets.place_drafts.rows.push(DRAFT_HEADERS.map((header) => draft("TX-PLACE", 4, 3)[header] ?? ""));
+      runtime.sheets.place_drafts.formulas.push(new Set());
+    }
+    assertError(callLifecycle(runtime, action), "VALIDATION_ERROR");
+    assert.deepEqual(runtime.calls.writes, []);
+  }
+  const archivedPublish = loadTransactionBackend("PUBLISH");
+  archivedPublish.sheets.places.rows[0][PLACE_HEADERS.indexOf("status")] = "archived";
+  assertError(callPublish(archivedPublish), "VALIDATION_ERROR");
+
+  for (const action of ["UNPUBLISH", "ARCHIVE", "RESTORE"]) {
+    const failures = [
+      { failPlaceUpdateAfterWrite: true },
+      { failAuditAppendAfterWrite: true },
+      { failFinalPublishVerification: true }
+    ];
+    if (action !== "ARCHIVE") failures.push({ failDraftAppendAfterWrite: true });
+    if (action !== "RESTORE") failures.push({ failEpochWriteAfterWrite: true });
+    for (const options of failures) {
+      const runtime = loadTransactionBackend(action, options);
+      const before = transactionBefore(runtime);
+      assertError(callLifecycle(runtime, action), "SERVER_ERROR");
+      assertRestored(runtime, before);
+      assert.equal(runtime.lock.released, 1);
+      assert.equal(runtime.calls.events.at(-1), "releaseLock");
+    }
+  }
+  const compensationFailure = loadTransactionBackend("UNPUBLISH", { failAuditAppendAfterWrite: true, failRestoreWrite: true });
+  const safe = callLifecycle(compensationFailure, "UNPUBLISH");
+  assertError(safe, "SERVER_ERROR");
+  assert.equal(JSON.stringify(safe).includes("synthetic"), false);
+});
+
+test("Task 9 mutation proofs reject skipped confirmation reinspection draft synchronization and conditional epoch", () => {
+  const source = read("apps-script/AdminPlaceService.gs");
+  const mutations = [
+    {
+      label: "confirmation",
+      source: source.replace("      (requireConfirmation && source.confirmed !== true))", "      false)"),
+      run(runtime) {
+        const result = plain(runtime.context.adminArchivePlace_("TOKEN", { place_id: "TX-PLACE", expected_version: 4, confirmed: false }));
+        assertError(result, "VALIDATION_ERROR");
+      },
+      runtime: (serviceSource) => loadTransactionBackend("ARCHIVE", { serviceSource })
+    },
+    {
+      label: "locked dependency reinspection",
+      source: source.replace("      AdminPlaceService_inspectDependencies_(parameters.place_id);", "      void parameters.place_id;"),
+      run(runtime) { assertError(callLifecycle(runtime, "ARCHIVE"), "SERVER_ERROR"); },
+      runtime: (serviceSource) => loadTransactionBackend("ARCHIVE", {
+        serviceSource,
+        route_places: [{ route_place_id: "RP-NEW", route_id: "ROUTE-MISSING", place_id: "TX-PLACE", status: "published" }]
+      })
+    },
+    {
+      label: "draft version synchronization",
+      source: source.replace(
+        "var draftPatch = { draft_version: nextVersion, updated_at: occurredAt, updated_by: admin.admin_id };",
+        "var draftPatch = { draft_version: lifecycle.entityVersion, updated_at: occurredAt, updated_by: admin.admin_id };"
+      ),
+      run(runtime) {
+        assert.equal(callLifecycle(runtime, "RESTORE").ok, true);
+        assert.equal(sheetRecord(runtime, "place_drafts").draft_version, 5);
+      },
+      runtime: (serviceSource) => loadTransactionBackend("RESTORE", { restoreWithDraft: true, serviceSource })
+    },
+    {
+      label: "published lifecycle epoch",
+      source: source.replace("    if (bumpEpoch) {\n      nextEpoch = PlaceService_bumpCacheEpoch_();", "    if (false) {\n      nextEpoch = PlaceService_bumpCacheEpoch_();"),
+      run(runtime) { assert.equal(callLifecycle(runtime, "UNPUBLISH").ok, true); assert.equal(runtime.properties.get("PLACE_PUBLIC_CACHE_EPOCH"), "42"); },
+      runtime: (serviceSource) => loadTransactionBackend("UNPUBLISH", { serviceSource })
+    }
+  ];
+  for (const mutation of mutations) {
+    assert.notEqual(mutation.source, source, `${mutation.label} mutation target must match`);
+    const runtime = mutation.runtime(mutation.source);
+    assert.throws(() => mutation.run(runtime), undefined, `${mutation.label} mutant must be rejected`);
+  }
+});
+
 test("transaction lock timeout fails closed and release occurs only from finally", () => {
   const timeout = loadTransactionBackend("UPDATE_DRAFT", { lockTimeout: true });
   assertError(runSyntheticTransaction(timeout), "SERVER_ERROR");
@@ -1897,7 +2123,7 @@ test("transaction compensation table restores every action and fully clears only
   assert.equal(draftArchive.calls.propertyWrites.length, 0, "draft ARCHIVE must not write the Public epoch");
 });
 
-test("transaction Router exposes Task 8 inspection but no force or later lifecycle path", () => {
+test("transaction Router exposes Task 9 lifecycle paths but no force or later route", () => {
   const { context, calls } = loadBackend();
   for (const action of ["adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace"]) {
     const result = post(context, { action, token: "TOKEN", payload: { force: true } });
@@ -1906,9 +2132,9 @@ test("transaction Router exposes Task 8 inspection but no force or later lifecyc
   assertError(post(context, { action: "adminInspectPlaceDependencies", token: "TOKEN", payload: { force: true } }), "VALIDATION_ERROR");
   for (const action of ["adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace"]) {
     const result = post(context, { action, token: "TOKEN", payload: { force: true } });
-    assertError(result, "UNKNOWN_ACTION");
+    assertError(result, "VALIDATION_ERROR");
   }
-  assert.equal(calls.auth.length, 4);
+  assert.equal(calls.auth.length, 7);
   assert.equal(calls.writes.length, 0);
 });
 

@@ -224,6 +224,23 @@ test("Public projection changes only after a complete draft snapshot is promoted
   }
 });
 
+test("Public lifecycle isolation follows only committed Place status", () => {
+  const { context, rows } = loadBackend();
+  const retained = rows.find((row) => row.place_id === "P-2");
+  const published = plain(context.buildPlaceDetailResponse_([{ ...retained, status: "published" }], { place_id: "P-2", lang: "th" }));
+  assert.equal(published.ok, true);
+  for (const status of ["draft", "archived"]) {
+    const lifecycleRows = [{ ...retained, status }];
+    assert.equal(plain(context.buildPlaceDetailResponse_(lifecycleRows, { place_id: "P-2", lang: "th" })).error.code, "NOT_FOUND");
+    assert.deepEqual(plain(context.buildPlacesResponse_(lifecycleRows, {})).data.items, []);
+  }
+  assert.deepEqual(
+    plain(context.buildPlaceDetailResponse_([{ ...retained, status: "published" }], { place_id: "P-2", lang: "th" })),
+    published,
+    "failed Unpublish or Archive must leave the prior Public snapshot visible"
+  );
+});
+
 test("map returns only published finite in-range coordinate pairs", () => {
   const { context, rows } = loadBackend();
   const result = plain(context.buildMapPlacesResponse_(rows, {}));

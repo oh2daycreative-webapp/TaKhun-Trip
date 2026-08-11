@@ -24,6 +24,9 @@ var AdminPlaceService_DETAIL_KEYS_ = ["place_id", "view"];
 var AdminPlaceService_CREATE_KEYS_ = ["content"];
 var AdminPlaceService_SAVE_KEYS_ = ["place_id", "expected_version", "content"];
 var AdminPlaceService_PUBLISH_KEYS_ = ["place_id", "expected_version"];
+var AdminPlaceService_UNPUBLISH_KEYS_ = ["place_id", "expected_version"];
+var AdminPlaceService_ARCHIVE_KEYS_ = ["place_id", "expected_version", "confirmed"];
+var AdminPlaceService_RESTORE_KEYS_ = ["place_id", "expected_version"];
 var AdminPlaceService_DEPENDENCY_KEYS_ = ["place_id"];
 var AdminPlaceService_DEPENDENCY_COMMON_STATUSES_ = ["draft", "published", "hidden", "archived", "deleted"];
 var AdminPlaceService_DEPENDENCY_REVIEW_STATUSES_ = ["pending", "approved", "hidden", "deleted"];
@@ -273,6 +276,161 @@ function adminInspectPlaceDependencies_(token, payload) {
     var parameters = AdminPlaceService_dependencyParameters_(payload);
     return AdminPlaceService_success_(AdminPlaceService_inspectDependencies_(parameters.place_id));
   });
+}
+
+function adminUnpublishPlace_(token, payload) {
+  return AdminPlaceService_execute_(token, function (admin) {
+    AdminPlaceService_requireWriteRole_(admin);
+    var parameters = AdminPlaceService_lifecycleParameters_(payload, AdminPlaceService_UNPUBLISH_KEYS_, false);
+    return AdminPlaceService_withWriteLock_(function () {
+      AdminPlaceService_requireContext_(true);
+      var state = AdminPlaceService_captureState_(parameters.place_id, true);
+      var lifecycle = AdminPlaceService_requireLifecycleState_(state, parameters.expected_version, ["published"]);
+      return AdminPlaceService_applyLifecycleWrite_(admin, state, lifecycle, "UNPUBLISH", "draft", true, true, false);
+    });
+  });
+}
+
+function adminArchivePlace_(token, payload) {
+  return AdminPlaceService_execute_(token, function (admin) {
+    AdminPlaceService_requireWriteRole_(admin);
+    var parameters = AdminPlaceService_lifecycleParameters_(payload, AdminPlaceService_ARCHIVE_KEYS_, true);
+    return AdminPlaceService_withWriteLock_(function () {
+      var context = AdminPlaceService_requireContext_(true);
+      var place = context.placesById[parameters.place_id];
+      if (!place) throw new Error("NOT_FOUND");
+      if (place.row.status !== "draft" && place.row.status !== "published") throw new Error("VALIDATION_ERROR");
+      var includeEpoch = place.row.status === "published";
+      var state = AdminPlaceService_captureState_(parameters.place_id, includeEpoch);
+      var lifecycle = AdminPlaceService_requireLifecycleState_(state, parameters.expected_version, ["draft", "published"]);
+      if ((lifecycle.status === "published") !== includeEpoch) throw new Error("ADMIN_PLACE_STATE_VERIFY");
+      AdminPlaceService_inspectDependencies_(parameters.place_id);
+      return AdminPlaceService_applyLifecycleWrite_(
+        admin, state, lifecycle, "ARCHIVE", "archived", false, includeEpoch, false
+      );
+    });
+  });
+}
+
+function adminRestorePlace_(token, payload) {
+  return AdminPlaceService_execute_(token, function (admin) {
+    AdminPlaceService_requireWriteRole_(admin);
+    var parameters = AdminPlaceService_lifecycleParameters_(payload, AdminPlaceService_RESTORE_KEYS_, false);
+    return AdminPlaceService_withWriteLock_(function () {
+      AdminPlaceService_requireContext_(true);
+      var state = AdminPlaceService_captureState_(parameters.place_id, false);
+      var lifecycle = AdminPlaceService_requireLifecycleState_(state, parameters.expected_version, ["archived"]);
+      return AdminPlaceService_applyLifecycleWrite_(admin, state, lifecycle, "RESTORE", "draft", true, false, true);
+    });
+  });
+}
+
+function AdminPlaceService_lifecycleParameters_(payload, keys, requireConfirmation) {
+  var source = AdminPlaceService_plainObject_(payload, false);
+  AdminPlaceService_requireExactKeys_(source, keys);
+  if (!AdminPlaceService_validId_(source.place_id) || typeof source.expected_version !== "number" ||
+      !Number.isSafeInteger(source.expected_version) || source.expected_version < 1 ||
+      (requireConfirmation && source.confirmed !== true)) {
+    throw new Error("VALIDATION_ERROR");
+  }
+  return { place_id: source.place_id, expected_version: source.expected_version };
+}
+
+function AdminPlaceService_requireLifecycleState_(state, expectedVersion, allowedStatuses) {
+  if (!state || !state.rows || !state.rows.place || !Array.isArray(allowedStatuses)) throw new Error("NOT_FOUND");
+  var place = state.rows.place.values;
+  if (allowedStatuses.indexOf(place.status) === -1) throw new Error("VALIDATION_ERROR");
+  var entityVersion = AdminPlaceService_storedInteger_(place.entity_version, true);
+  var publishedVersion = AdminPlaceService_storedInteger_(place.published_version, false);
+  var draft = state.rows.draft ? state.rows.draft.values : null;
+  if (draft) {
+    var draftVersion = AdminPlaceService_storedInteger_(draft.draft_version, true);
+    var basePublishedVersion = AdminPlaceService_storedInteger_(draft.base_published_version, false);
+    AdminPlaceService_requireExpectedVersion_(expectedVersion, entityVersion, basePublishedVersion, publishedVersion);
+    if (draftVersion !== entityVersion) throw new Error("ADMIN_PLACE_DRAFT_VERSION");
+  } else {
+    AdminPlaceService_requireExpectedVersion_(expectedVersion, entityVersion);
+  }
+  if (place.status === "draft" && !draft) throw new Error("ADMIN_PLACE_DRAFT_REQUIRED");
+  if (entityVersion >= Number.MAX_SAFE_INTEGER) throw new Error("ADMIN_PLACE_VERSION");
+  return { status: place.status, entityVersion: entityVersion, publishedVersion: publishedVersion, hasDraft: Boolean(draft) };
+}
+
+function AdminPlaceService_applyLifecycleWrite_(admin, state, lifecycle, action, targetStatus, ensureDraft, bumpEpoch, clearArchive) {
+  AdminPlaceService_setSelectiveRestore_(state, "place", []);
+  AdminPlaceService_setSelectiveRestore_(state, "draft", []);
+  try {
+    var occurredAt = new Date().toISOString();
+    var nextVersion = lifecycle.entityVersion + 1;
+    var placePatch = {
+      status: targetStatus,
+      entity_version: nextVersion,
+      updated_at: occurredAt,
+      updated_by: admin.admin_id
+    };
+    var placeFields = ["status", "entity_version", "updated_at", "updated_by"];
+    if (action === "ARCHIVE") {
+      placePatch.archived_at = occurredAt;
+      placePatch.archived_by = admin.admin_id;
+      placeFields.push("archived_at", "archived_by");
+    } else if (clearArchive) {
+      placePatch.archived_at = "";
+      placePatch.archived_by = "";
+      placeFields.push("archived_at", "archived_by");
+    }
+    AdminPlaceService_applySelectivePatch_(
+      state, "place", AdminPlaceSchema_PLACES_SHEET_NAME_, state.rows.place.sourceRowNumber, placeFields, placePatch
+    );
+    var intendedPlace = {
+      sourceRowNumber: state.rows.place.sourceRowNumber,
+      values: AdminPlaceService_mergeRow_(state.rows.place.values, placePatch)
+    };
+
+    var intendedDraft = { absent: true, sourceRowNumber: null };
+    if (state.rows.draft) {
+      var draftPatch = { draft_version: nextVersion, updated_at: occurredAt, updated_by: admin.admin_id };
+      AdminPlaceService_applySelectivePatch_(
+        state, "draft", AdminPlaceSchema_DRAFTS_SHEET_NAME_, state.rows.draft.sourceRowNumber,
+        ["draft_version", "updated_at", "updated_by"], draftPatch
+      );
+      intendedDraft = {
+        sourceRowNumber: state.rows.draft.sourceRowNumber,
+        values: AdminPlaceService_mergeRow_(state.rows.draft.values, draftPatch)
+      };
+    } else if (ensureDraft) {
+      var draftRecord = AdminPlaceService_newDraft_(
+        state.place_id, AdminPlaceService_projectContent_(state.rows.place.values), nextVersion,
+        lifecycle.publishedVersion, occurredAt, admin.admin_id, state.rows.place.values
+      );
+      var appendedDraft = SheetService_appendObjectWithRow_(
+        AdminPlaceSchema_DRAFTS_SHEET_NAME_, state.draft_headers, draftRecord
+      );
+      state.allocated_rows.draft = AdminPlaceService_appendedRowNumber_(appendedDraft);
+      intendedDraft = {
+        sourceRowNumber: state.allocated_rows.draft,
+        values: AdminPlaceService_completeRow_(state.draft_headers, draftRecord)
+      };
+    }
+
+    var intended = { place: intendedPlace, draft: intendedDraft };
+    AdminPlaceService_verifyIntendedState_(state, intended);
+    var nextEpoch = null;
+    if (bumpEpoch) {
+      nextEpoch = PlaceService_bumpCacheEpoch_();
+      AdminPlaceService_verifyCacheEpoch_(nextEpoch);
+    }
+    state.audit = AdminPlaceService_appendVerifiedAudit_(admin, action, state.place_id);
+    AdminPlaceService_verifyIntendedState_(state, intended);
+    if (bumpEpoch) AdminPlaceService_verifyCacheEpoch_(nextEpoch);
+    var response = AdminPlaceService_success_(AdminPlaceService_writeSuccess_(
+      state.place_id, targetStatus, nextVersion, lifecycle.publishedVersion, Boolean(state.rows.draft || ensureDraft),
+      AdminPlaceService_safeText_(state.rows.place.values.created_at), occurredAt
+    ));
+    state.audit = null;
+    return response;
+  } catch (_error) {
+    return AdminPlaceService_failClosed_(state);
+  }
 }
 
 function AdminPlaceService_dependencyParameters_(payload) {
@@ -720,10 +878,11 @@ function AdminPlaceService_verifyIntendedState_(snapshot, intended) {
       return entry && entry.values && entry.values.place_id === snapshot.place_id;
     });
     if (target.expected && target.expected.absent) {
-      if (!Number.isSafeInteger(target.expected.sourceRowNumber) || target.expected.sourceRowNumber < 2 ||
-          matches.length !== 0 || table.rows.some(function (entry) {
+      var retainedAbsence = target.expected.sourceRowNumber === null;
+      if ((!retainedAbsence && (!Number.isSafeInteger(target.expected.sourceRowNumber) || target.expected.sourceRowNumber < 2)) ||
+          matches.length !== 0 || (!retainedAbsence && table.rows.some(function (entry) {
             return entry && entry.sourceRowNumber === target.expected.sourceRowNumber;
-          })) {
+          }))) {
         throw new Error("ADMIN_PLACE_WRITE_VERIFY");
       }
       return;
