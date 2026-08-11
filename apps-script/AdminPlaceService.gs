@@ -1,6 +1,8 @@
 var AdminPlaceService_DEFAULT_PAGE_ = 1;
 var AdminPlaceService_DEFAULT_PAGE_SIZE_ = 20;
 var AdminPlaceService_MAX_PAGE_SIZE_ = 100;
+var AdminPlaceService_AUDIT_ACTIONS_ = ["CREATE", "UPDATE_DRAFT", "PUBLISH", "UNPUBLISH", "ARCHIVE", "RESTORE"];
+var AdminPlaceService_PUBLIC_CACHE_EPOCH_KEY_ = "PLACE_PUBLIC_CACHE_EPOCH";
 
 var AdminPlaceService_ALLOWED_ROLES_ = ["super_admin", "editor", "reviewer", "viewer"];
 var AdminPlaceService_WRITE_ROLES_ = ["super_admin", "editor"];
@@ -47,8 +49,319 @@ function AdminPlaceService_execute_(token, operation) {
     if (code === "UNAUTHORIZED") return AdminPlaceService_error_("UNAUTHORIZED", "กรุณาเข้าสู่ระบบ");
     if (code === "VALIDATION_ERROR") return AdminPlaceService_error_("VALIDATION_ERROR", "ข้อมูลคำขอไม่ถูกต้อง");
     if (code === "NOT_FOUND") return AdminPlaceService_error_("NOT_FOUND", "ไม่พบสถานที่");
+    if (code === "CONFLICT") return AdminPlaceService_error_("CONFLICT", "ข้อมูลถูกแก้ไขแล้ว กรุณาโหลดข้อมูลล่าสุด");
     return AdminPlaceService_error_("SERVER_ERROR", "เกิดข้อผิดพลาดของระบบ");
   }
+}
+
+function AdminPlaceService_withWriteLock_(operation) {
+  if (typeof operation !== "function") throw new Error("ADMIN_PLACE_WRITE_OPERATION");
+  var lock = LockService.getScriptLock();
+  var acquired = false;
+  try {
+    if (!lock || typeof lock.tryLock !== "function" || !lock.tryLock(AdminPlaceSchema_LOCK_TIMEOUT_MS_)) {
+      throw new Error("ADMIN_PLACE_WRITE_LOCK");
+    }
+    acquired = true;
+    return operation();
+  } finally {
+    if (acquired) lock.releaseLock();
+  }
+}
+
+function AdminPlaceService_requireExpectedVersion_(expectedVersion, currentVersion, draftBasePublishedVersion, currentPublishedVersion) {
+  if (arguments.length !== 2 && arguments.length !== 4) throw new Error("VALIDATION_ERROR");
+  if (typeof expectedVersion !== "number" || !Number.isSafeInteger(expectedVersion) || expectedVersion < 1) {
+    throw new Error("VALIDATION_ERROR");
+  }
+  var authoritativeVersion = AdminPlaceService_storedInteger_(currentVersion, true);
+  if (expectedVersion !== authoritativeVersion) throw new Error("CONFLICT");
+  if (arguments.length === 4) {
+    var authoritativeDraftBase = AdminPlaceService_storedInteger_(draftBasePublishedVersion, false);
+    var authoritativePublishedVersion = AdminPlaceService_storedInteger_(currentPublishedVersion, false);
+    if (authoritativeDraftBase !== authoritativePublishedVersion) throw new Error("CONFLICT");
+  }
+  return authoritativeVersion;
+}
+
+function AdminPlaceService_appendVerifiedAudit_(admin, action, placeId) {
+  if (!admin || typeof admin !== "object" || Array.isArray(admin) || !AdminPlaceService_validId_(admin.admin_id)) {
+    throw new Error("ADMIN_PLACE_AUDIT_ACTOR");
+  }
+  if (AdminPlaceService_AUDIT_ACTIONS_.indexOf(action) === -1 || !AdminPlaceService_validId_(placeId)) {
+    throw new Error("ADMIN_PLACE_AUDIT_INPUT");
+  }
+  var auditId = AdminPlaceService_safeText_(Utilities.getUuid());
+  if (!auditId || auditId.length > 128) throw new Error("ADMIN_PLACE_AUDIT_ID");
+  var occurredAt = new Date().toISOString();
+  var record = {
+    audit_id: auditId,
+    actor_admin_id: admin.admin_id,
+    action: action,
+    entity_type: "place",
+    entity_id: placeId,
+    description: action,
+    occurred_at: occurredAt,
+    log_id: auditId,
+    admin_id: admin.admin_id,
+    created_at: occurredAt
+  };
+  var auditHeaders = AdminPlaceSchema_ACTIVITY_BASE_HEADERS_.concat(AdminPlaceSchema_ACTIVITY_APPEND_HEADERS_);
+  var initialAuditTable = SheetService_readTable_(AdminPlaceSchema_ACTIVITY_SHEET_NAME_, auditHeaders);
+  if (initialAuditTable.rows.some(function (entry) { return entry && entry.values && entry.values.audit_id === auditId; })) {
+    throw new Error("ADMIN_PLACE_AUDIT_ID_COLLISION");
+  }
+  var appended = null;
+  var appendAttempted = false;
+  try {
+    appendAttempted = true;
+    appended = SheetService_appendObjectWithRow_(AdminPlaceSchema_ACTIVITY_SHEET_NAME_, auditHeaders, record);
+    if (!appended || !Number.isSafeInteger(appended.sourceRowNumber) || appended.sourceRowNumber < 2) {
+      throw new Error("ADMIN_PLACE_AUDIT_APPEND");
+    }
+    var auditTable = SheetService_readTable_(AdminPlaceSchema_ACTIVITY_SHEET_NAME_, auditHeaders);
+    var auditMatches = auditTable.rows.filter(function (entry) {
+      return entry && entry.values && entry.values.audit_id === auditId;
+    });
+    if (auditMatches.length !== 1 || auditMatches[0].sourceRowNumber !== appended.sourceRowNumber) {
+      throw new Error("ADMIN_PLACE_AUDIT_CARDINALITY");
+    }
+    var verified = auditMatches[0].values;
+    Object.keys(record).forEach(function (field) {
+      if (verified[field] !== record[field]) throw new Error("ADMIN_PLACE_AUDIT_VERIFY");
+    });
+    return true;
+  } catch (error) {
+    if (appendAttempted) {
+      try {
+        var returnedSourceRow = appended && Number.isSafeInteger(appended.sourceRowNumber) && appended.sourceRowNumber >= 2 ?
+          appended.sourceRowNumber : null;
+        var failedAppendTable = SheetService_readTable_(AdminPlaceSchema_ACTIVITY_SHEET_NAME_, auditHeaders);
+        var failedAppendMatches = failedAppendTable.rows.filter(function (entry) {
+          return entry && entry.values && entry.values.audit_id === auditId;
+        });
+        if (failedAppendMatches.length > 1) throw new Error("ADMIN_PLACE_AUDIT_CLEANUP_CARDINALITY");
+        var cleanupSourceRow = failedAppendMatches.length === 1 ? failedAppendMatches[0].sourceRowNumber : null;
+        if (cleanupSourceRow === null && returnedSourceRow !== null) {
+          var returnedRowExistedBefore = initialAuditTable.rows.some(function (entry) {
+            return entry.sourceRowNumber === returnedSourceRow;
+          });
+          var returnedRowExistsAfter = failedAppendTable.rows.some(function (entry) {
+            return entry.sourceRowNumber === returnedSourceRow;
+          });
+          if (!returnedRowExistedBefore && returnedRowExistsAfter) cleanupSourceRow = returnedSourceRow;
+        }
+        if (cleanupSourceRow !== null) {
+          SheetService_clearRow_(AdminPlaceSchema_ACTIVITY_SHEET_NAME_, cleanupSourceRow);
+        }
+        var cleanupTable = SheetService_readTable_(AdminPlaceSchema_ACTIVITY_SHEET_NAME_, auditHeaders);
+        var cleanupFailed = cleanupTable.rows.some(function (entry) {
+          return (cleanupSourceRow !== null && entry.sourceRowNumber === cleanupSourceRow) ||
+            (entry.values && entry.values.audit_id === auditId);
+        });
+        if (cleanupFailed) throw new Error("ADMIN_PLACE_AUDIT_CLEANUP");
+      } catch (cleanupError) {
+        // The owning action remains fail-closed and compensates its Place state.
+      }
+    }
+    throw error;
+  }
+}
+
+function AdminPlaceService_captureState_(placeId, includeEpoch) {
+  if (!AdminPlaceService_validId_(placeId) || (includeEpoch !== undefined && typeof includeEpoch !== "boolean")) {
+    throw new Error("ADMIN_PLACE_STATE_INPUT");
+  }
+  var placeHeaders = AdminPlaceSchema_PLACE_BASE_HEADERS_.concat(AdminPlaceSchema_PLACES_APPEND_HEADERS_);
+  var draftHeaders = AdminPlaceSchema_DRAFT_HEADERS_;
+  var placeTable = SheetService_readTable_(AdminPlaceSchema_PLACES_SHEET_NAME_, placeHeaders);
+  var draftTable = SheetService_readTable_(AdminPlaceSchema_DRAFTS_SHEET_NAME_, draftHeaders);
+  if (!placeTable || !Array.isArray(placeTable.headers) || !Array.isArray(placeTable.rows) ||
+      !draftTable || !Array.isArray(draftTable.headers) || !Array.isArray(draftTable.rows)) {
+    throw new Error("ADMIN_PLACE_STATE_READ");
+  }
+  var placeMatches = placeTable.rows.filter(function (entry) {
+    return entry && entry.values && entry.values.place_id === placeId;
+  });
+  var draftMatches = draftTable.rows.filter(function (entry) {
+    return entry && entry.values && entry.values.place_id === placeId;
+  });
+  if (placeMatches.length > 1 || draftMatches.length > 1 || (!placeMatches.length && draftMatches.length)) {
+    throw new Error("ADMIN_PLACE_STATE_CARDINALITY");
+  }
+
+  var placeRow = null;
+  if (placeMatches.length === 1) {
+    var placeValues = {};
+    placeTable.headers.forEach(function (header) { placeValues[header] = placeMatches[0].values[header]; });
+    placeRow = { sourceRowNumber: placeMatches[0].sourceRowNumber, values: placeValues };
+  }
+  var draftRow = null;
+  if (draftMatches.length === 1) {
+    var draftValues = {};
+    draftTable.headers.forEach(function (header) { draftValues[header] = draftMatches[0].values[header]; });
+    draftRow = { sourceRowNumber: draftMatches[0].sourceRowNumber, values: draftValues };
+  }
+  var epoch = { captured: false, present: false, value: null };
+  if (includeEpoch) {
+    var properties = PropertiesService.getScriptProperties();
+    if (!properties || typeof properties.getProperty !== "function") throw new Error("ADMIN_PLACE_EPOCH_READ");
+    var epochValue = properties.getProperty(AdminPlaceService_PUBLIC_CACHE_EPOCH_KEY_);
+    epoch = { captured: true, present: epochValue !== null, value: epochValue };
+  }
+  var snapshot = {
+    place_id: placeId,
+    place_headers: placeTable.headers.slice(),
+    draft_headers: draftTable.headers.slice(),
+    rows: {
+      place: placeRow,
+      draft: draftRow
+    },
+    allocated_rows: {
+      place: null,
+      draft: null
+    },
+    epoch: epoch
+  };
+
+  var verificationPlaceTable = SheetService_readTable_(AdminPlaceSchema_PLACES_SHEET_NAME_, placeHeaders);
+  var verificationDraftTable = SheetService_readTable_(AdminPlaceSchema_DRAFTS_SHEET_NAME_, draftHeaders);
+  var verificationPairs = [
+    { initial: placeTable, current: verificationPlaceTable, captured: placeRow },
+    { initial: draftTable, current: verificationDraftTable, captured: draftRow }
+  ];
+  verificationPairs.forEach(function (pair) {
+    if (!pair.current || !Array.isArray(pair.current.headers) || !Array.isArray(pair.current.rows) ||
+        pair.initial.headers.length !== pair.current.headers.length) {
+      throw new Error("ADMIN_PLACE_STATE_VERIFY");
+    }
+    pair.initial.headers.forEach(function (header, index) {
+      if (pair.current.headers[index] !== header) throw new Error("ADMIN_PLACE_STATE_VERIFY");
+    });
+    var matches = pair.current.rows.filter(function (entry) {
+      return entry && entry.values && entry.values.place_id === placeId;
+    });
+    if (matches.length !== (pair.captured ? 1 : 0)) throw new Error("ADMIN_PLACE_STATE_VERIFY");
+    if (pair.captured) {
+      if (matches[0].sourceRowNumber !== pair.captured.sourceRowNumber) throw new Error("ADMIN_PLACE_STATE_VERIFY");
+      pair.current.headers.forEach(function (header) {
+        var capturedCell = pair.captured.values[header];
+        var currentCell = matches[0].values[header];
+        var sameCell = currentCell === capturedCell ||
+          (currentCell instanceof Date && capturedCell instanceof Date && currentCell.getTime() === capturedCell.getTime());
+        if (!sameCell) throw new Error("ADMIN_PLACE_STATE_VERIFY");
+      });
+    }
+  });
+  if (epoch.captured) {
+    var verifiedEpoch = PropertiesService.getScriptProperties().getProperty(AdminPlaceService_PUBLIC_CACHE_EPOCH_KEY_);
+    if ((verifiedEpoch !== null) !== epoch.present || verifiedEpoch !== epoch.value) throw new Error("ADMIN_PLACE_EPOCH_VERIFY");
+  }
+  return snapshot;
+}
+
+function AdminPlaceService_restoreState_(snapshot) {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot) || !AdminPlaceService_validId_(snapshot.place_id) ||
+      !Array.isArray(snapshot.place_headers) || !Array.isArray(snapshot.draft_headers) || !snapshot.rows ||
+      !snapshot.allocated_rows || !snapshot.epoch) {
+    throw new Error("ADMIN_PLACE_RESTORE_INPUT");
+  }
+  if (snapshot.epoch.captured) {
+    var properties = PropertiesService.getScriptProperties();
+    if (!properties) throw new Error("ADMIN_PLACE_EPOCH_RESTORE");
+    if (snapshot.epoch.present) {
+      properties.setProperty(AdminPlaceService_PUBLIC_CACHE_EPOCH_KEY_, snapshot.epoch.value);
+    } else {
+      properties.deleteProperty(AdminPlaceService_PUBLIC_CACHE_EPOCH_KEY_);
+    }
+  }
+
+  var currentTables = {
+    places: SheetService_readTable_(AdminPlaceSchema_PLACES_SHEET_NAME_, snapshot.place_headers),
+    place_drafts: SheetService_readTable_(AdminPlaceSchema_DRAFTS_SHEET_NAME_, snapshot.draft_headers)
+  };
+  var clearedRows = { places: [], place_drafts: [] };
+  var restoreTargets = [
+    { key: "place", tableKey: "places", sheetName: AdminPlaceSchema_PLACES_SHEET_NAME_, headers: snapshot.place_headers },
+    { key: "draft", tableKey: "place_drafts", sheetName: AdminPlaceSchema_DRAFTS_SHEET_NAME_, headers: snapshot.draft_headers }
+  ].reverse();
+  restoreTargets.forEach(function (target) {
+    var before = snapshot.rows[target.key];
+    var allocatedRow = snapshot.allocated_rows[target.key];
+    if (allocatedRow !== null && (!Number.isSafeInteger(allocatedRow) || allocatedRow < 2)) {
+      throw new Error("ADMIN_PLACE_RESTORE_ALLOCATION");
+    }
+    var currentMatches = currentTables[target.tableKey].rows.filter(function (entry) {
+      return entry && entry.values && entry.values.place_id === snapshot.place_id;
+    });
+    if (before) {
+      if (allocatedRow !== null) throw new Error("ADMIN_PLACE_RESTORE_ALLOCATION");
+      SheetService_replaceObjectAtRow_(target.sheetName, before.sourceRowNumber, before.values);
+    } else {
+      if (currentMatches.length > 1) throw new Error("ADMIN_PLACE_RESTORE_ALLOCATION");
+      if (currentMatches.length === 1) {
+        // Verified pre-absence makes the unique target-ID row authoritative; never clear a conflicting unrelated allocation.
+        SheetService_clearRow_(target.sheetName, currentMatches[0].sourceRowNumber);
+        clearedRows[target.tableKey].push(currentMatches[0].sourceRowNumber);
+      } else if (allocatedRow !== null) {
+        if (currentTables[target.tableKey].rows.some(function (entry) { return entry.sourceRowNumber === allocatedRow; })) {
+          throw new Error("ADMIN_PLACE_RESTORE_ALLOCATION");
+        }
+        clearedRows[target.tableKey].push(allocatedRow);
+      }
+    }
+  });
+
+  var verificationTables = {
+    places: SheetService_readTable_(AdminPlaceSchema_PLACES_SHEET_NAME_, snapshot.place_headers),
+    place_drafts: SheetService_readTable_(AdminPlaceSchema_DRAFTS_SHEET_NAME_, snapshot.draft_headers)
+  };
+  restoreTargets.forEach(function (target) {
+    var before = snapshot.rows[target.key];
+    var table = verificationTables[target.tableKey];
+    if (!table || !Array.isArray(table.headers) || table.headers.length !== target.headers.length) {
+      throw new Error("ADMIN_PLACE_RESTORE_VERIFY");
+    }
+    target.headers.forEach(function (header, index) {
+      if (table.headers[index] !== header) throw new Error("ADMIN_PLACE_RESTORE_VERIFY");
+    });
+    var matches = table.rows.filter(function (entry) {
+      return entry && entry.values && entry.values.place_id === snapshot.place_id;
+    });
+    if (matches.length !== (before ? 1 : 0)) throw new Error("ADMIN_PLACE_RESTORE_VERIFY");
+    if (before) {
+      if (matches[0].sourceRowNumber !== before.sourceRowNumber) throw new Error("ADMIN_PLACE_RESTORE_VERIFY");
+      target.headers.forEach(function (header) {
+        var restoredCell = matches[0].values[header];
+        var capturedCell = before.values[header];
+        var sameCell = restoredCell === capturedCell ||
+          (restoredCell instanceof Date && capturedCell instanceof Date && restoredCell.getTime() === capturedCell.getTime());
+        if (!sameCell) throw new Error("ADMIN_PLACE_RESTORE_VERIFY");
+      });
+    } else {
+      clearedRows[target.tableKey].forEach(function (sourceRowNumber) {
+        if (table.rows.some(function (entry) { return entry.sourceRowNumber === sourceRowNumber; })) {
+          throw new Error("ADMIN_PLACE_RESTORE_CLEAR_VERIFY");
+        }
+      });
+    }
+  });
+  if (snapshot.epoch.captured) {
+    var restoredEpoch = PropertiesService.getScriptProperties().getProperty(AdminPlaceService_PUBLIC_CACHE_EPOCH_KEY_);
+    if ((restoredEpoch !== null) !== snapshot.epoch.present || restoredEpoch !== snapshot.epoch.value) {
+      throw new Error("ADMIN_PLACE_EPOCH_RESTORE_VERIFY");
+    }
+  }
+  return true;
+}
+
+function AdminPlaceService_failClosed_(snapshot) {
+  try {
+    if (snapshot) AdminPlaceService_restoreState_(snapshot);
+  } catch (rollbackError) {
+    // A rollback failure never changes the client-safe outcome.
+  }
+  return AdminPlaceService_error_("SERVER_ERROR", "เกิดข้อผิดพลาดของระบบ");
 }
 
 function AdminPlaceService_requireContext_(draftContentScope) {

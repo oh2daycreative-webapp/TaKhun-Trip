@@ -40,6 +40,13 @@ const DETAIL_KEYS = [
   "place_id", "status", "has_active_draft", "display_state", "entity_version", "working_version", "published_version",
   "content", "media", "capabilities", "created_at", "updated_at"
 ];
+const AUDIT_HEADERS = [
+  "log_id", "admin_id", "action", "entity_type", "entity_id", "description", "created_at",
+  "audit_id", "actor_admin_id", "occurred_at"
+];
+const AUDIT_ACTIONS = ["CREATE", "UPDATE_DRAFT", "PUBLISH", "UNPUBLISH", "ARCHIVE", "RESTORE"];
+const focusArgument = process.argv.find((argument) => argument.startsWith("--focus="));
+const focus = focusArgument ? focusArgument.slice("--focus=".length).toLowerCase() : "";
 
 function baseContent(overrides = {}) {
   const content = Object.fromEntries(CONTENT_KEYS.map((key) => [key, ""]));
@@ -175,7 +182,358 @@ function loadBackend(options = {}) {
   return { context, calls, data };
 }
 
+function transactionFixture(action, options = {}) {
+  if (action === "CREATE") return { places: [], drafts: [] };
+  if (action === "UPDATE_DRAFT") {
+    return {
+      places: [place("TX-PLACE", { entity_version: 3, published_version: 2 })],
+      drafts: options.updateDraftWithoutPrior ? [] : [draft("TX-PLACE", 3, 2, { name_th: "prior draft" })]
+    };
+  }
+  if (action === "PUBLISH") {
+    return {
+      places: [place("TX-PLACE", { entity_version: 3, published_version: 2, name_th: "prior published" })],
+      drafts: [draft("TX-PLACE", 3, 2, { name_th: "publish candidate" })]
+    };
+  }
+  if (action === "UNPUBLISH") {
+    return { places: [place("TX-PLACE", { entity_version: 2, published_version: 2 })], drafts: [] };
+  }
+  if (action === "ARCHIVE") {
+    return {
+      places: [place("TX-PLACE", options.archiveDraftSource ? { status: "draft", entity_version: 4, published_version: 0 } : { entity_version: 4, published_version: 3 })],
+      drafts: [draft("TX-PLACE", 4, options.archiveDraftSource ? 0 : 3, { name_th: "retained draft" })]
+    };
+  }
+  if (action === "RESTORE") {
+    return {
+      places: [place("TX-PLACE", { status: "archived", entity_version: 4, published_version: 3 })],
+      drafts: []
+    };
+  }
+  throw new Error(`unknown synthetic action: ${action}`);
+}
+
+function loadTransactionBackend(action, options = {}) {
+  const fixture = transactionFixture(action, options);
+  const makeSheet = (headers, rows) => ({
+    headers: [...headers],
+    rows: rows.map((record) => headers.map((header) => Object.prototype.hasOwnProperty.call(record, header) ? record[header] : ""))
+  });
+  const sheets = {
+    places: makeSheet(PLACE_HEADERS, fixture.places),
+    place_drafts: makeSheet(DRAFT_HEADERS, fixture.drafts),
+    activity_logs: makeSheet(AUDIT_HEADERS, [])
+  };
+  if (options.dateCells) {
+    sheets.places.rows.forEach((row) => { row[PLACE_HEADERS.indexOf("created_at")] = new Date("2026-08-01T00:00:00.000Z"); });
+    sheets.place_drafts.rows.forEach((row) => { row[DRAFT_HEADERS.indexOf("created_at")] = new Date("2026-08-02T00:00:00.000Z"); });
+  }
+  if (options.unrelatedBusinessRows) {
+    sheets.places.rows.push(PLACE_HEADERS.map((header) => place("OTHER-PLACE", { status: "draft", entity_version: 1, published_version: 0 })[header] ?? ""));
+    sheets.place_drafts.rows.push(DRAFT_HEADERS.map((header) => draft("OTHER-PLACE", 1, 0)[header] ?? ""));
+  }
+  const properties = new Map([["PLACE_PUBLIC_CACHE_EPOCH", "41"]]);
+  if (options.missingEpoch) properties.delete("PLACE_PUBLIC_CACHE_EPOCH");
+  if (options.extraColumns) {
+    sheets.places.headers.push("legacy_place_extra");
+    sheets.places.rows.forEach((row) => row.push("preserve complete Place row"));
+    sheets.place_drafts.headers.push("legacy_draft_extra");
+    sheets.place_drafts.rows.forEach((row) => row.push("preserve complete draft row"));
+  }
+  if (options.preexistingAuditCollision) {
+    const collision = {
+      log_id: "AUDIT-0001", admin_id: "ADM-authoritative", action: action, entity_type: "place", entity_id: "TX-PLACE",
+      description: "", created_at: "2026-08-01T00:00:00.000Z", audit_id: "AUDIT-0001",
+      actor_admin_id: "ADM-authoritative", occurred_at: "2026-08-01T00:00:00.000Z"
+    };
+    sheets.activity_logs.rows.push(AUDIT_HEADERS.map((header) => collision[header]));
+  }
+  if (options.wrongAuditAppendRow) {
+    const existing = {
+      log_id: "AUDIT-EXISTING", admin_id: "ADM-existing", action: "CREATE", entity_type: "place", entity_id: "OTHER-PLACE",
+      description: "preserve", created_at: "2026-07-01T00:00:00.000Z", audit_id: "AUDIT-EXISTING",
+      actor_admin_id: "ADM-existing", occurred_at: "2026-07-01T00:00:00.000Z"
+    };
+    sheets.activity_logs.rows.push(AUDIT_HEADERS.map((header) => existing[header]));
+  }
+  const calls = { auth: [], reads: [], writes: [], events: [], propertyReads: [], propertyWrites: [] };
+  const lock = {
+    released: 0,
+    tryLock(timeout) {
+      calls.events.push(`tryLock:${timeout}`);
+      if (options.throwTryLock) throw new Error("synthetic lock internals");
+      return !options.lockTimeout;
+    },
+    releaseLock() {
+      calls.events.push("releaseLock");
+      this.released += 1;
+      if (options.throwReleaseLock) throw new Error("synthetic release internals");
+    }
+  };
+  let auditReadFailed = false;
+  let auditSequence = 0;
+  let epochWriteFailed = false;
+  const runtime = { action, options, sheets, properties, calls, lock, phase: "action" };
+  const readTable = (name, requiredHeaders) => {
+    calls.reads.push({ name, requiredHeaders: [...requiredHeaders], phase: runtime.phase });
+    calls.events.push(`read:${name}:${runtime.phase}`);
+    if (name === "activity_logs" && options.failAuditRead && !auditReadFailed && sheets.activity_logs.rows.length) {
+      auditReadFailed = true;
+      throw new Error("synthetic audit readback internals");
+    }
+    const sheet = sheets[name];
+    if (!sheet) throw new Error("UNEXPECTED_READ");
+    for (const header of requiredHeaders) assert.equal(sheet.headers.includes(header), true, `required ${name}.${header}`);
+    return {
+      headers: [...sheet.headers],
+      headerMap: Object.fromEntries(sheet.headers.map((header, index) => [header, index])),
+      rows: sheet.rows.flatMap((row, index) => {
+        if (!row.some((cell) => cell !== null && cell !== undefined && String(cell).trim() !== "")) return [];
+        return [{
+          sourceRowNumber: index + 2,
+          values: Object.fromEntries(sheet.headers.map((header, column) => [
+            header,
+            options.cloneDateReads && row[column] instanceof Date ? new Date(row[column].getTime()) : row[column]
+          ]))
+        }];
+      })
+    };
+  };
+  const sourceIndex = (sheet, sourceRowNumber) => {
+    const index = sourceRowNumber - 2;
+    if (!Number.isSafeInteger(index) || index < 0 || index >= sheet.rows.length) throw new Error("BAD_SOURCE_ROW");
+    return index;
+  };
+  const context = {
+    JSON, Object, Array, String, Number, Math, Date, RegExp, isFinite,
+    AuthService_requireAdmin_(token) {
+      calls.auth.push(token);
+      return { admin_id: "ADM-authoritative", username: "operator", display_name: "Operator", role: "editor" };
+    },
+    LockService: { getScriptLock: () => lock },
+    Utilities: { getUuid: () => `AUDIT-${String(++auditSequence).padStart(4, "0")}` },
+    PropertiesService: {
+      getScriptProperties() {
+        return {
+          getProperty(key) {
+            calls.propertyReads.push({ key, phase: runtime.phase });
+            return properties.has(key) ? properties.get(key) : null;
+          },
+          setProperty(key, value) {
+            calls.propertyWrites.push({ method: "setProperty", key, value, phase: runtime.phase });
+            calls.events.push(`setProperty:${key}:${runtime.phase}`);
+            if (options.failEpochWrite && value === "42" && !epochWriteFailed) {
+              epochWriteFailed = true;
+              throw new Error("synthetic epoch internals");
+            }
+            properties.set(key, String(value));
+          },
+          deleteProperty(key) {
+            calls.propertyWrites.push({ method: "deleteProperty", key, phase: runtime.phase });
+            calls.events.push(`deleteProperty:${key}:${runtime.phase}`);
+            properties.delete(key);
+          }
+        };
+      }
+    },
+    SheetService_readTable_: readTable,
+    SheetService_appendObjectWithRow_(name, requiredHeaders, record) {
+      calls.writes.push({ method: "append", name, record: plain(record), phase: runtime.phase });
+      calls.events.push(`append:${name}:${runtime.phase}`);
+      if (name === "activity_logs" && options.failAuditAppend) throw new Error("synthetic audit append internals");
+      const sheet = sheets[name];
+      for (const header of requiredHeaders) assert.equal(sheet.headers.includes(header), true);
+      const row = sheet.headers.map((header) => Object.prototype.hasOwnProperty.call(record, header) ? record[header] : "");
+      sheet.rows.push(row);
+      if (name === "place_drafts" && options.corruptActionDraftBase && runtime.phase === "action") {
+        row[sheet.headers.indexOf("base_published_version")] = 777;
+      }
+      if (name === "activity_logs" && options.failAuditAppendAfterWrite) throw new Error("synthetic post-write audit append internals");
+      if (name === "activity_logs" && options.corruptAuditIdReadback) {
+        row[sheet.headers.indexOf("audit_id")] = "AUDIT-CORRUPTED";
+      }
+      if (name === "activity_logs" && options.corruptAuditDescriptionReadback) {
+        row[sheet.headers.indexOf("description")] = "CORRUPTED DESCRIPTION";
+      }
+      if (name === "activity_logs" && options.corruptAuditReadback) {
+        row[sheet.headers.indexOf("admin_id")] = "ADM-corrupted";
+      }
+      return {
+        sourceRowNumber: (name === "activity_logs" && options.wrongAuditAppendRow) || (name === "places" && options.wrongPlaceAppendRow) ?
+          2 : sheet.rows.length + 1,
+        values: Object.fromEntries(sheet.headers.map((header, index) => [header, row[index]]))
+      };
+    },
+    SheetService_replaceObjectAtRow_(name, sourceRowNumber, record) {
+      calls.writes.push({ method: "replace", name, sourceRowNumber, record: plain(record), phase: runtime.phase });
+      calls.events.push(`replace:${name}:${runtime.phase}`);
+      if (options.failRestoreWrite && runtime.phase === "restore") throw new Error("synthetic restore internals");
+      const sheet = sheets[name];
+      const row = sheet.rows[sourceIndex(sheet, sourceRowNumber)];
+      if (options.noOpActionReplace && runtime.phase === "action") return { sourceRowNumber, values: plain(record) };
+      for (const [field, value] of Object.entries(record)) row[sheet.headers.indexOf(field)] = value;
+      return { sourceRowNumber, values: plain(record) };
+    },
+    SheetService_clearRow_(name, sourceRowNumber) {
+      calls.writes.push({ method: "clear", name, sourceRowNumber, phase: runtime.phase });
+      calls.events.push(`clear:${name}:${runtime.phase}`);
+      if (options.failRestoreWrite && runtime.phase === "restore") throw new Error("synthetic restore internals");
+      const sheet = sheets[name];
+      const row = sheet.rows[sourceIndex(sheet, sourceRowNumber)];
+      row.fill("");
+      if (options.incompleteActionClear && runtime.phase === "action") row[row.length - 1] = "action clear residue";
+      if (options.incompleteClear && runtime.phase === "restore") row[row.length - 1] = "rollback residue";
+    }
+  };
+  vm.createContext(context);
+  vm.runInContext(read("apps-script/AdminPlaceSchema.gs"), context, { filename: "apps-script/AdminPlaceSchema.gs" });
+  vm.runInContext(options.serviceSource || read("apps-script/AdminPlaceService.gs"), context, { filename: "apps-script/AdminPlaceService.gs" });
+  runtime.context = context;
+  return runtime;
+}
+
+function transactionBefore(runtime) {
+  return {
+    places: runtime.sheets.places.rows.map((row) => [...row]),
+    drafts: runtime.sheets.place_drafts.rows.map((row) => [...row]),
+    activity: runtime.sheets.activity_logs.rows.map((row) => [...row]),
+    epoch: runtime.properties.get("PLACE_PUBLIC_CACHE_EPOCH")
+  };
+}
+
+function assertRestored(runtime, before) {
+  for (const [name, expected] of [["places", before.places], ["place_drafts", before.drafts]]) {
+    const rows = runtime.sheets[name].rows;
+    assert.deepEqual(rows.slice(0, expected.length), expected, `${name} full pre-state must be restored`);
+    for (const row of rows.slice(expected.length)) {
+      assert.equal(row.every((cell) => cell === ""), true, `${name} allocated compensation row must be fully blank`);
+    }
+  }
+  assert.equal(runtime.properties.get("PLACE_PUBLIC_CACHE_EPOCH"), before.epoch);
+  assert.deepEqual(runtime.sheets.activity_logs.rows.slice(0, before.activity.length), before.activity);
+  for (const row of runtime.sheets.activity_logs.rows.slice(before.activity.length)) {
+    assert.equal(row.every((cell) => cell === ""), true, "failed audit append must leave its allocated row blank");
+  }
+}
+
+function completeSyntheticRow(headers, record) {
+  return Object.fromEntries(headers.map((header) => [
+    header, Object.prototype.hasOwnProperty.call(record, header) ? record[header] : ""
+  ]));
+}
+
+function assertSyntheticIntendedRow(table, expected, label) {
+  const matches = table.rows.filter((entry) => entry.values.place_id === "TX-PLACE");
+  if (expected && expected.absent) {
+    assert.equal(matches.length, 0, `${label} must have zero target-ID matches`);
+    assert.equal(
+      table.rows.some((entry) => entry.sourceRowNumber === expected.sourceRowNumber),
+      false,
+      `${label} prior physical source row must be fully blank`
+    );
+    return;
+  }
+  if (expected === null) {
+    assert.equal(matches.length, 0, `${label} must be absent`);
+    return;
+  }
+  assert.equal(matches.length, 1, `${label} must have exact cardinality`);
+  assert.equal(matches[0].sourceRowNumber, expected.sourceRowNumber, `${label} must retain intended source-row provenance`);
+  assert.deepEqual(Object.keys(expected.values), table.headers, `${label} expected row must cover every physical header`);
+  for (const header of table.headers) {
+    const actualCell = matches[0].values[header];
+    const expectedCell = expected.values[header];
+    const sameCell = actualCell === expectedCell ||
+      (actualCell instanceof Date && expectedCell instanceof Date && actualCell.getTime() === expectedCell.getTime());
+    assert.equal(sameCell, true, `${label}.${header} must exactly match intended state`);
+  }
+}
+
+function syntheticWrite(runtime, action, placeEntry, draftEntry, state) {
+  const { context } = runtime;
+  if (action === "CREATE") {
+    const placeRecord = place("TX-PLACE", { status: "draft", entity_version: 1, published_version: 0 });
+    const createdPlace = context.SheetService_appendObjectWithRow_("places", PLACE_HEADERS, placeRecord);
+    state.allocated_rows.place = createdPlace.sourceRowNumber;
+    if (runtime.options.failurePoint === "afterPlace") throw new Error("synthetic partial Place write");
+    const draftRecord = draft("TX-PLACE", 1, 0);
+    const createdDraft = context.SheetService_appendObjectWithRow_("place_drafts", DRAFT_HEADERS, draftRecord);
+    state.allocated_rows.draft = createdDraft.sourceRowNumber;
+    return {
+      place: { sourceRowNumber: createdPlace.sourceRowNumber, values: completeSyntheticRow(runtime.sheets.places.headers, placeRecord) },
+      draft: { sourceRowNumber: createdDraft.sourceRowNumber, values: completeSyntheticRow(runtime.sheets.place_drafts.headers, draftRecord) }
+    };
+  }
+  const placePatch = {
+    entity_version: 99, status: action === "RESTORE" || action === "UNPUBLISH" ? "draft" : action === "ARCHIVE" ? "archived" : "published",
+    name_th: `mutated ${action}`, updated_at: "2099-01-01T00:00:00.000Z", updated_by: "ADM-mutated"
+  };
+  context.SheetService_replaceObjectAtRow_("places", placeEntry.sourceRowNumber, placePatch);
+  const intendedPlace = { sourceRowNumber: placeEntry.sourceRowNumber, values: { ...placeEntry.values, ...placePatch } };
+  if (runtime.options.failurePoint === "afterPlace") throw new Error("synthetic partial Place write");
+  let intendedDraft = null;
+  if (action === "PUBLISH") {
+    context.SheetService_clearRow_("place_drafts", draftEntry.sourceRowNumber);
+    intendedDraft = { absent: true, sourceRowNumber: draftEntry.sourceRowNumber };
+  } else if (draftEntry) {
+    const draftPatch = {
+      draft_version: 99, name_th: `mutated ${action}`, updated_by: "ADM-mutated"
+    };
+    context.SheetService_replaceObjectAtRow_("place_drafts", draftEntry.sourceRowNumber, draftPatch);
+    intendedDraft = { sourceRowNumber: draftEntry.sourceRowNumber, values: { ...draftEntry.values, ...draftPatch } };
+  } else if (action === "UPDATE_DRAFT" || action === "UNPUBLISH" || action === "RESTORE") {
+    const draftRecord = draft("TX-PLACE", 99, action === "RESTORE" ? 3 : 2);
+    const createdDraft = context.SheetService_appendObjectWithRow_("place_drafts", DRAFT_HEADERS, draftRecord);
+    state.allocated_rows.draft = createdDraft.sourceRowNumber;
+    intendedDraft = {
+      sourceRowNumber: createdDraft.sourceRowNumber,
+      values: completeSyntheticRow(runtime.sheets.place_drafts.headers, draftRecord)
+    };
+  }
+  return { place: intendedPlace, draft: intendedDraft };
+}
+
+function runSyntheticTransaction(runtime, options = {}) {
+  const { context, action } = runtime;
+  return plain(context.AdminPlaceService_execute_("TOKEN", function (admin) {
+    return context.AdminPlaceService_withWriteLock_(function () {
+      const placeTable = context.SheetService_readTable_("places", PLACE_HEADERS);
+      const draftTable = context.SheetService_readTable_("place_drafts", DRAFT_HEADERS);
+      const placeEntry = placeTable.rows.find((entry) => entry.values.place_id === "TX-PLACE") || null;
+      const draftEntry = draftTable.rows.find((entry) => entry.values.place_id === "TX-PLACE") || null;
+      if (action !== "CREATE") {
+        const actual = Number(placeEntry.values.entity_version);
+        const expected = Object.prototype.hasOwnProperty.call(options, "expectedVersion") ? options.expectedVersion : actual;
+        if (draftEntry) {
+          context.AdminPlaceService_requireExpectedVersion_(expected, actual, Number(draftEntry.values.base_published_version), Number(placeEntry.values.published_version));
+        } else {
+          context.AdminPlaceService_requireExpectedVersion_(expected, actual);
+        }
+      }
+      const state = context.AdminPlaceService_captureState_("TX-PLACE", Boolean(options.includeEpoch));
+      try {
+        const intended = syntheticWrite(runtime, action, placeEntry, draftEntry, state);
+        const intendedPlaceTable = context.SheetService_readTable_("places", PLACE_HEADERS);
+        const intendedDraftTable = context.SheetService_readTable_("place_drafts", DRAFT_HEADERS);
+        assertSyntheticIntendedRow(intendedPlaceTable, intended.place, `${action} Place row`);
+        assertSyntheticIntendedRow(intendedDraftTable, intended.draft, `${action} draft row`);
+        if (options.includeEpoch) {
+          context.PropertiesService.getScriptProperties().setProperty("PLACE_PUBLIC_CACHE_EPOCH", "42");
+        }
+        if (runtime.options.failurePoint === "afterMutation") throw new Error("synthetic action failure");
+        context.AdminPlaceService_appendVerifiedAudit_(admin, action, "TX-PLACE");
+        return context.AdminPlaceService_success_({ place_id: "TX-PLACE", status: "draft" });
+      } catch (error) {
+        runtime.phase = "restore";
+        return context.AdminPlaceService_failClosed_(state);
+      }
+    });
+  }));
+}
+
 function test(name, fn) {
+  if (focus && !name.toLowerCase().includes(focus)) return;
   try {
     fn();
     process.stdout.write(`PASS ${name}\n`);
@@ -202,6 +560,295 @@ function assertError(result, code) {
   assert.equal(typeof result.error.message, "string");
   assert.equal(result.error.message.length > 0 && result.error.message.length <= 120, true);
 }
+
+test("transaction lock timeout fails closed and release occurs only from finally", () => {
+  const timeout = loadTransactionBackend("UPDATE_DRAFT", { lockTimeout: true });
+  assertError(runSyntheticTransaction(timeout), "SERVER_ERROR");
+  assert.deepEqual(timeout.calls.events, ["tryLock:10000"]);
+  assert.equal(timeout.lock.released, 0);
+  assert.equal(timeout.calls.writes.length, 0);
+
+  const failed = loadTransactionBackend("CREATE", { failurePoint: "afterPlace" });
+  const before = transactionBefore(failed);
+  assertError(runSyntheticTransaction(failed), "SERVER_ERROR");
+  assertRestored(failed, before);
+  assert.equal(failed.lock.released, 1);
+  assert.equal(failed.calls.events.at(-1), "releaseLock");
+  assert.equal(failed.calls.events.some((event) => event === "read:places:restore"), true);
+});
+
+test("transaction stale version conflicts before every write and never appends success audit", () => {
+  const stale = loadTransactionBackend("UPDATE_DRAFT");
+  const result = runSyntheticTransaction(stale, { expectedVersion: 2 });
+  assertError(result, "CONFLICT");
+  assert.equal(stale.calls.writes.length, 0);
+  assert.equal(stale.sheets.activity_logs.rows.length, 0);
+  assert.equal(stale.lock.released, 1);
+
+  const invalid = loadTransactionBackend("UPDATE_DRAFT");
+  assertError(runSyntheticTransaction(invalid, { expectedVersion: "3" }), "VALIDATION_ERROR");
+  assert.equal(invalid.calls.writes.length, 0);
+
+  const staleDraftBase = loadTransactionBackend("PUBLISH");
+  staleDraftBase.sheets.place_drafts.rows[0][DRAFT_HEADERS.indexOf("base_published_version")] = 1;
+  assertError(runSyntheticTransaction(staleDraftBase, { expectedVersion: 3 }), "CONFLICT");
+  assert.equal(staleDraftBase.calls.writes.length, 0);
+});
+
+test("transaction success appends exactly one verified uppercase authoritative audit with exact aliases", () => {
+  for (const action of AUDIT_ACTIONS) {
+    const runtime = loadTransactionBackend(action, { dateCells: action === "PUBLISH", cloneDateReads: action === "PUBLISH" });
+    const result = runSyntheticTransaction(runtime, { includeEpoch: ["PUBLISH", "UNPUBLISH", "ARCHIVE"].includes(action) });
+    assert.equal(result.ok, true, action);
+    const appends = runtime.calls.writes.filter((write) => write.method === "append" && write.name === "activity_logs");
+    assert.equal(appends.length, 1, action);
+    assert.deepEqual(Object.keys(appends[0].record).sort(), [
+      "action", "actor_admin_id", "admin_id", "audit_id", "created_at", "description", "entity_id", "entity_type", "log_id", "occurred_at"
+    ]);
+    const audit = appends[0].record;
+    assert.equal(audit.action, action);
+    assert.equal(audit.action, audit.action.toUpperCase());
+    assert.equal(audit.actor_admin_id, "ADM-authoritative");
+    assert.equal(audit.entity_type, "place");
+    assert.equal(audit.entity_id, "TX-PLACE");
+    assert.equal(audit.description, action);
+    assert.equal(audit.log_id, audit.audit_id);
+    assert.equal(audit.admin_id, audit.actor_admin_id);
+    assert.equal(audit.created_at, audit.occurred_at);
+    assert.equal(runtime.sheets.activity_logs.rows.filter((row) => row.some((cell) => cell !== "")).length, 1);
+    assert.deepEqual(Object.keys(result.data), ["place_id", "status"]);
+    assert.equal(/audit_id|actor_admin_id|sourceRowNumber|rollback|sheet/i.test(JSON.stringify(result)), false);
+    assert.equal(runtime.lock.released, 1);
+    assert.equal(runtime.calls.events.at(-1), "releaseLock");
+  }
+});
+
+test("transaction audit append and readback failures remove audit and restore full business state", () => {
+  for (const options of [
+    { failAuditAppend: true },
+    { failAuditAppendAfterWrite: true },
+    { failAuditRead: true },
+    { corruptAuditReadback: true },
+    { corruptAuditIdReadback: true },
+    { corruptAuditDescriptionReadback: true },
+    { preexistingAuditCollision: true }
+  ]) {
+    const runtime = loadTransactionBackend("PUBLISH", options);
+    const before = transactionBefore(runtime);
+    const result = runSyntheticTransaction(runtime, { includeEpoch: true });
+    assertError(result, "SERVER_ERROR");
+    assertRestored(runtime, before);
+    assert.equal(runtime.lock.released, 1);
+    assert.equal(JSON.stringify(result).includes("synthetic"), false);
+  }
+  const wrongRow = loadTransactionBackend("PUBLISH", { wrongAuditAppendRow: true });
+  const wrongRowBefore = transactionBefore(wrongRow);
+  const wrongRowResult = runSyntheticTransaction(wrongRow, { includeEpoch: true });
+  assertError(wrongRowResult, "SERVER_ERROR");
+  assert.deepEqual(wrongRow.sheets.activity_logs.rows[0], wrongRowBefore.activity[0], "pre-existing audit must never be cleared");
+  assert.equal(wrongRow.sheets.activity_logs.rows[1].every((cell) => cell === ""), true, "generated-ID audit row must be fully blank");
+  assert.equal(wrongRow.lock.released, 1);
+});
+
+test("transaction compensation table restores every action and fully clears only new rows", () => {
+  for (const action of AUDIT_ACTIONS) {
+    const runtime = loadTransactionBackend(action, {
+      failurePoint: "afterMutation", extraColumns: action === "PUBLISH", dateCells: action === "PUBLISH", cloneDateReads: action === "PUBLISH"
+    });
+    const before = transactionBefore(runtime);
+    const includeEpoch = ["PUBLISH", "UNPUBLISH", "ARCHIVE"].includes(action);
+    const result = runSyntheticTransaction(runtime, { includeEpoch });
+    assertError(result, "SERVER_ERROR");
+    assertRestored(runtime, before);
+    const restoreWrites = runtime.calls.writes.filter((write) => write.phase === "restore").map((write) => write.name);
+    assert.deepEqual(restoreWrites, ["place_drafts", "places"], `${action} compensates draft then Place`);
+    if (includeEpoch) {
+      assert.equal(runtime.calls.propertyWrites.some((write) => write.phase === "restore" && write.key === "PLACE_PUBLIC_CACHE_EPOCH"), true);
+    }
+    if (action === "RESTORE") {
+      assert.equal(runtime.calls.propertyReads.length, 0, "RESTORE must not read the Public epoch");
+      assert.equal(runtime.calls.propertyWrites.length, 0, "RESTORE must not write the Public epoch");
+    }
+    assert.equal(runtime.lock.released, 1);
+    assert.equal(runtime.calls.events.at(-1), "releaseLock");
+  }
+  const newlyCreatedDraft = loadTransactionBackend("UPDATE_DRAFT", { failurePoint: "afterMutation", updateDraftWithoutPrior: true });
+  const newlyCreatedDraftBefore = transactionBefore(newlyCreatedDraft);
+  assertError(runSyntheticTransaction(newlyCreatedDraft), "SERVER_ERROR");
+  assertRestored(newlyCreatedDraft, newlyCreatedDraftBefore);
+
+  const draftArchive = loadTransactionBackend("ARCHIVE", { failurePoint: "afterMutation", archiveDraftSource: true });
+  const draftArchiveBefore = transactionBefore(draftArchive);
+  assertError(runSyntheticTransaction(draftArchive, { includeEpoch: false }), "SERVER_ERROR");
+  assertRestored(draftArchive, draftArchiveBefore);
+  assert.equal(draftArchive.calls.propertyReads.length, 0, "draft ARCHIVE must not read the Public epoch");
+  assert.equal(draftArchive.calls.propertyWrites.length, 0, "draft ARCHIVE must not write the Public epoch");
+});
+
+test("transaction Router exposes no write action or force path", () => {
+  const { context, calls } = loadBackend();
+  for (const action of [
+    "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace", "adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace"
+  ]) {
+    const result = post(context, { action, token: "TOKEN", payload: { force: true } });
+    assertError(result, "UNKNOWN_ACTION");
+  }
+  assert.equal(calls.auth.length, 0);
+  assert.equal(calls.writes.length, 0);
+});
+
+test("transaction partial Place draft and conditional epoch failures compensate before unlock", () => {
+  const partial = loadTransactionBackend("CREATE", { failurePoint: "afterPlace" });
+  const partialBefore = transactionBefore(partial);
+  assertError(runSyntheticTransaction(partial), "SERVER_ERROR");
+  assertRestored(partial, partialBefore);
+
+  const epoch = loadTransactionBackend("PUBLISH", { failEpochWrite: true });
+  const epochBefore = transactionBefore(epoch);
+  assertError(runSyntheticTransaction(epoch, { includeEpoch: true }), "SERVER_ERROR");
+  assertRestored(epoch, epochBefore);
+  const releaseIndex = epoch.calls.events.lastIndexOf("releaseLock");
+  const finalRestoreRead = Math.max(epoch.calls.events.lastIndexOf("read:places:restore"), epoch.calls.events.lastIndexOf("read:place_drafts:restore"));
+  assert.equal(releaseIndex > finalRestoreRead, true);
+
+  const missingEpoch = loadTransactionBackend("PUBLISH", { failurePoint: "afterMutation", missingEpoch: true });
+  const missingEpochBefore = transactionBefore(missingEpoch);
+  assertError(runSyntheticTransaction(missingEpoch, { includeEpoch: true }), "SERVER_ERROR");
+  assertRestored(missingEpoch, missingEpochBefore);
+  assert.equal(missingEpoch.properties.has("PLACE_PUBLIC_CACHE_EPOCH"), false);
+});
+
+test("transaction rollback and rollback-verification failures never expose success or internals", () => {
+  for (const options of [
+    { failurePoint: "afterMutation", incompleteClear: true },
+    { failurePoint: "afterMutation", failRestoreWrite: true }
+  ]) {
+    const runtime = loadTransactionBackend("CREATE", options);
+    const result = runSyntheticTransaction(runtime);
+    assertError(result, "SERVER_ERROR");
+    assert.equal(JSON.stringify(result).includes("rollback residue"), false);
+    assert.equal(JSON.stringify(result).includes("synthetic restore internals"), false);
+    assert.equal(runtime.lock.released, 1);
+    assert.equal(runtime.calls.events.at(-1), "releaseLock");
+  }
+  const verificationFailure = loadTransactionBackend("CREATE", { failurePoint: "afterMutation", incompleteClear: true });
+  runSyntheticTransaction(verificationFailure);
+  assert.equal(verificationFailure.calls.reads.filter((entry) => entry.phase === "restore").length >= 4, true);
+
+  const wrongAllocation = loadTransactionBackend("CREATE", {
+    failurePoint: "afterMutation", unrelatedBusinessRows: true, wrongPlaceAppendRow: true
+  });
+  const wrongAllocationBefore = transactionBefore(wrongAllocation);
+  const wrongAllocationResult = runSyntheticTransaction(wrongAllocation);
+  assertError(wrongAllocationResult, "SERVER_ERROR");
+  assert.deepEqual(wrongAllocation.sheets.places.rows[0], wrongAllocationBefore.places[0], "unrelated Place row must remain intact");
+  assert.deepEqual(wrongAllocation.sheets.place_drafts.rows[0], wrongAllocationBefore.drafts[0], "unrelated draft row must remain intact");
+  assertRestored(wrongAllocation, wrongAllocationBefore);
+  assert.equal(wrongAllocation.lock.released, 1);
+});
+
+test("transaction intended-state reread rejects no-op existing-row writes before audit", () => {
+  const runtime = loadTransactionBackend("UPDATE_DRAFT", { noOpActionReplace: true });
+  const before = transactionBefore(runtime);
+  const result = runSyntheticTransaction(runtime);
+  assertError(result, "SERVER_ERROR");
+  assertRestored(runtime, before);
+  assert.equal(runtime.calls.writes.some((write) => write.name === "activity_logs"), false);
+
+  const corruptDraft = loadTransactionBackend("UNPUBLISH", { corruptActionDraftBase: true });
+  const corruptDraftBefore = transactionBefore(corruptDraft);
+  const corruptDraftResult = runSyntheticTransaction(corruptDraft, { includeEpoch: true });
+  assertError(corruptDraftResult, "SERVER_ERROR");
+  assertRestored(corruptDraft, corruptDraftBefore);
+  assert.equal(corruptDraft.calls.writes.some((write) => write.name === "activity_logs"), false);
+  assert.equal(corruptDraft.lock.released, 1);
+  const corruptDraftFinalRestoreRead = Math.max(
+    corruptDraft.calls.events.lastIndexOf("read:places:restore"),
+    corruptDraft.calls.events.lastIndexOf("read:place_drafts:restore")
+  );
+  assert.equal(corruptDraft.calls.events.lastIndexOf("releaseLock") > corruptDraftFinalRestoreRead, true);
+
+  const partialPublishClear = loadTransactionBackend("PUBLISH", { incompleteActionClear: true });
+  const partialPublishBefore = transactionBefore(partialPublishClear);
+  const partialPublishResult = runSyntheticTransaction(partialPublishClear, { includeEpoch: true });
+  assertError(partialPublishResult, "SERVER_ERROR");
+  assertRestored(partialPublishClear, partialPublishBefore);
+  assert.equal(partialPublishClear.calls.writes.some((write) => write.name === "activity_logs"), false);
+  assert.equal(partialPublishClear.lock.released, 1);
+  const partialPublishFinalRestoreRead = Math.max(
+    partialPublishClear.calls.events.lastIndexOf("read:places:restore"),
+    partialPublishClear.calls.events.lastIndexOf("read:place_drafts:restore")
+  );
+  assert.equal(partialPublishClear.calls.events.lastIndexOf("releaseLock") > partialPublishFinalRestoreRead, true);
+});
+
+test("transaction mutation proofs catch removed state version audit reverse clear and verification invariants", () => {
+  const source = read("apps-script/AdminPlaceService.gs");
+
+  const noPreState = source.replace("      place: placeRow,", "      place: null,");
+  assert.notEqual(noPreState, source, "pre-state capture mutation target must match");
+  {
+    const runtime = loadTransactionBackend("UPDATE_DRAFT", { serviceSource: noPreState, failurePoint: "afterMutation" });
+    const before = transactionBefore(runtime);
+    runSyntheticTransaction(runtime);
+    assert.throws(() => assertRestored(runtime, before));
+  }
+
+  const noVersionComparison = source.replace(
+    '  if (expectedVersion !== authoritativeVersion) throw new Error("CONFLICT");',
+    '  if (false) throw new Error("CONFLICT");'
+  );
+  assert.notEqual(noVersionComparison, source, "version comparison mutation target must match");
+  {
+    const runtime = loadTransactionBackend("UPDATE_DRAFT", { serviceSource: noVersionComparison });
+    const result = runSyntheticTransaction(runtime, { expectedVersion: 2 });
+    assert.throws(() => assertError(result, "CONFLICT"));
+  }
+
+  const noAuditVerification = source.replace(
+    "    var auditTable = SheetService_readTable_(AdminPlaceSchema_ACTIVITY_SHEET_NAME_, auditHeaders);",
+    "    return true;\n    var auditTable = SheetService_readTable_(AdminPlaceSchema_ACTIVITY_SHEET_NAME_, auditHeaders);"
+  );
+  assert.notEqual(noAuditVerification, source, "audit verification mutation target must match");
+  {
+    const runtime = loadTransactionBackend("UPDATE_DRAFT", { serviceSource: noAuditVerification, corruptAuditReadback: true });
+    const result = runSyntheticTransaction(runtime);
+    assert.throws(() => assertError(result, "SERVER_ERROR"));
+  }
+
+  const noReverseCompensation = source.replace("  ].reverse();", "  ];");
+  assert.notEqual(noReverseCompensation, source, "reverse compensation mutation target must match");
+  {
+    const runtime = loadTransactionBackend("PUBLISH", { serviceSource: noReverseCompensation, failurePoint: "afterMutation" });
+    runSyntheticTransaction(runtime, { includeEpoch: true });
+    const restored = runtime.calls.writes.filter((write) => write.phase === "restore").map((write) => write.name);
+    assert.throws(() => assert.deepEqual(restored, ["place_drafts", "places"]));
+  }
+
+  const noFullClear = source.replace(
+    "        SheetService_clearRow_(target.sheetName, currentMatches[0].sourceRowNumber);",
+    "        void currentMatches;"
+  );
+  assert.notEqual(noFullClear, source, "full-row clear mutation target must match");
+  {
+    const runtime = loadTransactionBackend("CREATE", { serviceSource: noFullClear, failurePoint: "afterMutation" });
+    const before = transactionBefore(runtime);
+    runSyntheticTransaction(runtime);
+    assert.throws(() => assertRestored(runtime, before));
+  }
+
+  const noCompensationVerification = source.replace(
+    "  var verificationTables = {",
+    "  return true;\n  var verificationTables = {"
+  );
+  assert.notEqual(noCompensationVerification, source, "compensation verification mutation target must match");
+  {
+    const runtime = loadTransactionBackend("CREATE", { serviceSource: noCompensationVerification, failurePoint: "afterMutation" });
+    runSyntheticTransaction(runtime);
+    const verificationReads = runtime.calls.reads.filter((entry) => entry.phase === "restore").length;
+    assert.throws(() => assert.equal(verificationReads >= 4, true));
+  }
+});
 
 test("all four authoritative Admin roles may list and inspect Places", () => {
   for (const role of ["super_admin", "editor", "reviewer", "viewer"]) {
