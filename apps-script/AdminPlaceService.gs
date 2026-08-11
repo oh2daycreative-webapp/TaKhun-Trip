@@ -24,6 +24,22 @@ var AdminPlaceService_DETAIL_KEYS_ = ["place_id", "view"];
 var AdminPlaceService_CREATE_KEYS_ = ["content"];
 var AdminPlaceService_SAVE_KEYS_ = ["place_id", "expected_version", "content"];
 var AdminPlaceService_PUBLISH_KEYS_ = ["place_id", "expected_version"];
+var AdminPlaceService_DEPENDENCY_KEYS_ = ["place_id"];
+var AdminPlaceService_DEPENDENCY_COMMON_STATUSES_ = ["draft", "published", "hidden", "archived", "deleted"];
+var AdminPlaceService_DEPENDENCY_REVIEW_STATUSES_ = ["pending", "approved", "hidden", "deleted"];
+var AdminPlaceService_DEPENDENCY_GROUP_KEYS_ = [
+  "routes", "nearby_places", "products", "events", "gallery", "trip_templates", "reviews"
+];
+var AdminPlaceService_DEPENDENCY_HEADERS_ = {
+  places: ["place_id", "name_th", "name_en", "nearby_place_ids", "status"],
+  routes: ["route_id", "name_th", "name_en", "status"],
+  route_places: ["route_place_id", "route_id", "place_id", "status"],
+  products: ["product_id", "name_th", "name_en", "related_place_id", "status"],
+  events: ["event_id", "title_th", "title_en", "related_place_id", "status"],
+  gallery: ["media_id", "title_th", "title_en", "related_place_id", "status"],
+  trip_templates: ["template_id", "name_th", "name_en", "place_ids", "status"],
+  reviews: ["review_id", "place_id", "reviewer_name", "is_anonymous", "status"]
+};
 var AdminPlaceService_PUBLISH_REQUIRED_HEADERS_ = [
   "name_th", "district", "province", "category", "short_description_th", "description_th", "coordinate_status"
 ];
@@ -249,6 +265,197 @@ function adminPublishPlace_(token, payload) {
         return AdminPlaceService_failClosed_(state);
       }
     });
+  });
+}
+
+function adminInspectPlaceDependencies_(token, payload) {
+  return AdminPlaceService_execute_(token, function () {
+    var parameters = AdminPlaceService_dependencyParameters_(payload);
+    return AdminPlaceService_success_(AdminPlaceService_inspectDependencies_(parameters.place_id));
+  });
+}
+
+function AdminPlaceService_dependencyParameters_(payload) {
+  var source = AdminPlaceService_plainObject_(payload, false);
+  AdminPlaceService_requireExactKeys_(source, AdminPlaceService_DEPENDENCY_KEYS_);
+  if (!AdminPlaceService_validId_(source.place_id)) throw new Error("VALIDATION_ERROR");
+  return { place_id: source.place_id };
+}
+
+function AdminPlaceService_inspectDependencies_(placeId) {
+  if (!AdminPlaceService_validId_(placeId)) throw new Error("VALIDATION_ERROR");
+  var tables = {
+    places: SheetService_readTable_(AdminPlaceSchema_PLACES_SHEET_NAME_, AdminPlaceService_DEPENDENCY_HEADERS_.places),
+    routes: SheetService_readTable_("routes", AdminPlaceService_DEPENDENCY_HEADERS_.routes),
+    route_places: SheetService_readTable_("route_places", AdminPlaceService_DEPENDENCY_HEADERS_.route_places),
+    products: SheetService_readTable_("products", AdminPlaceService_DEPENDENCY_HEADERS_.products),
+    events: SheetService_readTable_("events", AdminPlaceService_DEPENDENCY_HEADERS_.events),
+    gallery: SheetService_readTable_("gallery", AdminPlaceService_DEPENDENCY_HEADERS_.gallery),
+    trip_templates: SheetService_readTable_("trip_templates", AdminPlaceService_DEPENDENCY_HEADERS_.trip_templates),
+    reviews: SheetService_readTable_("reviews", AdminPlaceService_DEPENDENCY_HEADERS_.reviews)
+  };
+  var groups = {};
+  AdminPlaceService_DEPENDENCY_GROUP_KEYS_.forEach(function (key) { groups[key] = []; });
+
+  var places = AdminPlaceService_dependencyIndex_(
+    tables.places, "place_id", AdminPlaceService_STATUSES_, "ADMIN_PLACE_DEPENDENCY_PLACE"
+  );
+  if (!Object.prototype.hasOwnProperty.call(places, placeId)) throw new Error("NOT_FOUND");
+  Object.keys(places).forEach(function (referrerId) {
+    var referrer = places[referrerId];
+    if (referrerId === placeId) return;
+    var memberships = AdminPlaceService_dependencyList_(referrer.nearby_place_ids);
+    if (memberships.indexOf(placeId) !== -1) {
+      AdminPlaceService_dependencyAdd_(groups.nearby_places, referrerId,
+        AdminPlaceService_dependencyLabel_(referrer.name_th, referrer.name_en, referrerId));
+    }
+  });
+
+  var routes = AdminPlaceService_dependencyIndex_(
+    tables.routes, "route_id", AdminPlaceService_DEPENDENCY_COMMON_STATUSES_, "ADMIN_PLACE_DEPENDENCY_ROUTE"
+  );
+  var routePlaces = AdminPlaceService_dependencyIndex_(
+    tables.route_places, "route_place_id", AdminPlaceService_DEPENDENCY_COMMON_STATUSES_, "ADMIN_PLACE_DEPENDENCY_ROUTE_PLACE"
+  );
+  Object.keys(routePlaces).forEach(function (relationshipId) {
+    var relationship = routePlaces[relationshipId];
+    if (relationship.status === "deleted") return;
+    var relationshipPlaceId = AdminPlaceService_dependencyReference_(relationship.place_id, false);
+    var routeId = AdminPlaceService_dependencyReference_(relationship.route_id, false);
+    if (relationshipPlaceId !== placeId) return;
+    if (!Object.prototype.hasOwnProperty.call(routes, routeId)) throw new Error("ADMIN_PLACE_DEPENDENCY_ORPHAN_ROUTE");
+    var route = routes[routeId];
+    if (route.status === "deleted") return;
+    AdminPlaceService_dependencyAdd_(groups.routes, routeId,
+      AdminPlaceService_dependencyLabel_(route.name_th, route.name_en, routeId));
+  });
+
+  AdminPlaceService_dependencyScalarGroup_(
+    tables.products, "product_id", "related_place_id", "name_th", "name_en", placeId, groups.products,
+    AdminPlaceService_DEPENDENCY_COMMON_STATUSES_, "ADMIN_PLACE_DEPENDENCY_PRODUCT"
+  );
+  AdminPlaceService_dependencyScalarGroup_(
+    tables.events, "event_id", "related_place_id", "title_th", "title_en", placeId, groups.events,
+    AdminPlaceService_DEPENDENCY_COMMON_STATUSES_, "ADMIN_PLACE_DEPENDENCY_EVENT"
+  );
+  AdminPlaceService_dependencyScalarGroup_(
+    tables.gallery, "media_id", "related_place_id", "title_th", "title_en", placeId, groups.gallery,
+    AdminPlaceService_DEPENDENCY_COMMON_STATUSES_, "ADMIN_PLACE_DEPENDENCY_GALLERY"
+  );
+
+  var templates = AdminPlaceService_dependencyIndex_(
+    tables.trip_templates, "template_id", AdminPlaceService_DEPENDENCY_COMMON_STATUSES_, "ADMIN_PLACE_DEPENDENCY_TEMPLATE"
+  );
+  Object.keys(templates).forEach(function (templateId) {
+    var template = templates[templateId];
+    var templatePlaceIds = AdminPlaceService_dependencyList_(template.place_ids);
+    if (template.status === "deleted") return;
+    if (templatePlaceIds.indexOf(placeId) !== -1) {
+      AdminPlaceService_dependencyAdd_(groups.trip_templates, templateId,
+        AdminPlaceService_dependencyLabel_(template.name_th, template.name_en, templateId));
+    }
+  });
+
+  var reviews = AdminPlaceService_dependencyIndex_(
+    tables.reviews, "review_id", AdminPlaceService_DEPENDENCY_REVIEW_STATUSES_, "ADMIN_PLACE_DEPENDENCY_REVIEW"
+  );
+  Object.keys(reviews).forEach(function (reviewId) {
+    var review = reviews[reviewId];
+    if (review.status === "deleted") return;
+    if (AdminPlaceService_dependencyReference_(review.place_id, false) !== placeId) return;
+    var reviewerName = AdminPlaceService_dependencyHumanText_(review.reviewer_name);
+    var label = AdminPlaceService_dependencyStoredBoolean_(review.is_anonymous) ? "นักท่องเที่ยว" : (reviewerName || reviewId);
+    AdminPlaceService_dependencyAdd_(groups.reviews, reviewId, label);
+  });
+
+  AdminPlaceService_DEPENDENCY_GROUP_KEYS_.forEach(function (key) {
+    groups[key].sort(function (left, right) {
+      return left.entity_id < right.entity_id ? -1 : left.entity_id > right.entity_id ? 1 : 0;
+    });
+  });
+  return { place_id: placeId, checked_at: new Date().toISOString(), groups: groups };
+}
+
+function AdminPlaceService_dependencyRows_(table, errorCode) {
+  if (!table || typeof table !== "object" || !Array.isArray(table.rows)) throw new Error(errorCode);
+  return table.rows.map(function (entry) {
+    if (!entry || typeof entry !== "object" || !entry.values || typeof entry.values !== "object" || Array.isArray(entry.values)) {
+      throw new Error(errorCode);
+    }
+    return entry.values;
+  });
+}
+
+function AdminPlaceService_dependencyIndex_(table, idKey, statuses, errorCode) {
+  var index = Object.create(null);
+  AdminPlaceService_dependencyRows_(table, errorCode).forEach(function (row) {
+    var id = row[idKey];
+    if (!AdminPlaceService_validId_(id) || Object.prototype.hasOwnProperty.call(index, id)) throw new Error(errorCode);
+    if (typeof row.status !== "string" || statuses.indexOf(row.status) === -1) throw new Error(errorCode);
+    index[id] = row;
+  });
+  return index;
+}
+
+function AdminPlaceService_dependencyReference_(value, optional) {
+  if (typeof value !== "string") throw new Error("ADMIN_PLACE_DEPENDENCY_REFERENCE");
+  var normalized = value.trim();
+  if (!normalized && optional) return "";
+  if (!AdminPlaceService_validId_(normalized)) throw new Error("ADMIN_PLACE_DEPENDENCY_REFERENCE");
+  return normalized;
+}
+
+function AdminPlaceService_dependencyList_(value) {
+  if (typeof value !== "string") throw new Error("ADMIN_PLACE_DEPENDENCY_LIST");
+  if (!value) return [];
+  var seen = Object.create(null);
+  var result = [];
+  value.split("|").forEach(function (part) {
+    var id = part.trim();
+    if (!id || Object.prototype.hasOwnProperty.call(seen, id)) return;
+    if (!AdminPlaceService_validId_(id)) throw new Error("ADMIN_PLACE_DEPENDENCY_LIST");
+    seen[id] = true;
+    result.push(id);
+  });
+  return result;
+}
+
+function AdminPlaceService_dependencyHumanText_(value) {
+  if (value === undefined || value === null || value === "") return "";
+  if (typeof value !== "string") throw new Error("ADMIN_PLACE_DEPENDENCY_LABEL");
+  try {
+    return AdminPlaceService_unescapeHumanText_(value);
+  } catch (_labelError) {
+    throw new Error("ADMIN_PLACE_DEPENDENCY_LABEL");
+  }
+}
+
+function AdminPlaceService_dependencyLabel_(primary, secondary, fallback) {
+  var first = AdminPlaceService_dependencyHumanText_(primary);
+  var second = AdminPlaceService_dependencyHumanText_(secondary);
+  return first || second || fallback;
+}
+
+function AdminPlaceService_dependencyStoredBoolean_(value) {
+  if (value === true || value === 1) return true;
+  var text = value === null || value === undefined ? "" : String(value).trim().toLowerCase();
+  return text === "true" || text === "1";
+}
+
+function AdminPlaceService_dependencyAdd_(items, entityId, label) {
+  if (items.some(function (item) { return item.entity_id === entityId; })) return;
+  items.push({ entity_id: entityId, label: label });
+}
+
+function AdminPlaceService_dependencyScalarGroup_(table, idKey, referenceKey, primaryLabelKey, secondaryLabelKey,
+    placeId, items, statuses, errorCode) {
+  var records = AdminPlaceService_dependencyIndex_(table, idKey, statuses, errorCode);
+  Object.keys(records).forEach(function (entityId) {
+    var record = records[entityId];
+    if (record.status === "deleted") return;
+    if (AdminPlaceService_dependencyReference_(record[referenceKey], true) !== placeId) return;
+    AdminPlaceService_dependencyAdd_(items, entityId,
+      AdminPlaceService_dependencyLabel_(record[primaryLabelKey], record[secondaryLabelKey], entityId));
   });
 }
 

@@ -49,6 +49,16 @@ const AUDIT_HEADERS = [
   "audit_id", "actor_admin_id", "occurred_at"
 ];
 const AUDIT_ACTIONS = ["CREATE", "UPDATE_DRAFT", "PUBLISH", "UNPUBLISH", "ARCHIVE", "RESTORE"];
+const DEPENDENCY_HEADERS = {
+  routes: ["route_id", "name_th", "name_en", "status"],
+  route_places: ["route_place_id", "route_id", "place_id", "status"],
+  products: ["product_id", "name_th", "name_en", "related_place_id", "status"],
+  events: ["event_id", "title_th", "title_en", "related_place_id", "status"],
+  gallery: ["media_id", "title_th", "title_en", "related_place_id", "status"],
+  trip_templates: ["template_id", "name_th", "name_en", "place_ids", "status"],
+  reviews: ["review_id", "place_id", "reviewer_name", "is_anonymous", "status"]
+};
+const DEPENDENCY_GROUPS = ["routes", "nearby_places", "products", "events", "gallery", "trip_templates", "reviews"];
 const focusArgument = process.argv.find((argument) => argument.startsWith("--focus="));
 const focus = focusArgument ? focusArgument.slice("--focus=".length).toLowerCase() : "";
 
@@ -151,6 +161,57 @@ function fixtures() {
   };
 }
 
+function dependencyFixtures() {
+  const data = fixtures();
+  data.places.push(
+    place("PLC-NEAR-A", { name_th: "Nearby A", status: "draft", nearby_place_ids: "PLC-PUBLISHED|PLC-PUBLISHED" }),
+    place("PLC-NEAR-B", { name_th: "", name_en: "Nearby B", status: "published", nearby_place_ids: "OTHER| PLC-PUBLISHED | |OTHER" }),
+    place("PLC-NEAR-C", { name_th: "", name_en: "", status: "archived", nearby_place_ids: "PLC-PUBLISHED" })
+  );
+  data.routes = [
+    { route_id: "ROUTE-D", name_th: "Route Draft", name_en: "", status: "draft", description_th: "PLC-PUBLISHED" },
+    { route_id: "ROUTE-P", name_th: "", name_en: "Route Published", status: "published" },
+    { route_id: "ROUTE-H", name_th: "", name_en: "", status: "hidden" },
+    { route_id: "ROUTE-A", name_th: "Route Archived", name_en: "", status: "archived" },
+    { route_id: "ROUTE-X", name_th: "Deleted", name_en: "", status: "deleted", place_ids: "PLC-PUBLISHED" },
+    { route_id: "ROUTE-TEXT", name_th: "PLC-PUBLISHED", name_en: "", status: "published", description_th: "PLC-PUBLISHED" }
+  ];
+  data.route_places = [
+    { route_place_id: "RP-1", route_id: "ROUTE-P", place_id: "PLC-PUBLISHED", status: "published" },
+    { route_place_id: "RP-2", route_id: "ROUTE-P", place_id: "PLC-PUBLISHED", status: "hidden" },
+    { route_place_id: "RP-3", route_id: "ROUTE-D", place_id: "PLC-PUBLISHED", status: "draft" },
+    { route_place_id: "RP-4", route_id: "ROUTE-H", place_id: "PLC-PUBLISHED", status: "hidden" },
+    { route_place_id: "RP-5", route_id: "ROUTE-A", place_id: "PLC-PUBLISHED", status: "archived" },
+    { route_place_id: "RP-6", route_id: "ROUTE-X", place_id: "PLC-PUBLISHED", status: "published" },
+    { route_place_id: "RP-7", route_id: "ROUTE-TEXT", place_id: "PLC-OTHER", status: "published" },
+    { route_place_id: "RP-8", route_id: "ROUTE-D", place_id: "PLC-PUBLISHED", status: "deleted" }
+  ];
+  data.products = ["draft", "published", "hidden", "archived", "deleted"].map((status, index) => ({
+    product_id: `PROD-${index}`, name_th: index === 0 ? "Product Draft" : "", name_en: index === 1 ? "Product Published" : "",
+    related_place_id: "PLC-PUBLISHED", status, description_th: "PLC-PUBLISHED"
+  })).concat([{ product_id: "PROD-TEXT", name_th: "PLC-PUBLISHED", name_en: "", related_place_id: "PLC-OTHER", status: "published" }]);
+  data.events = ["draft", "published", "hidden", "archived", "deleted"].map((status, index) => ({
+    event_id: `EVT-${index}`, title_th: index === 0 ? "Event Draft" : "", title_en: index === 1 ? "Event Published" : "",
+    related_place_id: "PLC-PUBLISHED", status
+  }));
+  data.gallery = ["draft", "published", "hidden", "archived", "deleted"].map((status, index) => ({
+    media_id: `MEDIA-${index}`, title_th: index === 0 ? "Gallery Draft" : "", title_en: index === 1 ? "Gallery Published" : "",
+    related_place_id: "PLC-PUBLISHED", status
+  })).concat([{ media_id: "MEDIA-MANIFEST", title_th: "Manifest only", title_en: "", related_place_id: "", status: "published", owner_place_id: "PLC-PUBLISHED" }]);
+  data.trip_templates = ["draft", "published", "hidden", "archived", "deleted"].map((status, index) => ({
+    template_id: `TRIP-${index}`, name_th: index === 0 ? "Trip Draft" : "", name_en: index === 1 ? "Trip Published" : "",
+    place_ids: "OTHER| PLC-PUBLISHED | |PLC-PUBLISHED", status
+  })).concat([{ template_id: "TRIP-OTHER", name_th: "PLC-PUBLISHED", name_en: "", place_ids: "PLC-PUBLISHED-X", status: "published" }]);
+  data.reviews = [
+    { review_id: "REV-A", place_id: "PLC-PUBLISHED", reviewer_name: "'=Unsafe", is_anonymous: false, status: "approved" },
+    { review_id: "REV-H", place_id: "PLC-PUBLISHED", reviewer_name: "", is_anonymous: false, status: "hidden" },
+    { review_id: "REV-P", place_id: "PLC-PUBLISHED", reviewer_name: "Named reviewer", is_anonymous: false, status: "pending" },
+    { review_id: "REV-Z", place_id: "PLC-PUBLISHED", reviewer_name: "Secret", is_anonymous: true, status: "approved" },
+    { review_id: "REV-X", place_id: "PLC-PUBLISHED", reviewer_name: "Deleted", is_anonymous: false, status: "deleted" }
+  ];
+  return data;
+}
+
 function table(headers, values) {
   return {
     headers: [...headers],
@@ -179,6 +240,9 @@ function loadBackend(options = {}) {
       if (options.readError) throw new Error(options.readError);
       if (name === "places") return table(PLACE_HEADERS, data.places);
       if (name === "place_drafts") return table(DRAFT_HEADERS, data.drafts);
+      if (Object.prototype.hasOwnProperty.call(DEPENDENCY_HEADERS, name) && Array.isArray(data[name])) {
+        return table(DEPENDENCY_HEADERS[name], data[name]);
+      }
       throw new Error("UNEXPECTED_READ");
     },
     SheetService_updateObjectAtRow_: forbiddenWrite("updateObjectAtRow"),
@@ -729,15 +793,140 @@ function assertError(result, code) {
   assert.equal(result.error.message.length > 0 && result.error.message.length <= 120, true);
 }
 
-test("Task 7 exports Create Save Draft and Publish but no later write action", () => {
+function inspect(runtime, payload = { place_id: "PLC-PUBLISHED" }) {
+  return plain(runtime.context.adminInspectPlaceDependencies_("TOKEN", payload));
+}
+
+test("Task 8 exports dependency inspection but no later lifecycle action", () => {
   const create = loadTransactionBackend("CREATE");
   assert.equal(typeof create.context.adminCreatePlace_, "function");
   assert.equal(typeof create.context.adminSavePlaceDraft_, "function");
   assert.equal(typeof create.context.adminPublishPlace_, "function");
+  assert.equal(typeof create.context.adminInspectPlaceDependencies_, "function");
   for (const forbidden of [
     "adminUnpublishPlace_", "adminArchivePlace_", "adminRestorePlace_",
-    "adminInspectPlaceDependencies_", "adminGetPlaceMediaOptions_"
+    "adminGetPlaceMediaOptions_"
   ]) assert.equal(typeof create.context[forbidden], "undefined", forbidden);
+});
+
+test("dependencies authorize all Admin roles and reject fake role invalid session and noncanonical payloads", () => {
+  for (const role of ["super_admin", "editor", "reviewer", "viewer"]) {
+    const runtime = loadBackend({ role, data: dependencyFixtures() });
+    assert.equal(inspect(runtime, { place_id: "PLC-PUBLISHED", role: "super_admin" }).error.code, "VALIDATION_ERROR");
+    assert.equal(inspect(runtime).ok, true, role);
+    assert.deepEqual(runtime.calls.auth, ["TOKEN", "TOKEN"]);
+  }
+  assertError(inspect(loadBackend({ authError: "UNAUTHORIZED", data: dependencyFixtures() })), "UNAUTHORIZED");
+  for (const payload of [{}, { place_id: 1 }, { place_id: " PLC-PUBLISHED" }, { place_id: "../PLC" }, { place_id: "PLC-PUBLISHED", confirmed: true }]) {
+    assertError(inspect(loadBackend({ data: dependencyFixtures() }), payload), "VALIDATION_ERROR");
+  }
+});
+
+test("dependencies return exactly seven safe deduplicated sorted authoritative groups", () => {
+  const data = dependencyFixtures();
+  const before = JSON.stringify(data);
+  const runtime = loadBackend({ data });
+  const first = inspect(runtime);
+  const second = inspect(runtime);
+  assert.equal(first.ok, true);
+  assert.deepEqual(Object.keys(first.data), ["place_id", "checked_at", "groups"]);
+  assert.equal(first.data.place_id, "PLC-PUBLISHED");
+  assert.match(first.data.checked_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  assert.equal(first.data.checked_at.length, 24);
+  assert.deepEqual(Object.keys(first.data.groups), DEPENDENCY_GROUPS);
+  assert.deepEqual(first.data.groups.routes, [
+    { entity_id: "ROUTE-A", label: "Route Archived" },
+    { entity_id: "ROUTE-D", label: "Route Draft" },
+    { entity_id: "ROUTE-H", label: "ROUTE-H" },
+    { entity_id: "ROUTE-P", label: "Route Published" }
+  ]);
+  assert.deepEqual(first.data.groups.nearby_places, [
+    { entity_id: "PLC-NEAR-A", label: "Nearby A" },
+    { entity_id: "PLC-NEAR-B", label: "Nearby B" },
+    { entity_id: "PLC-NEAR-C", label: "PLC-NEAR-C" }
+  ]);
+  assert.deepEqual(first.data.groups.products, [
+    { entity_id: "PROD-0", label: "Product Draft" }, { entity_id: "PROD-1", label: "Product Published" },
+    { entity_id: "PROD-2", label: "PROD-2" }, { entity_id: "PROD-3", label: "PROD-3" }
+  ]);
+  assert.deepEqual(first.data.groups.events, [
+    { entity_id: "EVT-0", label: "Event Draft" }, { entity_id: "EVT-1", label: "Event Published" },
+    { entity_id: "EVT-2", label: "EVT-2" }, { entity_id: "EVT-3", label: "EVT-3" }
+  ]);
+  assert.deepEqual(first.data.groups.gallery, [
+    { entity_id: "MEDIA-0", label: "Gallery Draft" }, { entity_id: "MEDIA-1", label: "Gallery Published" },
+    { entity_id: "MEDIA-2", label: "MEDIA-2" }, { entity_id: "MEDIA-3", label: "MEDIA-3" }
+  ]);
+  assert.deepEqual(first.data.groups.trip_templates, [
+    { entity_id: "TRIP-0", label: "Trip Draft" }, { entity_id: "TRIP-1", label: "Trip Published" },
+    { entity_id: "TRIP-2", label: "TRIP-2" }, { entity_id: "TRIP-3", label: "TRIP-3" }
+  ]);
+  assert.deepEqual(first.data.groups.reviews, [
+    { entity_id: "REV-A", label: "=Unsafe" },
+    { entity_id: "REV-H", label: "REV-H" },
+    { entity_id: "REV-P", label: "Named reviewer" },
+    { entity_id: "REV-Z", label: "\u0e19\u0e31\u0e01\u0e17\u0e48\u0e2d\u0e07\u0e40\u0e17\u0e35\u0e48\u0e22\u0e27" }
+  ]);
+  for (const key of DEPENDENCY_GROUPS) {
+    for (const item of first.data.groups[key]) assert.deepEqual(Object.keys(item), ["entity_id", "label"]);
+    assert.deepEqual(first.data.groups[key].map((item) => item.entity_id), [...first.data.groups[key].map((item) => item.entity_id)].sort());
+  }
+  assert.equal(/sourceRowNumber|route_place_id|status|sheet|count|total|owner_place_id/i.test(JSON.stringify(first.data)), false);
+  assert.equal(JSON.stringify(data), before);
+  assert.deepEqual(second.data.groups, first.data.groups);
+  assert.equal(runtime.calls.writes.length, 0);
+  const readsByName = runtime.calls.reads.reduce((counts, entry) => ({ ...counts, [entry.name]: (counts[entry.name] || 0) + 1 }), {});
+  for (const name of ["places", ...Object.keys(DEPENDENCY_HEADERS)]) assert.equal(readsByName[name], 2, `${name} once per inspection`);
+});
+
+test("dependencies enforce exact status boundaries and ignore every non-source", () => {
+  const data = dependencyFixtures();
+  const result = inspect(loadBackend({ data }));
+  assert.equal(result.ok, true);
+  const serialized = JSON.stringify(result.data.groups);
+  for (const excluded of ["ROUTE-X", "ROUTE-TEXT", "PROD-4", "PROD-TEXT", "EVT-4", "MEDIA-4", "MEDIA-MANIFEST", "TRIP-4", "TRIP-OTHER", "REV-X"]) {
+    assert.equal(serialized.includes(excluded), false, excluded);
+  }
+  assert.equal(serialized.includes("PLC-PUBLISHED-X"), false);
+});
+
+test("dependencies fail closed for unknown duplicate malformed unsupported and orphan authoritative state", () => {
+  const cases = [
+    ["unknown Place", (data) => data, { place_id: "PLC-MISSING" }, "NOT_FOUND"],
+    ["duplicate Place", (data) => data.places.push({ ...data.places[0] }), null, "SERVER_ERROR"],
+    ["malformed Place", (data) => { data.places[1].place_id = "bad id"; }, null, "SERVER_ERROR"],
+    ["legacy Place", (data) => { data.places[1].status = "hidden"; }, null, "SERVER_ERROR"],
+    ["deleted legacy Place", (data) => { data.places[1].status = "deleted"; }, null, "SERVER_ERROR"],
+    ["duplicate Route", (data) => data.routes.push({ ...data.routes[0] }), null, "SERVER_ERROR"],
+    ["duplicate Product", (data) => data.products.push({ ...data.products[0] }), null, "SERVER_ERROR"],
+    ["malformed relationship identity", (data) => { data.route_places[0].route_place_id = "bad id"; }, null, "SERVER_ERROR"],
+    ["orphan Route edge", (data) => data.route_places.push({ route_place_id: "RP-X", route_id: "ROUTE-MISSING", place_id: "PLC-PUBLISHED", status: "published" }), null, "SERVER_ERROR"],
+    ["malformed scalar", (data) => { data.products[0].related_place_id = "bad id"; }, null, "SERVER_ERROR"],
+    ["malformed list", (data) => { data.trip_templates[0].place_ids = "PLC-PUBLISHED|bad id"; }, null, "SERVER_ERROR"],
+    ["non-string list", (data) => { data.trip_templates[0].place_ids = ["PLC-PUBLISHED"]; }, null, "SERVER_ERROR"],
+    ["deleted non-string list", (data) => { data.trip_templates[4].place_ids = ["PLC-PUBLISHED"]; }, null, "SERVER_ERROR"],
+    ["unsupported status", (data) => { data.events[0].status = "future"; }, null, "SERVER_ERROR"],
+    ["invalid label", (data) => { data.gallery[0].title_th = { raw: true }; }, null, "SERVER_ERROR"],
+    ["missing sheet", (data) => { delete data.gallery; }, null, "SERVER_ERROR"]
+  ];
+  for (const [label, mutate, payload, code] of cases) {
+    const data = dependencyFixtures();
+    mutate(data);
+    const runtime = loadBackend({ data });
+    assertError(inspect(runtime, payload || undefined), code);
+    assert.deepEqual(runtime.calls.writes, [], label);
+  }
+});
+
+test("dependency inspection Router is POST-only and cannot archive or persist confirmation", () => {
+  const runtime = loadBackend({ data: dependencyFixtures() });
+  assert.equal(post(runtime.context, { action: "adminInspectPlaceDependencies", token: "TOKEN", payload: { place_id: "PLC-PUBLISHED" } }).ok, true);
+  assert.equal(response(runtime.context.routeRequest_("GET", { parameter: { action: "adminInspectPlaceDependencies", token: "TOKEN" } })).error.code, "UNKNOWN_ACTION");
+  for (const action of ["adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace"]) {
+    assert.equal(post(runtime.context, { action, token: "TOKEN", payload: { place_id: "PLC-PUBLISHED", confirmed: true } }).error.code, "UNKNOWN_ACTION");
+  }
+  assert.equal(runtime.data.places.find((row) => row.place_id === "PLC-PUBLISHED").status, "published");
+  assert.equal(runtime.calls.writes.length, 0);
 });
 
 test("Create and Save authorize authoritative roles before payload reads locks or writes", () => {
@@ -1708,17 +1897,18 @@ test("transaction compensation table restores every action and fully clears only
   assert.equal(draftArchive.calls.propertyWrites.length, 0, "draft ARCHIVE must not write the Public epoch");
 });
 
-test("transaction Router exposes only Task 5 draft writes plus Task 7 Publish and no force or later lifecycle path", () => {
+test("transaction Router exposes Task 8 inspection but no force or later lifecycle path", () => {
   const { context, calls } = loadBackend();
   for (const action of ["adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace"]) {
     const result = post(context, { action, token: "TOKEN", payload: { force: true } });
     assertError(result, "VALIDATION_ERROR");
   }
-  for (const action of ["adminInspectPlaceDependencies", "adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace"]) {
+  assertError(post(context, { action: "adminInspectPlaceDependencies", token: "TOKEN", payload: { force: true } }), "VALIDATION_ERROR");
+  for (const action of ["adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace"]) {
     const result = post(context, { action, token: "TOKEN", payload: { force: true } });
     assertError(result, "UNKNOWN_ACTION");
   }
-  assert.equal(calls.auth.length, 3);
+  assert.equal(calls.auth.length, 4);
   assert.equal(calls.writes.length, 0);
 });
 

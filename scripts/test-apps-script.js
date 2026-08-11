@@ -38,7 +38,8 @@ for (const { name, source } of sources) {
 
 const postActions = [
   "submitReview", "adminLogin", "adminValidateSession", "adminLogout",
-  "adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace"
+  "adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace",
+  "adminInspectPlaceDependencies"
 ];
 
 function assertStaticPostActionAllowlist(source) {
@@ -130,7 +131,7 @@ function createRouterRuntime({ routerSource = router, json = JSON } = {}) {
       return { ok: true, data: { action } };
     };
   }
-  for (const action of ["adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace"]) {
+  for (const action of ["adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace", "adminInspectPlaceDependencies"]) {
     context[`${action}_`] = (...args) => {
       calls.push({ action, args });
       return { ok: true, data: { action } };
@@ -143,14 +144,15 @@ function createRouterRuntime({ routerSource = router, json = JSON } = {}) {
 }
 
 // Admin Place actions forward only the body token and payload, never query/header authority.
-for (const action of ["adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace"]) {
+for (const action of ["adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace", "adminInspectPlaceDependencies"]) {
   const runtime = createRouterRuntime();
   const token = "BODY_TOKEN";
   const payload = action === "adminGetPlaces" ? { status: "draft" } :
     action === "adminGetPlaceDetail" ? { place_id: "P-1", view: "working" } :
       action === "adminCreatePlace" ? { content: { marker: "create" } } :
         action === "adminSavePlaceDraft" ? { place_id: "P-1", expected_version: 3, content: { marker: "save" } } :
-          { place_id: "P-1", expected_version: 3 };
+          action === "adminPublishPlace" ? { place_id: "P-1", expected_version: 3 } :
+            { place_id: "P-1" };
   assert.deepEqual(post(runtime, { action, token, payload }, {
     parameter: { action: "adminLogout", token: "QUERY_TOKEN", payload: "QUERY_PAYLOAD" },
     headers: { Authorization: "Bearer HEADER_TOKEN" }, token: "EVENT_TOKEN", payload: "EVENT_PAYLOAD"
@@ -158,12 +160,11 @@ for (const action of ["adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace
   assert.deepEqual(runtime.calls, [{ action, args: [token, payload] }]);
 }
 
-// A Router with the Task 7 branch removed is exactly the pre-Task-7 eight-action set
-// and must fail the current exact nine-action contract.
+// The committed pre-Task-8 Router is exactly the prior nine-action set and must
+// fail the current exact ten-action contract until the static inspection branch exists.
 {
-  const preTask7Router = router.replace(/^\s*if \(action === "adminPublishPlace"\).*\r?\n/m, "");
   assert.throws(
-    () => assertStaticPostActionAllowlist(preTask7Router),
+    () => assertStaticPostActionAllowlist(router.replace(/^\s*if \(action === "adminInspectPlaceDependencies"\).*\r?\n/m, "")),
     /Router POST action comparisons must be exactly the approved allowlist/
   );
 }
@@ -493,7 +494,7 @@ for (const action of publicGetActions) {
 }
 
 // GET and query values cannot activate Admin actions or deliver URL/header tokens.
-for (const action of ["adminLogin", "adminValidateSession", "adminLogout", "adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace"]) {
+for (const action of ["adminLogin", "adminValidateSession", "adminLogout", "adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace", "adminInspectPlaceDependencies"]) {
   for (const parameter of [
     { action, token: "T".repeat(43) },
     { method: action, token: "T".repeat(43) },
@@ -519,7 +520,7 @@ for (const editorOnlyName of ["setupAdminAuthSchema", "benchmarkAdminPbkdf2", "b
 }
 
 // Every Admin exception is converted to the existing fixed server-safe envelope with no leak.
-for (const action of ["adminLogin", "adminValidateSession", "adminLogout", "adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace"]) {
+for (const action of ["adminLogin", "adminValidateSession", "adminLogout", "adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace", "adminInspectPlaceDependencies"]) {
   for (const thrown of [
     new Error("ordinary failure"),
     "string failure",
