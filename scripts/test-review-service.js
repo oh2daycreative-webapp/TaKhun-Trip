@@ -30,25 +30,36 @@ function makeCache() {
   return { values, puts, get(key) { return values.get(key) || null; }, put(key, value, ttl) { puts.push({ key, value, ttl }); values.set(key, value); } };
 }
 
+function makeProperties(initial = "1") {
+  const values = new Map(); const calls = [];
+  if (initial !== null) values.set("PLACE_PUBLIC_CACHE_EPOCH", initial);
+  return { values, calls, getProperty(key) { calls.push(key); return values.has(key) ? values.get(key) : null; } };
+}
+
 function load(options = {}) {
   const reviewRows = options.reviews || reviews();
   const placeRows = options.places || [{ place_id: "P-1", status: "published" }, { place_id: "P-2", status: "draft" }];
   const cache = options.cache || makeCache();
+  const properties = options.properties || makeProperties();
   const appended = [];
+  const reads = [];
   const lock = options.lock || { acquired: false, released: 0, tryLock(ms) { assert.equal(ms, 10000); this.acquired = true; return true; }, releaseLock() { this.released += 1; } };
   const context = {
     JSON, Object, Math, Number, String, Array, Date, RegExp, encodeURIComponent, isFinite,
     CacheService: { getScriptCache: () => cache },
+    PropertiesService: { getScriptProperties: () => properties },
     LockService: { getScriptLock: () => lock },
     Utilities: { getUuid: () => "123e4567-e89b-12d3-a456-426614174000", formatDate: (_date, zone, pattern) => { assert.equal(zone, "Asia/Bangkok"); assert.equal(pattern, "yyyy-MM-dd HH:mm:ss"); return "2026-07-15 14:30:00"; } },
     Session: { getScriptTimeZone: () => "Asia/Bangkok" },
-    readSheetObjects_(name) { if (name === "reviews") return reviewRows; if (name === "places") return placeRows; throw new Error("unexpected sheet"); },
+    readSheetObjects_(name) { reads.push(name); if (name === "reviews") return reviewRows; if (name === "places") return placeRows; throw new Error("unexpected sheet"); },
     appendSheetObject_(name, required, record) { appended.push({ name, required: [...required], record: { ...record } }); if (options.appendError) throw new Error("sheet secret"); }
   };
   vm.createContext(context);
+  vm.runInContext(read("apps-script/Config.gs"), context, { filename: "apps-script/Config.gs" });
+  vm.runInContext(read("apps-script/PlaceService.gs"), context, { filename: "apps-script/PlaceService.gs" });
   const file = path.join(root, "apps-script/ReviewService.gs");
   vm.runInContext(fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "", context, { filename: "apps-script/ReviewService.gs" });
-  return { context, reviewRows, placeRows, cache, appended, lock };
+  return { context, reviewRows, placeRows, cache, appended, lock, properties, reads };
 }
 
 function required(context, name) { assert.equal(typeof context[name], "function", `${name} must be implemented`); return context[name]; }
@@ -123,6 +134,25 @@ test("SheetService appends by real header order and fails closed for missing hea
   required(context, "appendSheetObject_")("reviews", ["review_id", "place_id", "status", "comment"], { review_id: "R", place_id: "P", status: "pending", comment: "safe" });
   assert.deepEqual(plain(writes[0]), { row: 2, column: 1, height: 1, width: 4, values: [["safe", "R", "pending", "P"]] });
   assert.throws(() => required(context, "appendSheetObject_")("reviews", ["missing"], {}));
+});
+
+test("Review visibility cache changes namespace with the Place epoch but submitReview does not read it", () => {
+  const properties = makeProperties("1"); const cache = makeCache();
+  const env = load({ properties, cache });
+  const first = plain(env.context.getReviews_({ place_id: "P-1", epoch: "client" }));
+  const reads = env.reads.length;
+  assert.deepEqual(plain(env.context.getReviews_({ place_id: "P-1" })), first);
+  assert.equal(env.reads.length, reads);
+  properties.values.set("PLACE_PUBLIC_CACHE_EPOCH", "2");
+  assert.deepEqual(plain(env.context.getReviews_({ place_id: "P-1" })), first);
+  assert.equal(env.reads.length, reads * 2);
+  assert.match(cache.puts.at(-1).key, /:getReviews:place-epoch:2:/);
+  assert.equal(JSON.stringify(first).includes("epoch"), false);
+
+  const submitProperties = makeProperties("5");
+  const submit = load({ properties: submitProperties });
+  assert.equal(plain(submit.context.submitReview_({ place_id: "P-1", rating: 5, comment: "safe" })).ok, true);
+  assert.deepEqual(submitProperties.calls, []);
 });
 
 if (process.exitCode) process.exit(process.exitCode);

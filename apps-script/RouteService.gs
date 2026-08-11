@@ -207,8 +207,9 @@ function RouteService_normalizeTripTemplateParameters_(parameters) {
 
 function RouteService_getCachedPublicResponse_(action, parameters, ttlSeconds, loader) {
   var cache = null;
-  var key = RouteService_cacheKey_(action, parameters);
+  var key = null;
   try {
+    key = RouteService_cacheKey_(action, parameters);
     cache = CacheService.getScriptCache();
     var cached = cache.get(key);
     if (cached) {
@@ -221,7 +222,7 @@ function RouteService_getCachedPublicResponse_(action, parameters, ttlSeconds, l
   var response = loader();
   if (response && response.ok === true) {
     try {
-      if (cache) cache.put(key, JSON.stringify(response), ttlSeconds);
+      if (cache && key) cache.put(key, JSON.stringify(response), ttlSeconds);
     } catch (_routeServiceCacheWriteError) {
       // A successful uncached response remains valid.
     }
@@ -231,6 +232,7 @@ function RouteService_getCachedPublicResponse_(action, parameters, ttlSeconds, l
 
 function RouteService_cacheKey_(action, parameters) {
   var parts = ["public", action];
+  if (action === "getRouteDetail" || action === "getTripTemplates") parts.push(PlaceService_cacheEpochKey_());
   Object.keys(parameters || {}).sort().forEach(function (key) {
     parts.push(key + "=" + encodeURIComponent(RouteService_trim_(parameters[key])));
   });

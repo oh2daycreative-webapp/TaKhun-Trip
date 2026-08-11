@@ -157,18 +157,18 @@ function EventService_publishedPlaceMap_(sourceRows) {
 }
 
 function EventService_cached_(action, parameters, loader) {
-  var cache = null; var key = EventService_cacheKey_(action, parameters);
-  try { cache = CacheService.getScriptCache(); var cached = cache.get(key); if (cached) { var parsed = JSON.parse(cached); if (parsed && parsed.ok === true && parsed.data && typeof parsed.data === "object") return parsed; } }
+  var cache = null; var key = null;
+  try { key = EventService_cacheKey_(action, parameters); cache = CacheService.getScriptCache(); var cached = cache.get(key); if (cached) { var parsed = JSON.parse(cached); if (parsed && parsed.ok === true && parsed.data && typeof parsed.data === "object") return parsed; } }
   catch (_eventServiceCacheReadError) { /* Cache failures must not prevent public reads. */ }
   var response = loader();
   if (response && response.ok === true) {
-    try { if (cache) cache.put(key, JSON.stringify(response), EventService_CACHE_SECONDS_); }
+    try { if (cache && key) cache.put(key, JSON.stringify(response), EventService_CACHE_SECONDS_); }
     catch (_eventServiceCacheWriteError) { /* Return the successful uncached response. */ }
   }
   return response;
 }
 
-function EventService_cacheKey_(action, parameters) { var parts = ["public", action]; Object.keys(parameters || {}).sort().forEach(function (key) { parts.push(key + "=" + encodeURIComponent(EventService_trim_(parameters[key]))); }); return parts.join(":"); }
+function EventService_cacheKey_(action, parameters) { var parts = ["public", action]; if (action === "getEventDetail") parts.push(PlaceService_cacheEpochKey_()); Object.keys(parameters || {}).sort().forEach(function (key) { parts.push(key + "=" + encodeURIComponent(EventService_trim_(parameters[key]))); }); return parts.join(":"); }
 function EventService_optionalBoolean_(value) { if (value === undefined || value === null || EventService_trim_(value) === "") return { ok: true, hasValue: false, value: false }; if (value === true || value === 1) return { ok: true, hasValue: true, value: true }; if (value === false || value === 0) return { ok: true, hasValue: true, value: false }; var text = EventService_lower_(value); if (text === "true" || text === "1") return { ok: true, hasValue: true, value: true }; if (text === "false" || text === "0") return { ok: true, hasValue: true, value: false }; return { ok: false, hasValue: false, value: false }; }
 function EventService_storedBoolean_(value) { var result = EventService_optionalBoolean_(value); return result.ok && result.hasValue ? result.value : false; }
 function EventService_localized_(row, field, lang) { return EventService_trim_(row[field + "_" + lang]) || EventService_trim_(row[field + "_th"]); }

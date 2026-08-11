@@ -34,19 +34,29 @@ function cache() {
   return { values, puts, get(key) { return values.get(key) || null; }, put(key, value, ttl) { puts.push({ key, value, ttl }); values.set(key, value); } };
 }
 
+function properties(initial = "1") {
+  const values = new Map();
+  if (initial !== null) values.set("PLACE_PUBLIC_CACHE_EPOCH", initial);
+  return { values, getProperty(key) { return values.has(key) ? values.get(key) : null; } };
+}
+
 function load(options = {}) {
   const source = data();
   const store = options.cache || cache();
+  const propertyStore = options.properties || properties();
   const reads = [];
   const context = {
     JSON, Object, Math, Number, String, Array, Date, RegExp, encodeURIComponent, isFinite,
     CacheService: { getScriptCache: () => store },
+    PropertiesService: { getScriptProperties: () => propertyStore },
     readSheetObjects_: options.readSheetObjects || ((name) => { reads.push(name); return source[name]; })
   };
   vm.createContext(context);
+  vm.runInContext(read("apps-script/Config.gs"), context, { filename: "apps-script/Config.gs" });
+  vm.runInContext(read("apps-script/PlaceService.gs"), context, { filename: "apps-script/PlaceService.gs" });
   const file = path.join(root, "apps-script/ProductService.gs");
   vm.runInContext(fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "", context, { filename: "apps-script/ProductService.gs" });
-  return { context, source, store, reads };
+  return { context, source, store, reads, properties: propertyStore };
 }
 
 function required(context, name) {
@@ -116,6 +126,26 @@ test("product cache normalizes effective keys uses 300 seconds and never caches 
   store.values.set(store.puts[0].key, "not-json");
   context.getProducts_({ category: "honey", featured: true, page: 1, page_size: 20, lang: "en" });
   assert.equal(reads.filter((name) => name === "products").length, productReadsBeforeMalformedRecovery + 1);
+});
+
+test("only Product Detail changes namespace with the Place epoch", () => {
+  const propertyStore = properties("1");
+  const store = cache();
+  const { context, reads } = load({ cache: store, properties: propertyStore });
+  context.getProducts_({ page: 1, epoch: "client" });
+  const listReads = reads.length;
+  propertyStore.values.set("PLACE_PUBLIC_CACHE_EPOCH", "2");
+  context.getProducts_({ page: 1 });
+  assert.equal(reads.length, listReads);
+  assert.equal(store.puts[0].key.includes("place-epoch"), false);
+
+  context.getProductDetail_({ product_id: "PR-10" });
+  const detailReads = reads.length;
+  assert.match(store.puts.at(-1).key, /:getProductDetail:place-epoch:2:/);
+  propertyStore.values.set("PLACE_PUBLIC_CACHE_EPOCH", "3");
+  context.getProductDetail_({ product_id: "PR-10" });
+  assert.equal(reads.length, detailReads + 2);
+  assert.match(store.puts.at(-1).key, /:getProductDetail:place-epoch:3:/);
 });
 
 if (process.exitCode) process.exit(process.exitCode);

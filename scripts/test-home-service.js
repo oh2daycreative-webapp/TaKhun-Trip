@@ -65,10 +65,17 @@ function createCache(options = {}) {
   };
 }
 
+function createProperties(initial = "1") {
+  const values = new Map();
+  if (initial !== null) values.set("PLACE_PUBLIC_CACHE_EPOCH", initial);
+  return { values, getProperty(key) { return values.has(key) ? values.get(key) : null; } };
+}
+
 function load(options = {}) {
   assert.equal(fs.existsSync(homeFile), true, "apps-script/HomeService.gs must exist before Home tests can pass");
   const rows = clone(options.rows || baseRows());
   const cache = options.cache || createCache();
+  const properties = options.properties || createProperties();
   const reads = [];
   const builderCalls = [];
   class FixedDate extends Date {
@@ -78,6 +85,7 @@ function load(options = {}) {
     JSON, Object, Math, Number, String, Array, RegExp, encodeURIComponent, decodeURIComponent, isFinite,
     Date: FixedDate,
     CacheService: { getScriptCache: () => { if (options.throwCacheService) throw new Error("cache unavailable"); return cache; } },
+    PropertiesService: { getScriptProperties: () => properties },
     readSheetObjects_: (name) => {
       reads.push(name);
       if (options.failRead === name) throw new Error("source failed: " + name);
@@ -85,6 +93,7 @@ function load(options = {}) {
     }
   };
   vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(root, "apps-script", "Config.gs"), "utf8"), context, { filename: "apps-script/Config.gs" });
   serviceFiles.forEach((name) => vm.runInContext(fs.readFileSync(path.join(root, "apps-script", name), "utf8"), context, { filename: `apps-script/${name}` }));
   ["RouteService_buildRoutesResponse_", "buildPlacesResponse_", "ProductService_buildProductsResponse_", "EventService_buildEventsResponse_", "GalleryService_buildGalleryResponse_"].forEach((name) => {
     const original = context[name];
@@ -94,7 +103,7 @@ function load(options = {}) {
   ["getRoutes_", "getPlaces_", "getProducts_", "getEvents_", "getGallery_"].forEach((name) => { context[name] = () => { throw new Error(`Home must not call cached endpoint ${name}`); }; });
   vm.runInContext(fs.readFileSync(homeFile, "utf8"), context, { filename: "apps-script/HomeService.gs" });
   assert.equal(typeof context.getHomeData_, "function", "getHomeData_ must be implemented");
-  return { context, rows, cache, reads, builderCalls };
+  return { context, rows, cache, reads, builderCalls, properties };
 }
 
 function assertExactSuccess(response) {
@@ -137,11 +146,11 @@ test("returns exact five-section contract projections limits visibility and stab
 
 test("normalizes language uses English fallback and separates only effective cache keys", () => {
   const omitted = load(); assert.equal(plain(omitted.context.getHomeData_({})).data.featured_places[0].name, "สถานที่ P-1");
-  assert.equal(omitted.cache.puts[0].key, "public:getHomeData:lang=th");
-  const thai = load(); thai.context.getHomeData_({ lang: "th" }); assert.equal(thai.cache.puts[0].key, "public:getHomeData:lang=th");
-  const unknown = load(); unknown.context.getHomeData_({ lang: "xx" }); assert.equal(unknown.cache.puts[0].key, "public:getHomeData:lang=th");
+  assert.equal(omitted.cache.puts[0].key, "public:getHomeData:place-epoch:1:lang=th");
+  const thai = load(); thai.context.getHomeData_({ lang: "th" }); assert.equal(thai.cache.puts[0].key, "public:getHomeData:place-epoch:1:lang=th");
+  const unknown = load(); unknown.context.getHomeData_({ lang: "xx" }); assert.equal(unknown.cache.puts[0].key, "public:getHomeData:place-epoch:1:lang=th");
   const english = load(); const response = plain(english.context.getHomeData_({ lang: "en" }));
-  assert.equal(english.cache.puts[0].key, "public:getHomeData:lang=en");
+  assert.equal(english.cache.puts[0].key, "public:getHomeData:place-epoch:1:lang=en");
   assert.equal(response.data.featured_places[0].name, "สถานที่ P-1");
   assert.equal(response.data.featured_places[1].name, "Place P-2");
   english.builderCalls.forEach((call) => assert.equal(call.parameters.lang, "en"));
@@ -188,7 +197,7 @@ test("fails atomically and never caches source or builder failures", () => {
 test("uses exact validated cache for miss hit and TTL 300", () => {
   const loaded = load(); const first = plain(loaded.context.getHomeData_({}));
   assertExactSuccess(first); assert.equal(loaded.cache.puts.length, 1); assert.equal(loaded.cache.puts[0].ttl, 300);
-  assert.equal(loaded.cache.puts[0].key, "public:getHomeData:lang=th");
+  assert.equal(loaded.cache.puts[0].key, "public:getHomeData:place-epoch:1:lang=th");
   const reads = loaded.reads.length; const second = plain(loaded.context.getHomeData_({ lang: "invalid" }));
   assert.deepEqual(second, first); assert.equal(loaded.reads.length, reads); assert.equal(loaded.cache.puts.length, 1);
 });
@@ -200,18 +209,32 @@ test("rejects malformed cached JSON wrong sections extra sections and extra item
     JSON.stringify({ ok: true, data: { featured_routes: [], featured_places: [], featured_products: [], upcoming_events: [], gallery_preview: [], extra: [] }, message: "success" })
   ];
   variants.forEach((cached) => {
-    const cache = createCache(); cache.values.set("public:getHomeData:lang=th", cached);
+    const cache = createCache(); cache.values.set("public:getHomeData:place-epoch:1:lang=th", cached);
     const loaded = load({ cache }); assertExactSuccess(plain(loaded.context.getHomeData_({}))); assert.equal(loaded.reads.length, 5); assert.equal(cache.puts.length, 1);
   });
   const cache = createCache(); const seeded = load({ cache }); const valid = plain(seeded.context.getHomeData_({}));
   valid.data.featured_routes[0].status = "published";
-  cache.values.set("public:getHomeData:lang=th", JSON.stringify(valid)); cache.puts.length = 0; seeded.reads.length = 0;
+  cache.values.set("public:getHomeData:place-epoch:1:lang=th", JSON.stringify(valid)); cache.puts.length = 0; seeded.reads.length = 0;
   assertExactSuccess(plain(seeded.context.getHomeData_({}))); assert.equal(seeded.reads.length, 5); assert.equal(cache.puts.length, 1);
 });
 
 test("continues through CacheService read and write failures", () => {
   const unavailable = load({ throwCacheService: true }); assertExactSuccess(plain(unavailable.context.getHomeData_({}))); assert.equal(unavailable.reads.length, 5);
   const broken = load({ cache: createCache({ throwGet: true, throwPut: true }) }); assertExactSuccess(plain(broken.context.getHomeData_({}))); assert.equal(broken.reads.length, 5);
+});
+
+test("Home cache becomes unreachable after the Place epoch changes", () => {
+  const properties = createProperties("1");
+  const loaded = load({ properties });
+  const first = plain(loaded.context.getHomeData_({ lang: "th", epoch: "client" }));
+  const reads = loaded.reads.length;
+  assert.deepEqual(plain(loaded.context.getHomeData_({ lang: "th" })), first);
+  assert.equal(loaded.reads.length, reads);
+  properties.values.set("PLACE_PUBLIC_CACHE_EPOCH", "2");
+  assert.deepEqual(plain(loaded.context.getHomeData_({ lang: "th" })), first);
+  assert.equal(loaded.reads.length, reads * 2);
+  assert.equal(loaded.cache.puts.at(-1).key, "public:getHomeData:place-epoch:2:lang=th");
+  assert.equal(JSON.stringify(first).includes("epoch"), false);
 });
 
 if (process.exitCode) process.exit(process.exitCode);

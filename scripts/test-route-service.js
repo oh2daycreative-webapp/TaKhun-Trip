@@ -63,13 +63,21 @@ function createCache(seed = {}) {
   };
 }
 
+function createProperties(initial = "1") {
+  const values = new Map();
+  if (initial !== null) values.set("PLACE_PUBLIC_CACHE_EPOCH", initial);
+  return { values, getProperty(key) { return values.has(key) ? values.get(key) : null; } };
+}
+
 function loadBackend(options = {}) {
   const data = options.data || makeData();
   const cache = options.cache || createCache();
+  const properties = options.properties || createProperties();
   const reads = [];
   const context = {
     JSON, Object, Math, Number, String, Array, Date, RegExp, encodeURIComponent, isFinite,
     CacheService: { getScriptCache: () => cache },
+    PropertiesService: { getScriptProperties: () => properties },
     ContentService: {
       MimeType: { JSON: "application/json" },
       createTextOutput(text) { return { text, mime: "", setMimeType(mime) { this.mime = mime; return this; } }; }
@@ -81,11 +89,13 @@ function loadBackend(options = {}) {
     })
   };
   vm.createContext(context);
+  vm.runInContext(read("apps-script/Config.gs"), context, { filename: "apps-script/Config.gs" });
   vm.runInContext(read("apps-script/ApiResponse.gs"), context, { filename: "apps-script/ApiResponse.gs" });
+  vm.runInContext(read("apps-script/PlaceService.gs"), context, { filename: "apps-script/PlaceService.gs" });
   const routeSource = fs.existsSync(routeServicePath) ? fs.readFileSync(routeServicePath, "utf8") : "";
   vm.runInContext(routeSource, context, { filename: "apps-script/RouteService.gs" });
   vm.runInContext(read("apps-script/Router.gs"), context, { filename: "apps-script/Router.gs" });
-  return { context, data, cache, reads };
+  return { context, data, cache, reads, properties };
 }
 
 function requireFunction(context, name) {
@@ -287,6 +297,34 @@ test("Router dispatches route and trip actions while preserving place and unknow
   assert.equal(payload(context.routeRequest_("GET", { parameter: { action: "missing" } })).error.code, "UNKNOWN_ACTION");
   const router = read("apps-script/Router.gs");
   for (const action of ["getPlaces", "getPlaceDetail", "getMapPlaces"]) assert.match(router, new RegExp(`case \\"${action}\\"`));
+});
+
+test("only Route Detail and Trip Templates change namespace with the Place epoch", () => {
+  const properties = createProperties("1");
+  const cache = createCache();
+  const { context, reads } = loadBackend({ cache, properties });
+
+  context.getRoutes_({ lang: "th", epoch: "client" });
+  const routeReads = reads.length;
+  properties.values.set("PLACE_PUBLIC_CACHE_EPOCH", "2");
+  context.getRoutes_({ lang: "th" });
+  assert.equal(reads.length, routeReads);
+  assert.equal(cache.puts[0].key.includes("place-epoch"), false);
+
+  context.getRouteDetail_({ route_id: "R-2A", lang: "th" });
+  const detailReads = reads.length;
+  assert.match(cache.puts.at(-1).key, /:getRouteDetail:place-epoch:2:/);
+  properties.values.set("PLACE_PUBLIC_CACHE_EPOCH", "3");
+  context.getRouteDetail_({ route_id: "R-2A", lang: "th" });
+  assert.equal(reads.length, detailReads + 3);
+  assert.match(cache.puts.at(-1).key, /:getRouteDetail:place-epoch:3:/);
+
+  context.getTripTemplates_({ duration_type: "one_day", lang: "th" });
+  const templateReads = reads.length;
+  properties.values.set("PLACE_PUBLIC_CACHE_EPOCH", "4");
+  context.getTripTemplates_({ duration_type: "one_day", lang: "th" });
+  assert.equal(reads.length, templateReads + 2);
+  assert.match(cache.puts.at(-1).key, /:getTripTemplates:place-epoch:4:/);
 });
 
 if (process.exitCode) process.exit(process.exitCode);

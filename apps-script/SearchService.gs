@@ -34,8 +34,9 @@ function searchAll_(parameters) {
   if (!normalized.params.keyword) return SearchService_empty_();
 
   var cache = null;
-  var cacheKey = SearchService_cacheKey_(normalized.params);
+  var cacheKey = null;
   try {
+    cacheKey = SearchService_cacheKey_(normalized.params);
     cache = CacheService.getScriptCache();
     var cached = cache.get(cacheKey);
     if (cached) {
@@ -55,7 +56,7 @@ function searchAll_(parameters) {
   if (!SearchService_validResponse_(response)) return SearchService_serverError_();
 
   try {
-    if (cache) cache.put(cacheKey, JSON.stringify(response), SearchService_CACHE_SECONDS_);
+    if (cache && cacheKey) cache.put(cacheKey, JSON.stringify(response), SearchService_CACHE_SECONDS_);
   } catch (_searchCacheWriteError) {
     // Return the successful uncached response.
   }
@@ -200,7 +201,7 @@ function SearchService_language_(value) {
 }
 
 function SearchService_cacheKey_(parameters) {
-  return "public:searchAll:keyword=" + encodeURIComponent(parameters.canonicalKeyword) + ":lang=" + parameters.lang;
+  return "public:searchAll:" + PlaceService_cacheEpochKey_() + ":keyword=" + encodeURIComponent(parameters.canonicalKeyword) + ":lang=" + parameters.lang;
 }
 
 function SearchService_validResponse_(response) {

@@ -39,8 +39,34 @@ function createCache(seed = {}) {
   };
 }
 
+function createProperties(initial = "1", options = {}) {
+  const values = new Map();
+  if (initial !== null) values.set("PLACE_PUBLIC_CACHE_EPOCH", initial);
+  const calls = [];
+  return {
+    values,
+    calls,
+    getProperty(key) {
+      calls.push({ method: "get", key });
+      if (options.throwGet) throw new Error("raw property read secret");
+      return values.has(key) ? values.get(key) : null;
+    },
+    setProperty(key, value) {
+      calls.push({ method: "set", key, value });
+      if (options.throwSet) throw new Error("raw property write secret");
+      values.set(key, options.corruptSet === undefined ? value : options.corruptSet);
+    },
+    deleteProperty(key) {
+      calls.push({ method: "delete", key });
+      if (options.throwDelete) throw new Error("raw property delete secret");
+      if (!options.retainOnDelete) values.delete(key);
+    }
+  };
+}
+
 function loadBackend(options = {}) {
   const cache = options.cache || createCache();
+  const properties = options.properties || createProperties();
   const rows = options.rows || makeRows();
   const context = {
     JSON,
@@ -52,6 +78,7 @@ function loadBackend(options = {}) {
     Date,
     console,
     CacheService: { getScriptCache: () => cache },
+    PropertiesService: { getScriptProperties: () => properties },
     ContentService: {
       MimeType: { JSON: "application/json" },
       createTextOutput(text) {
@@ -64,10 +91,10 @@ function loadBackend(options = {}) {
     })
   };
   vm.createContext(context);
-  for (const file of ["apps-script/ApiResponse.gs", "apps-script/PlaceService.gs", "apps-script/Router.gs"]) {
+  for (const file of ["apps-script/Config.gs", "apps-script/ApiResponse.gs", "apps-script/PlaceService.gs", "apps-script/Router.gs"]) {
     vm.runInContext(read(file), context, { filename: file });
   }
-  return { context, cache, rows };
+  return { context, cache, rows, properties };
 }
 
 function test(name, fn) {
@@ -205,6 +232,93 @@ test("public cache uses action and effective filters, hits, recovers malformed v
   const invalid = plain(context.getPlaces_({ featured: "invalid" }));
   assert.equal(invalid.error.code, "VALIDATION_ERROR");
   assert.equal(cache.puts.length, putsBeforeError);
+});
+
+test("Place cache epoch validates reads and bumps with verified deterministic state", () => {
+  const established = loadBackend({ properties: createProperties("7") });
+  assert.equal(established.context.PlaceService_cacheEpoch_(), 7);
+  assert.equal(established.context.PlaceService_cacheEpochKey_(), "place-epoch:7");
+  assert.equal(loadBackend({ properties: createProperties(null) }).context.PlaceService_cacheEpoch_(), 1);
+  for (const malformed of ["", "0", "01", "-1", "1.0", " 1", "1 ", "9007199254740992", 1, true]) {
+    assert.throws(() => loadBackend({ properties: createProperties(malformed) }).context.PlaceService_cacheEpoch_(), /CACHE_EPOCH/);
+  }
+
+  const properties = createProperties("7");
+  const { context } = loadBackend({ properties });
+  assert.equal(context.PlaceService_bumpCacheEpoch_(), 8);
+  assert.equal(properties.values.get("PLACE_PUBLIC_CACHE_EPOCH"), "8");
+
+  const absentProperties = createProperties(null);
+  const absent = loadBackend({ properties: absentProperties });
+  assert.equal(absent.context.PlaceService_bumpCacheEpoch_(), 2);
+  assert.equal(absentProperties.values.get("PLACE_PUBLIC_CACHE_EPOCH"), "2");
+
+  assert.throws(() => loadBackend({ properties: createProperties("9007199254740991") }).context.PlaceService_bumpCacheEpoch_(), /CACHE_EPOCH/);
+  assert.throws(() => loadBackend({ properties: createProperties("7", { corruptSet: "9" }) }).context.PlaceService_bumpCacheEpoch_(), /CACHE_EPOCH/);
+});
+
+test("all three Place cache actions change namespace by epoch and ignore client epoch input", () => {
+  const cache = createCache();
+  const properties = createProperties("1");
+  let reads = 0;
+  const { context } = loadBackend({ cache, properties, readSheetObjects: () => { reads += 1; return makeRows(); } });
+  const calls = [
+    () => context.getPlaces_({ category: "nature", cache_epoch: 999, token: "session-secret" }),
+    () => context.getPlaceDetail_({ place_id: "P-1", epoch: "client", session_id: "session-secret" }),
+    () => context.getMapPlaces_({ category: "nature", PLACE_PUBLIC_CACHE_EPOCH: "client" })
+  ];
+  calls.forEach((call) => { call(); call(); });
+  assert.equal(reads, 3);
+  assert.equal(cache.puts.length, 3);
+  cache.puts.forEach((entry) => assert.match(entry.key, /^public:(getPlaces|getPlaceDetail|getMapPlaces):place-epoch:1(?::|$)/));
+  properties.values.set("PLACE_PUBLIC_CACHE_EPOCH", "2");
+  calls.forEach((call) => call());
+  assert.equal(reads, 6);
+  cache.puts.slice(3).forEach((entry) => assert.match(entry.key, /:place-epoch:2(?::|$)/));
+  assert.equal(cache.puts.some((entry) => /999|client|session-secret|PLACE_PUBLIC_CACHE_EPOCH/.test(entry.key)), false);
+});
+
+test("malformed or unavailable epoch bypasses cache without leaking property details", () => {
+  for (const properties of [createProperties("bad"), createProperties("1", { throwGet: true })]) {
+    const cache = createCache();
+    let reads = 0;
+    const { context } = loadBackend({ cache, properties, readSheetObjects: () => { reads += 1; return makeRows(); } });
+    const first = plain(context.getPlaces_({ category: "nature" }));
+    const second = plain(context.getPlaces_({ category: "nature" }));
+    assert.equal(first.ok, true);
+    assert.deepEqual(second, first);
+    assert.equal(reads, 2);
+    assert.equal(cache.puts.length, 0);
+    assert.equal(JSON.stringify(first).includes("property"), false);
+    assert.equal(JSON.stringify(first).includes("PLACE_PUBLIC_CACHE_EPOCH"), false);
+  }
+});
+
+test("Gallery Settings and Categories cache namespaces ignore Place epoch changes", () => {
+  const cases = [
+    { file: "apps-script/GalleryService.gs", action: "getGallery_", sheet: "gallery", parameters: {} },
+    { file: "apps-script/SettingsService.gs", action: "getSettings_", sheet: "settings", parameters: {} },
+    { file: "apps-script/CategoryService.gs", action: "getCategories_", sheet: "categories", parameters: {} }
+  ];
+  cases.forEach((entry) => {
+    const cache = createCache();
+    const properties = createProperties("1");
+    let reads = 0;
+    const context = {
+      JSON, Object, Math, Number, String, Array, Date, RegExp, encodeURIComponent, isFinite,
+      CacheService: { getScriptCache: () => cache },
+      PropertiesService: { getScriptProperties: () => properties },
+      readSheetObjects_(name) { assert.equal(name, entry.sheet); reads += 1; return []; }
+    };
+    vm.createContext(context);
+    vm.runInContext(read(entry.file), context, { filename: entry.file });
+    assert.equal(plain(context[entry.action](entry.parameters)).ok, true);
+    properties.values.set("PLACE_PUBLIC_CACHE_EPOCH", "2");
+    assert.equal(plain(context[entry.action](entry.parameters)).ok, true);
+    assert.equal(reads, 1, `${entry.action} must reuse its cache across Place epoch changes`);
+    assert.equal(cache.puts.length, 1);
+    assert.equal(cache.puts[0].key.includes("place-epoch"), false);
+  });
 });
 
 test("router dispatches all place actions and returns JSON errors for unknown methods actions and exceptions", () => {
