@@ -24,6 +24,7 @@ $required = @(
   "public/admin/login.html",
   "public/admin/dashboard.html",
   "public/admin/places.html",
+  "public/admin/place-edit.html",
   "public/admin/routes.html",
   "public/admin/products.html",
   "public/admin/events.html",
@@ -51,6 +52,7 @@ $required = @(
   "public/admin/js/admin-auth.js",
   "public/admin/js/admin-shell.js",
   "public/admin/js/admin-places.js",
+  "public/admin/js/admin-place-edit.js",
   "public/favicon.svg",
   "public/assets/media/placeholders/hero.svg",
   "public/assets/media/placeholders/cover.svg",
@@ -112,7 +114,6 @@ foreach ($html in $htmlFiles) {
   foreach ($match in $matches) {
     $reference = $match.Groups[1].Value
     if ($reference -match '^(?:https?:|mailto:|tel:)') { continue }
-    if ($html.FullName -eq (Join-Path $root "public\admin\places.html") -and $reference -eq "place-edit.html") { continue }
     $target = [IO.Path]::GetFullPath((Join-Path $html.DirectoryName $reference))
     if (-not (Test-Path -LiteralPath $target)) {
       throw "$($html.FullName) has a broken local reference: $reference"
@@ -161,6 +162,8 @@ if ($LASTEXITCODE -ne 0) { throw "Admin browser auth verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin shell verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-places.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Places list verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-place-edit.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Place editor verification failed." }
 & node (Join-Path $PSScriptRoot "test-crypto-service.js")
 if ($LASTEXITCODE -ne 0) { throw "CryptoService verification failed." }
 & node (Join-Path $PSScriptRoot "test-auth-service.js")

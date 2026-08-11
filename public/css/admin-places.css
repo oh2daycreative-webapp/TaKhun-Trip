@@ -35,3 +35,18 @@
 .admin-places input:focus-visible, .admin-places select:focus-visible, .admin-places a:focus-visible, .admin-places button:focus-visible { outline: 3px solid var(--color-primary-dark); outline-offset: 3px; }
 @media (max-width: 699px) { .admin-places__filters { grid-template-columns: 1fr; } .admin-places__table-wrap { display: none; } .admin-places__cards { display: grid; gap: .75rem; } }
 @media (prefers-reduced-motion: reduce) { .admin-places * { scroll-behavior: auto; transition: none !important; animation: none !important; } }
+.admin-place-edit { max-width: 1100px; margin: 0 auto; }
+.admin-place-edit__section { margin: 1rem 0; padding: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); }
+.admin-place-edit__section h2 { margin-top: 0; }
+.admin-place-edit label { display: grid; gap: .35rem; margin: .75rem 0; font-weight: 700; }
+.admin-place-edit input, .admin-place-edit select, .admin-place-edit textarea { width: 100%; min-height: 44px; padding: .65rem; box-sizing: border-box; font: inherit; }
+.admin-place-edit textarea { min-height: 7rem; resize: vertical; }
+.admin-place-edit label:has(input[type="checkbox"]) { display: flex; align-items: center; font-weight: 400; }
+.admin-place-edit label input[type="checkbox"] { width: 24px; min-height: 24px; }
+.admin-place-edit__tabs { display: flex; gap: .5rem; border-bottom: 1px solid var(--color-border); }
+.admin-place-edit__tabs [role="tab"] { min-width: 44px; min-height: 44px; border: 0; background: transparent; font: inherit; font-weight: 700; cursor: pointer; }
+.admin-place-edit__tabs [role="tab"][aria-selected="true"] { border-bottom: 3px solid var(--color-primary); }
+.admin-place-edit__actions, .admin-place-edit__submit { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; }
+.admin-place-edit__notice { min-height: 1.5rem; }.admin-place-edit__foundation { color: var(--color-muted); }
+.admin-place-edit :focus-visible { outline: 3px solid var(--color-primary-dark); outline-offset: 2px; }
+@media (min-width: 700px) { .admin-place-edit__section { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 1rem; } .admin-place-edit__section h2, .admin-place-edit__tabs, .admin-place-edit__section > [role="tabpanel"], .admin-place-edit__section > p, .admin-place-edit__submit { grid-column: 1 / -1; } }

@@ -560,11 +560,11 @@ async function run() {
     assert.equal(disconnected.mount.querySelector("[data-media-runtime]"), initial);
   });
 
-  await test("all 27 HTML pages link the local favicon with correct relative paths", () => {
+  await test("all 28 HTML pages link the local favicon with correct relative paths", () => {
     const htmlFiles = [];
     const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).forEach((entry) => entry.isDirectory() ? walk(path.join(dir, entry.name)) : entry.name.endsWith(".html") && htmlFiles.push(path.join(dir, entry.name)));
     walk(path.join(root, "public"));
-    assert.equal(htmlFiles.length, 27);
+    assert.equal(htmlFiles.length, 28);
     for (const file of htmlFiles) {
       const html = fs.readFileSync(file, "utf8");
       const expected = file.includes(`${path.sep}admin${path.sep}`) ? "../favicon.svg" : "favicon.svg";
