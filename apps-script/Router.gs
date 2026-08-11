@@ -60,6 +60,8 @@ function routeRequest_(method, event) {
         if (action === "adminLogout") return createJsonResponse_(adminLogout_(body.token));
         if (action === "adminGetPlaces") return createJsonResponse_(adminGetPlaces_(body.token, body.payload));
         if (action === "adminGetPlaceDetail") return createJsonResponse_(adminGetPlaceDetail_(body.token, body.payload));
+        if (action === "adminCreatePlace") return createJsonResponse_(adminCreatePlace_(body.token, body.payload));
+        if (action === "adminSavePlaceDraft") return createJsonResponse_(adminSavePlaceDraft_(body.token, body.payload));
       }
     }
 

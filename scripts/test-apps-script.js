@@ -38,10 +38,23 @@ for (const { name, source } of sources) {
 
 const postActions = [
   "submitReview", "adminLogin", "adminValidateSession", "adminLogout",
-  "adminGetPlaces", "adminGetPlaceDetail"
+  "adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft"
 ];
 
 function assertStaticPostActionAllowlist(source) {
+  for (const pattern of [
+    /(?:\/(?:\\\/|[^/\r\n])+\/[dgimsuvy]*|[A-Za-z_$][\w$]*)\s*\.\s*test\s*\(\s*(?:action|body\s*\.\s*action)\s*\)/,
+    /(?:action|body\s*\.\s*action)\s*\.\s*(?:startsWith|endsWith|includes|match|search)\s*\(/,
+    /(?:\[[^\]\r\n]*\]|[A-Za-z_$][\w$]*)\s*\.\s*(?:includes|indexOf|some|find)\s*\(\s*(?:action|body\s*\.\s*action)\b/,
+    /\bif\s*\(\s*!?\s*[A-Za-z_$][\w$]*\s*\(\s*(?:action|body\s*\.\s*action)\s*(?:,|\))/
+  ]) {
+    assert.doesNotMatch(source, pattern, "Router must use only exact literal action equality branches");
+  }
+  assert.doesNotMatch(
+    source,
+    /\b[A-Za-z_$][\w$]*\s*\[\s*(?:action|body\s*\.\s*action)\s*\]\s*\(/,
+    "Router must use static action branches"
+  );
   const dispatchSource = source.replace(
     /\btypeof\s+(?:action|body\s*\.\s*action)\s*===\s*"[^"]+"/g,
     ""
@@ -75,6 +88,10 @@ assert.throws(
 );
 assert.doesNotThrow(() => assertStaticPostActionAllowlist(`${router}\nif (typeof body.action === "string") validateActionType_();`));
 assert.doesNotThrow(() => assertStaticPostActionAllowlist(`${router}\nif (unrelatedField === "unrelated-value") keepUnrelated_();`));
+assert.throws(
+  () => assertStaticPostActionAllowlist(`${router}\nhandlers[action](body.payload);`),
+  /Router must use static action branches/
+);
 assert.match(router, /createJsonResponse_\(/);
 assert.match(router, /UNKNOWN_ACTION/);
 assert.match(router, /SERVER_ERROR/);
@@ -113,7 +130,7 @@ function createRouterRuntime({ routerSource = router, json = JSON } = {}) {
       return { ok: true, data: { action } };
     };
   }
-  for (const action of ["adminGetPlaces", "adminGetPlaceDetail"]) {
+  for (const action of ["adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft"]) {
     context[`${action}_`] = (...args) => {
       calls.push({ action, args });
       return { ok: true, data: { action } };
@@ -125,16 +142,31 @@ function createRouterRuntime({ routerSource = router, json = JSON } = {}) {
   return { context, calls };
 }
 
-// Admin Place reads forward only the body token and payload, never query/header authority.
-for (const action of ["adminGetPlaces", "adminGetPlaceDetail"]) {
+// Admin Place actions forward only the body token and payload, never query/header authority.
+for (const action of ["adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft"]) {
   const runtime = createRouterRuntime();
   const token = "BODY_TOKEN";
-  const payload = action === "adminGetPlaces" ? { status: "draft" } : { place_id: "P-1", view: "working" };
+  const payload = action === "adminGetPlaces" ? { status: "draft" } :
+    action === "adminGetPlaceDetail" ? { place_id: "P-1", view: "working" } :
+      action === "adminCreatePlace" ? { content: { marker: "create" } } :
+        { place_id: "P-1", expected_version: 3, content: { marker: "save" } };
   assert.deepEqual(post(runtime, { action, token, payload }, {
     parameter: { action: "adminLogout", token: "QUERY_TOKEN", payload: "QUERY_PAYLOAD" },
     headers: { Authorization: "Bearer HEADER_TOKEN" }, token: "EVENT_TOKEN", payload: "EVENT_PAYLOAD"
   }), { ok: true, data: { action } });
   assert.deepEqual(runtime.calls, [{ action, args: [token, payload] }]);
+}
+
+// A Router with the two Task 5 branches removed is exactly the pre-Task-5 six-action set
+// and must fail the current exact eight-action contract.
+{
+  const preTask5Router = router
+    .replace(/^\s*if \(action === "adminCreatePlace"\).*\r?\n/m, "")
+    .replace(/^\s*if \(action === "adminSavePlaceDraft"\).*\r?\n/m, "");
+  assert.throws(
+    () => assertStaticPostActionAllowlist(preTask5Router),
+    /Router POST action comparisons must be exactly the approved allowlist/
+  );
 }
 
 function response(output) {
@@ -205,6 +237,40 @@ function assertSafeError(output, code) {
   assert.throws(
     () => assertStaticPostActionAllowlist(directBodyMutation),
     /Router POST action comparisons must be exactly the approved allowlist/
+  );
+}
+
+// Every broad/helper-gated mutation is executable, admits a ninth action, and must be rejected structurally.
+for (const [label, branch, helper] of [
+  ["regex test", '        if (/^adminFuture$/.test(action)) return createJsonResponse_(adminFuture_(body.payload));', ""],
+  ["prefix test", '        if (action.startsWith("adminFuture")) return createJsonResponse_(adminFuture_(body.payload));', ""],
+  [
+    "allowlist includes",
+    '        if (allowedActions.includes(action)) return createJsonResponse_(adminFuture_(body.payload));',
+    '\nvar allowedActions = ["adminFuture"];\n'
+  ],
+  [
+    "helper gate",
+    '        if (isFutureAction_(action)) return createJsonResponse_(adminFuture_(body.payload));',
+    '\nfunction isFutureAction_(candidate) { return candidate === "adminFuture"; }\n'
+  ]
+]) {
+  const mutation = router.replace(
+    '        if (action === "adminSavePlaceDraft") return createJsonResponse_(adminSavePlaceDraft_(body.token, body.payload));',
+    '        if (action === "adminSavePlaceDraft") return createJsonResponse_(adminSavePlaceDraft_(body.token, body.payload));\n' + branch
+  ) + helper;
+  assert.notEqual(mutation, router, `${label} mutation target must match production Router source`);
+  const runtime = createRouterRuntime({ routerSource: mutation });
+  runtime.context.adminFuture_ = (...args) => {
+    runtime.calls.push({ action: "adminFuture", args });
+    return { ok: true, data: { action: "adminFuture" } };
+  };
+  const payload = { sentinel: label };
+  assert.deepEqual(post(runtime, { action: "adminFuture", payload }), { ok: true, data: { action: "adminFuture" } });
+  assert.deepEqual(runtime.calls, [{ action: "adminFuture", args: [payload] }]);
+  assert.throws(
+    () => assertStaticPostActionAllowlist(mutation),
+    /Router must use only exact literal action equality branches/
   );
 }
 
@@ -428,7 +494,7 @@ for (const action of publicGetActions) {
 }
 
 // GET and query values cannot activate Admin actions or deliver URL/header tokens.
-for (const action of ["adminLogin", "adminValidateSession", "adminLogout", "adminGetPlaces", "adminGetPlaceDetail"]) {
+for (const action of ["adminLogin", "adminValidateSession", "adminLogout", "adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft"]) {
   for (const parameter of [
     { action, token: "T".repeat(43) },
     { method: action, token: "T".repeat(43) },
@@ -454,7 +520,7 @@ for (const editorOnlyName of ["setupAdminAuthSchema", "benchmarkAdminPbkdf2", "b
 }
 
 // Every Admin exception is converted to the existing fixed server-safe envelope with no leak.
-for (const action of ["adminLogin", "adminValidateSession", "adminLogout", "adminGetPlaces", "adminGetPlaceDetail"]) {
+for (const action of ["adminLogin", "adminValidateSession", "adminLogout", "adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft"]) {
   for (const thrown of [
     new Error("ordinary failure"),
     "string failure",

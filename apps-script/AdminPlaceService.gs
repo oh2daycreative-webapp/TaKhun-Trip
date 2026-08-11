@@ -21,6 +21,22 @@ var AdminPlaceService_CONTENT_HEADERS_ = [
 ];
 var AdminPlaceService_LIST_KEYS_ = ["keyword", "category", "status", "page", "page_size"];
 var AdminPlaceService_DETAIL_KEYS_ = ["place_id", "view"];
+var AdminPlaceService_CREATE_KEYS_ = ["content"];
+var AdminPlaceService_SAVE_KEYS_ = ["place_id", "expected_version", "content"];
+var AdminPlaceService_DISTRICTS_ = ["ban_ta_khun", "khiri_rat_nikhom", "phanom"];
+var AdminPlaceService_ROUTE_GROUPS_ = [
+  "main_point_1", "main_point_2", "main_point_3", "main_point_4", "nearby_khiri_rat_nikhom", "nearby_phanom"
+];
+var AdminPlaceService_COORDINATE_STATUSES_ = [
+  "verified", "pending_verify", "needs_survey", "no_coordinate", "approximate"
+];
+var AdminPlaceService_URL_HEADERS_ = ["line_url", "facebook_url", "website_url", "google_maps_url"];
+var AdminPlaceService_BOOLEAN_HEADERS_ = ["is_featured", "is_main_route_point"];
+var AdminPlaceService_NON_HUMAN_TEXT_HEADERS_ = ["slug", "district", "route_group", "category", "coordinate_status"];
+var AdminPlaceService_MAX_TEXT_LENGTH_ = 20000;
+var AdminPlaceService_MAX_URL_LENGTH_ = 2048;
+var AdminPlaceService_MAX_LIST_ITEMS_ = 100;
+var AdminPlaceService_MAX_LIST_ITEM_LENGTH_ = 200;
 
 function adminGetPlaces_(token, payload) {
   return AdminPlaceService_execute_(token, function () {
@@ -37,6 +53,381 @@ function adminGetPlaceDetail_(token, payload) {
   });
 }
 
+function adminCreatePlace_(token, payload) {
+  return AdminPlaceService_execute_(token, function (admin) {
+    AdminPlaceService_requireWriteRole_(admin);
+    var parameters = AdminPlaceService_createParameters_(payload);
+    return AdminPlaceService_withWriteLock_(function () {
+      var context = AdminPlaceService_requireContext_(true);
+      var placeId = AdminPlaceService_generatePlaceId_();
+      if (Object.prototype.hasOwnProperty.call(context.placesById, placeId) ||
+          Object.prototype.hasOwnProperty.call(context.draftsById, placeId)) {
+        throw new Error("ADMIN_PLACE_ID_COLLISION");
+      }
+      var state = AdminPlaceService_captureState_(placeId, false);
+      try {
+        var occurredAt = new Date().toISOString();
+        var placeRecord = AdminPlaceService_neutralIdentity_(placeId, occurredAt, admin.admin_id);
+        var draftRecord = AdminPlaceService_newDraft_(placeId, parameters.content, 1, 0, occurredAt, admin.admin_id, null);
+        var appendedPlace = SheetService_appendObjectWithRow_(
+          AdminPlaceSchema_PLACES_SHEET_NAME_, state.place_headers, placeRecord
+        );
+        state.allocated_rows.place = AdminPlaceService_appendedRowNumber_(appendedPlace);
+        var appendedDraft = SheetService_appendObjectWithRow_(
+          AdminPlaceSchema_DRAFTS_SHEET_NAME_, state.draft_headers, draftRecord
+        );
+        state.allocated_rows.draft = AdminPlaceService_appendedRowNumber_(appendedDraft);
+        AdminPlaceService_verifyIntendedState_(state, {
+          place: {
+            sourceRowNumber: state.allocated_rows.place,
+            values: AdminPlaceService_completeRow_(state.place_headers, placeRecord)
+          },
+          draft: {
+            sourceRowNumber: state.allocated_rows.draft,
+            values: AdminPlaceService_completeRow_(state.draft_headers, draftRecord)
+          }
+        });
+        AdminPlaceService_appendVerifiedAudit_(admin, "CREATE", placeId);
+        return AdminPlaceService_success_(AdminPlaceService_writeSuccess_(
+          placeId, "draft", 1, 0, true, occurredAt, occurredAt
+        ));
+      } catch (error) {
+        return AdminPlaceService_failClosed_(state);
+      }
+    });
+  });
+}
+
+function adminSavePlaceDraft_(token, payload) {
+  return AdminPlaceService_execute_(token, function (admin) {
+    AdminPlaceService_requireWriteRole_(admin);
+    var parameters = AdminPlaceService_saveParameters_(payload);
+    return AdminPlaceService_withWriteLock_(function () {
+      var context = AdminPlaceService_requireContext_(true);
+      var place = context.placesById[parameters.place_id];
+      if (!place) throw new Error("NOT_FOUND");
+      if (place.row.status === "archived") throw new Error("VALIDATION_ERROR");
+      var draft = context.draftsById[parameters.place_id] || null;
+      if (draft) {
+        AdminPlaceService_requireExpectedVersion_(
+          parameters.expected_version, place.entityVersion, draft.basePublishedVersion, place.publishedVersion
+        );
+      } else {
+        AdminPlaceService_requireExpectedVersion_(parameters.expected_version, place.entityVersion);
+      }
+      if (place.entityVersion >= Number.MAX_SAFE_INTEGER) throw new Error("ADMIN_PLACE_VERSION");
+
+      var state = AdminPlaceService_captureState_(parameters.place_id, false);
+      AdminPlaceService_setSelectiveRestore_(state, "place", []);
+      AdminPlaceService_setSelectiveRestore_(state, "draft", []);
+      try {
+        var occurredAt = new Date().toISOString();
+        var nextVersion = place.entityVersion + 1;
+        var placePatch = {
+          entity_version: nextVersion,
+          updated_at: occurredAt,
+          updated_by: admin.admin_id
+        };
+        AdminPlaceService_applySelectivePatch_(
+          state, "place", AdminPlaceSchema_PLACES_SHEET_NAME_, state.rows.place.sourceRowNumber,
+          ["entity_version", "updated_at", "updated_by"], placePatch
+        );
+        var intendedPlace = {
+          sourceRowNumber: state.rows.place.sourceRowNumber,
+          values: AdminPlaceService_mergeRow_(state.rows.place.values, placePatch)
+        };
+
+        var intendedDraft;
+        if (draft) {
+          var draftPatch = AdminPlaceService_existingDraftPatch_(
+            parameters.content, nextVersion, occurredAt, admin.admin_id
+          );
+          AdminPlaceService_applySelectivePatch_(
+            state, "draft", AdminPlaceSchema_DRAFTS_SHEET_NAME_, state.rows.draft.sourceRowNumber,
+            AdminPlaceService_CONTENT_HEADERS_.concat(["draft_version", "updated_at", "updated_by"]), draftPatch
+          );
+          intendedDraft = {
+            sourceRowNumber: state.rows.draft.sourceRowNumber,
+            values: AdminPlaceService_mergeRow_(state.rows.draft.values, draftPatch)
+          };
+        } else {
+          var draftRecord = AdminPlaceService_newDraft_(
+            parameters.place_id, parameters.content, nextVersion, place.publishedVersion,
+            occurredAt, admin.admin_id, state.rows.place.values
+          );
+          var appendedDraft = SheetService_appendObjectWithRow_(
+            AdminPlaceSchema_DRAFTS_SHEET_NAME_, state.draft_headers, draftRecord
+          );
+          state.allocated_rows.draft = AdminPlaceService_appendedRowNumber_(appendedDraft);
+          intendedDraft = {
+            sourceRowNumber: state.allocated_rows.draft,
+            values: AdminPlaceService_completeRow_(state.draft_headers, draftRecord)
+          };
+        }
+        AdminPlaceService_verifyIntendedState_(state, { place: intendedPlace, draft: intendedDraft });
+        AdminPlaceService_appendVerifiedAudit_(admin, "UPDATE_DRAFT", parameters.place_id);
+        return AdminPlaceService_success_(AdminPlaceService_writeSuccess_(
+          parameters.place_id, place.row.status, nextVersion, place.publishedVersion, true,
+          AdminPlaceService_safeText_(state.rows.place.values.created_at), occurredAt
+        ));
+      } catch (error) {
+        return AdminPlaceService_failClosed_(state);
+      }
+    });
+  });
+}
+
+function AdminPlaceService_requireWriteRole_(admin) {
+  if (!admin || AdminPlaceService_WRITE_ROLES_.indexOf(admin.role) === -1) throw new Error("FORBIDDEN");
+}
+
+function AdminPlaceService_createParameters_(payload) {
+  var source = AdminPlaceService_plainObject_(payload, false);
+  AdminPlaceService_requireExactKeys_(source, AdminPlaceService_CREATE_KEYS_);
+  return { content: AdminPlaceService_normalizeEditableContent_(source.content) };
+}
+
+function AdminPlaceService_saveParameters_(payload) {
+  var source = AdminPlaceService_plainObject_(payload, false);
+  AdminPlaceService_requireExactKeys_(source, AdminPlaceService_SAVE_KEYS_);
+  if (!AdminPlaceService_validId_(source.place_id)) throw new Error("VALIDATION_ERROR");
+  if (typeof source.expected_version !== "number" || !Number.isSafeInteger(source.expected_version) || source.expected_version < 1) {
+    throw new Error("VALIDATION_ERROR");
+  }
+  return {
+    place_id: source.place_id,
+    expected_version: source.expected_version,
+    content: AdminPlaceService_normalizeEditableContent_(source.content)
+  };
+}
+
+function AdminPlaceService_requireExactKeys_(source, required) {
+  AdminPlaceService_assertExactKeys_(source, required);
+  if (Object.keys(source).length !== required.length) throw new Error("VALIDATION_ERROR");
+}
+
+function AdminPlaceService_normalizeEditableContent_(content) {
+  var source = AdminPlaceService_plainObject_(content, false);
+  AdminPlaceService_requireExactKeys_(source, AdminPlaceService_CONTENT_HEADERS_);
+  var normalized = {};
+  AdminPlaceService_CONTENT_HEADERS_.forEach(function (header) {
+    var value = source[header];
+    if (header === "gallery_media_ids") {
+      if (value !== "") throw new Error("VALIDATION_ERROR");
+      normalized[header] = "";
+    } else if (header === "tags") {
+      normalized[header] = AdminPlaceService_normalizeList_(value, false);
+    } else if (header === "nearby_place_ids") {
+      normalized[header] = AdminPlaceService_normalizeList_(value, true);
+    } else if (AdminPlaceService_BOOLEAN_HEADERS_.indexOf(header) !== -1) {
+      if (typeof value !== "boolean") throw new Error("VALIDATION_ERROR");
+      normalized[header] = value;
+    } else if (header === "latitude" || header === "longitude") {
+      if (value === "") normalized[header] = "";
+      else if (typeof value === "number" && isFinite(value)) normalized[header] = value;
+      else throw new Error("VALIDATION_ERROR");
+    } else if (header === "sort_order") {
+      if (value === "") normalized[header] = "";
+      else if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) normalized[header] = value;
+      else throw new Error("VALIDATION_ERROR");
+    } else if (AdminPlaceService_URL_HEADERS_.indexOf(header) !== -1) {
+      normalized[header] = AdminPlaceService_normalizeUrl_(value);
+    } else {
+      normalized[header] = AdminPlaceService_normalizeText_(value);
+    }
+  });
+
+  if (normalized.slug && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalized.slug)) throw new Error("VALIDATION_ERROR");
+  if (normalized.district && AdminPlaceService_DISTRICTS_.indexOf(normalized.district) === -1) throw new Error("VALIDATION_ERROR");
+  if (normalized.route_group && AdminPlaceService_ROUTE_GROUPS_.indexOf(normalized.route_group) === -1) throw new Error("VALIDATION_ERROR");
+  if (normalized.category && AdminPlaceService_CATEGORIES_.indexOf(normalized.category) === -1) throw new Error("VALIDATION_ERROR");
+  if (normalized.coordinate_status && AdminPlaceService_COORDINATE_STATUSES_.indexOf(normalized.coordinate_status) === -1) {
+    throw new Error("VALIDATION_ERROR");
+  }
+  if ((normalized.latitude === "") !== (normalized.longitude === "")) throw new Error("VALIDATION_ERROR");
+  if (normalized.latitude !== "" &&
+      (normalized.latitude < -90 || normalized.latitude > 90 || normalized.longitude < -180 || normalized.longitude > 180)) {
+    throw new Error("VALIDATION_ERROR");
+  }
+  return normalized;
+}
+
+function AdminPlaceService_normalizeText_(value) {
+  if (typeof value !== "string") throw new Error("VALIDATION_ERROR");
+  var normalized = value.trim();
+  if (normalized.length > AdminPlaceService_MAX_TEXT_LENGTH_ ||
+      /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(normalized)) {
+    throw new Error("VALIDATION_ERROR");
+  }
+  return SheetService_escapeHumanText_(normalized);
+}
+
+function AdminPlaceService_normalizeUrl_(value) {
+  if (typeof value !== "string") throw new Error("VALIDATION_ERROR");
+  var normalized = value.trim();
+  if (!normalized) return "";
+  if (normalized.length > AdminPlaceService_MAX_URL_LENGTH_ ||
+      /[\u0000-\u0020\u007F\\<>"']/.test(normalized)) {
+    throw new Error("VALIDATION_ERROR");
+  }
+  var parts = /^(https?):\/\/([^/?#]+)([/?#].*)?$/i.exec(normalized);
+  if (!parts || parts[2].indexOf("@") !== -1) throw new Error("VALIDATION_ERROR");
+  var authority = parts[2];
+  var hostAndPort = /^([^:]+)(?::([0-9]{1,5}))?$/.exec(authority);
+  if (!hostAndPort) throw new Error("VALIDATION_ERROR");
+  var host = hostAndPort[1];
+  var port = hostAndPort[2] || "";
+  var label = "[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?";
+  if (host.length > 253 || !(new RegExp("^" + label + "(?:\\." + label + ")*$")).test(host)) {
+    throw new Error("VALIDATION_ERROR");
+  }
+  if (port && (Number(port) < 1 || Number(port) > 65535)) throw new Error("VALIDATION_ERROR");
+  return normalized;
+}
+
+function AdminPlaceService_normalizeList_(value, identifiers) {
+  if (!Array.isArray(value) || value.length > AdminPlaceService_MAX_LIST_ITEMS_) throw new Error("VALIDATION_ERROR");
+  var seen = Object.create(null);
+  var normalized = value.map(function (item) {
+    if (typeof item !== "string") throw new Error("VALIDATION_ERROR");
+    var entry = item.trim();
+    if (!entry || entry.length > AdminPlaceService_MAX_LIST_ITEM_LENGTH_ || entry.indexOf("|") !== -1 ||
+        /[\u0000-\u001F\u007F]/.test(entry)) {
+      throw new Error("VALIDATION_ERROR");
+    }
+    if (identifiers && !AdminPlaceService_validId_(entry)) throw new Error("VALIDATION_ERROR");
+    if (Object.prototype.hasOwnProperty.call(seen, entry)) throw new Error("VALIDATION_ERROR");
+    seen[entry] = true;
+    return entry;
+  });
+  var serialized = normalized.join("|");
+  return identifiers || !serialized ? serialized : SheetService_escapeHumanText_(serialized);
+}
+
+function AdminPlaceService_generatePlaceId_() {
+  var uuid = Utilities.getUuid();
+  if (typeof uuid !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(uuid)) {
+    throw new Error("ADMIN_PLACE_ID_GENERATION");
+  }
+  var placeId = "PLC-" + uuid.toLowerCase();
+  if (!AdminPlaceService_validId_(placeId)) throw new Error("ADMIN_PLACE_ID_GENERATION");
+  return placeId;
+}
+
+function AdminPlaceService_neutralIdentity_(placeId, occurredAt, adminId) {
+  var headers = AdminPlaceSchema_PLACE_BASE_HEADERS_.concat(AdminPlaceSchema_PLACES_APPEND_HEADERS_);
+  var record = {};
+  headers.forEach(function (header) { record[header] = ""; });
+  AdminPlaceService_BOOLEAN_HEADERS_.forEach(function (header) { record[header] = false; });
+  record.place_id = placeId;
+  record.status = "draft";
+  record.entity_version = 1;
+  record.published_version = 0;
+  record.created_at = occurredAt;
+  record.updated_at = occurredAt;
+  record.created_by = adminId;
+  record.updated_by = adminId;
+  return record;
+}
+
+function AdminPlaceService_newDraft_(placeId, content, draftVersion, basePublishedVersion, occurredAt, adminId, trustedMediaSource) {
+  var record = {};
+  AdminPlaceSchema_DRAFT_HEADERS_.forEach(function (header) { record[header] = ""; });
+  AdminPlaceService_CONTENT_HEADERS_.forEach(function (header) { record[header] = content[header]; });
+  record.place_id = placeId;
+  record.cover_image_url = trustedMediaSource ? trustedMediaSource.cover_image_url : "";
+  record.gallery_image_urls = trustedMediaSource ? trustedMediaSource.gallery_image_urls : "";
+  record.video_url = trustedMediaSource ? trustedMediaSource.video_url : "";
+  record.draft_version = draftVersion;
+  record.base_published_version = basePublishedVersion;
+  record.created_at = occurredAt;
+  record.updated_at = occurredAt;
+  record.created_by = adminId;
+  record.updated_by = adminId;
+  return record;
+}
+
+function AdminPlaceService_existingDraftPatch_(content, draftVersion, occurredAt, adminId) {
+  var patch = {};
+  AdminPlaceService_CONTENT_HEADERS_.forEach(function (header) { patch[header] = content[header]; });
+  patch.draft_version = draftVersion;
+  patch.updated_at = occurredAt;
+  patch.updated_by = adminId;
+  return patch;
+}
+
+function AdminPlaceService_appendedRowNumber_(result) {
+  if (!result || !Number.isSafeInteger(result.sourceRowNumber) || result.sourceRowNumber < 2) {
+    throw new Error("ADMIN_PLACE_APPEND");
+  }
+  return result.sourceRowNumber;
+}
+
+function AdminPlaceService_completeRow_(headers, record) {
+  var values = {};
+  headers.forEach(function (header) {
+    values[header] = Object.prototype.hasOwnProperty.call(record, header) ? record[header] : "";
+  });
+  return values;
+}
+
+function AdminPlaceService_mergeRow_(before, patch) {
+  var values = {};
+  Object.keys(before).forEach(function (header) { values[header] = before[header]; });
+  Object.keys(patch).forEach(function (header) { values[header] = patch[header]; });
+  return values;
+}
+
+function AdminPlaceService_verifyIntendedState_(snapshot, intended) {
+  var targets = [
+    {
+      sheetName: AdminPlaceSchema_PLACES_SHEET_NAME_, headers: snapshot.place_headers,
+      expected: intended.place
+    },
+    {
+      sheetName: AdminPlaceSchema_DRAFTS_SHEET_NAME_, headers: snapshot.draft_headers,
+      expected: intended.draft
+    }
+  ];
+  targets.forEach(function (target) {
+    var table = SheetService_readTable_(target.sheetName, target.headers);
+    if (!table || !Array.isArray(table.headers) || table.headers.length !== target.headers.length) {
+      throw new Error("ADMIN_PLACE_WRITE_VERIFY");
+    }
+    target.headers.forEach(function (header, index) {
+      if (table.headers[index] !== header) throw new Error("ADMIN_PLACE_WRITE_VERIFY");
+    });
+    var matches = table.rows.filter(function (entry) {
+      return entry && entry.values && entry.values.place_id === snapshot.place_id;
+    });
+    if (!target.expected || matches.length !== 1 || matches[0].sourceRowNumber !== target.expected.sourceRowNumber) {
+      throw new Error("ADMIN_PLACE_WRITE_VERIFY");
+    }
+    target.headers.forEach(function (header) {
+      var actual = matches[0].values[header];
+      var expected = target.expected.values[header];
+      var same = actual === expected ||
+        (actual instanceof Date && expected instanceof Date && actual.getTime() === expected.getTime());
+      if (!same) throw new Error("ADMIN_PLACE_WRITE_VERIFY");
+    });
+  });
+  return true;
+}
+
+function AdminPlaceService_writeSuccess_(placeId, status, entityVersion, publishedVersion, hasDraft, createdAt, updatedAt) {
+  return {
+    place_id: placeId,
+    status: status,
+    entity_version: entityVersion,
+    working_version: entityVersion,
+    published_version: publishedVersion || null,
+    has_active_draft: hasDraft,
+    created_at: createdAt,
+    updated_at: updatedAt
+  };
+}
+
 function AdminPlaceService_execute_(token, operation) {
   try {
     var admin = AuthService_requireAdmin_(token);
@@ -47,6 +438,7 @@ function AdminPlaceService_execute_(token, operation) {
   } catch (error) {
     var code = error && typeof error.message === "string" ? error.message : "";
     if (code === "UNAUTHORIZED") return AdminPlaceService_error_("UNAUTHORIZED", "กรุณาเข้าสู่ระบบ");
+    if (code === "FORBIDDEN") return AdminPlaceService_error_("FORBIDDEN", "คุณไม่มีสิทธิ์ดำเนินการนี้");
     if (code === "VALIDATION_ERROR") return AdminPlaceService_error_("VALIDATION_ERROR", "ข้อมูลคำขอไม่ถูกต้อง");
     if (code === "NOT_FOUND") return AdminPlaceService_error_("NOT_FOUND", "ไม่พบสถานที่");
     if (code === "CONFLICT") return AdminPlaceService_error_("CONFLICT", "ข้อมูลถูกแก้ไขแล้ว กรุณาโหลดข้อมูลล่าสุด");
@@ -221,6 +613,10 @@ function AdminPlaceService_captureState_(placeId, includeEpoch) {
       place: null,
       draft: null
     },
+    restore_fields: {
+      place: null,
+      draft: null
+    },
     epoch: epoch
   };
 
@@ -260,10 +656,49 @@ function AdminPlaceService_captureState_(placeId, includeEpoch) {
   return snapshot;
 }
 
+function AdminPlaceService_setSelectiveRestore_(snapshot, key, fields) {
+  if (!snapshot || !snapshot.restore_fields || (key !== "place" && key !== "draft") ||
+      !snapshot.rows || !Array.isArray(fields)) {
+    throw new Error("ADMIN_PLACE_RESTORE_FIELDS");
+  }
+  if (!fields.length) {
+    snapshot.restore_fields[key] = [];
+    return snapshot;
+  }
+  if (!snapshot.rows[key]) throw new Error("ADMIN_PLACE_RESTORE_FIELDS");
+  var headers = key === "place" ? snapshot.place_headers : snapshot.draft_headers;
+  var seen = Object.create(null);
+  fields.forEach(function (field) {
+    if (typeof field !== "string" || field === "place_id" || headers.indexOf(field) === -1 ||
+        Object.prototype.hasOwnProperty.call(seen, field)) {
+      throw new Error("ADMIN_PLACE_RESTORE_FIELDS");
+    }
+    seen[field] = true;
+  });
+  snapshot.restore_fields[key] = fields.slice();
+  return snapshot;
+}
+
+function AdminPlaceService_applySelectivePatch_(snapshot, key, sheetName, sourceRowNumber, orderedFields, patch) {
+  if (!snapshot || !snapshot.restore_fields || !Array.isArray(snapshot.restore_fields[key]) ||
+      !Array.isArray(orderedFields) || !orderedFields.length || !patch || typeof patch !== "object" || Array.isArray(patch) ||
+      Object.keys(patch).length !== orderedFields.length) {
+    throw new Error("ADMIN_PLACE_SELECTIVE_PATCH");
+  }
+  orderedFields.forEach(function (field) {
+    if (!Object.prototype.hasOwnProperty.call(patch, field)) throw new Error("ADMIN_PLACE_SELECTIVE_PATCH");
+    AdminPlaceService_setSelectiveRestore_(snapshot, key, snapshot.restore_fields[key].concat([field]));
+    var fieldPatch = {};
+    fieldPatch[field] = patch[field];
+    SheetService_updateObjectAtRow_(sheetName, sourceRowNumber, fieldPatch);
+  });
+  return true;
+}
+
 function AdminPlaceService_restoreState_(snapshot) {
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot) || !AdminPlaceService_validId_(snapshot.place_id) ||
       !Array.isArray(snapshot.place_headers) || !Array.isArray(snapshot.draft_headers) || !snapshot.rows ||
-      !snapshot.allocated_rows || !snapshot.epoch) {
+      !snapshot.allocated_rows || !snapshot.restore_fields || !snapshot.epoch) {
     throw new Error("ADMIN_PLACE_RESTORE_INPUT");
   }
   if (snapshot.epoch.captured) {
@@ -288,16 +723,35 @@ function AdminPlaceService_restoreState_(snapshot) {
   restoreTargets.forEach(function (target) {
     var before = snapshot.rows[target.key];
     var allocatedRow = snapshot.allocated_rows[target.key];
+    var restoreFields = snapshot.restore_fields[target.key];
     if (allocatedRow !== null && (!Number.isSafeInteger(allocatedRow) || allocatedRow < 2)) {
       throw new Error("ADMIN_PLACE_RESTORE_ALLOCATION");
+    }
+    if (restoreFields !== null && !Array.isArray(restoreFields)) {
+      throw new Error("ADMIN_PLACE_RESTORE_FIELDS");
     }
     var currentMatches = currentTables[target.tableKey].rows.filter(function (entry) {
       return entry && entry.values && entry.values.place_id === snapshot.place_id;
     });
     if (before) {
       if (allocatedRow !== null) throw new Error("ADMIN_PLACE_RESTORE_ALLOCATION");
-      SheetService_replaceObjectAtRow_(target.sheetName, before.sourceRowNumber, before.values);
+      if (restoreFields === null) {
+        SheetService_replaceObjectAtRow_(target.sheetName, before.sourceRowNumber, before.values);
+      } else if (restoreFields.length) {
+        var restoreSeen = Object.create(null);
+        restoreFields.forEach(function (field) {
+          if (typeof field !== "string" || field === "place_id" || target.headers.indexOf(field) === -1 ||
+              Object.prototype.hasOwnProperty.call(restoreSeen, field)) {
+            throw new Error("ADMIN_PLACE_RESTORE_FIELDS");
+          }
+          restoreSeen[field] = true;
+          var restorePatch = {};
+          restorePatch[field] = before.values[field];
+          SheetService_updateObjectAtRow_(target.sheetName, before.sourceRowNumber, restorePatch);
+        });
+      }
     } else {
+      if (restoreFields !== null && restoreFields.length) throw new Error("ADMIN_PLACE_RESTORE_FIELDS");
       if (currentMatches.length > 1) throw new Error("ADMIN_PLACE_RESTORE_ALLOCATION");
       if (currentMatches.length === 1) {
         // Verified pre-absence makes the unique target-ID row authoritative; never clear a conflicting unrelated allocation.
@@ -571,13 +1025,16 @@ function AdminPlaceService_projectContent_(source) {
   var result = {};
   AdminPlaceService_CONTENT_HEADERS_.forEach(function (header) {
     if (header === "tags" || header === "nearby_place_ids" || header === "gallery_media_ids") {
-      result[header] = AdminPlaceService_listValue_(source[header], header === "gallery_media_ids");
+      var listSource = header === "tags" ? AdminPlaceService_unescapeHumanText_(source[header]) : source[header];
+      result[header] = AdminPlaceService_listValue_(listSource, header === "gallery_media_ids");
     } else if (header === "is_featured" || header === "is_main_route_point") {
       result[header] = AdminPlaceService_booleanValue_(source[header]);
     } else if (header === "latitude" || header === "longitude" || header === "sort_order") {
       result[header] = AdminPlaceService_numberValue_(source[header], header);
     } else {
-      result[header] = AdminPlaceService_safeText_(source[header]);
+      var textValue = AdminPlaceService_safeText_(source[header]);
+      result[header] = AdminPlaceService_NON_HUMAN_TEXT_HEADERS_.indexOf(header) !== -1 ||
+        AdminPlaceService_URL_HEADERS_.indexOf(header) !== -1 ? textValue : AdminPlaceService_unescapeHumanText_(textValue);
     }
   });
   if ((result.latitude === "") !== (result.longitude === "")) throw new Error("ADMIN_PLACE_COORDINATES");
@@ -647,6 +1104,11 @@ function AdminPlaceService_safeText_(value) {
     throw new Error("ADMIN_PLACE_TEXT");
   }
   return text;
+}
+
+function AdminPlaceService_unescapeHumanText_(value) {
+  var text = AdminPlaceService_safeText_(value);
+  return /^'[=+\-@]/.test(text) ? text.slice(1) : text;
 }
 
 function AdminPlaceService_lowerText_(value) {
