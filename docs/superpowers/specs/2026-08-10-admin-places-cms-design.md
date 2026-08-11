@@ -246,6 +246,8 @@ The Admin map uses the existing Leaflet.js/OpenStreetMap direction and is progre
 - the page never calls `navigator.geolocation` automatically or provides a current-location action in M7;
 - “เปิด/ตรวจสอบใน Google Maps” opens a validated existing `google_maps_url`, or a safely generated HTTPS Google Maps query from a valid coordinate pair, in a new tab with `noopener noreferrer`.
 
+Task 13 uses the viewport-only default center `8.900000, 98.800000` at zoom `10` whenever no complete valid pair exists. The default is not Place data: it does not populate the inputs, create a marker, mutate form content, or enter the Save payload. Map clicks and marker drag completion validate finite in-range numbers and serialize both fields with the single canonical rule equivalent to `Number(value).toFixed(6)`. Valid manual input remains textually unchanged (for example, `"8.9"` and `"98.8001"`) while its numeric values position the one permitted marker; invalid or incomplete input never moves that marker and blank input never becomes zero. Save continues to derive from the validated current inputs, so blank/incomplete coordinates remain empty and no viewport default is persisted. A later deliberate map click or drag may replace preserved manual text with canonical six-decimal strings.
+
 ### 10.3 Approved media selector
 
 The frozen Public media model remains authoritative: local production images come from the validated public manifest, and ordinary Place cover IDs are derived from stable entity IDs and roles. M7 does not replace this with client-supplied URLs or a general media-ID picker.
