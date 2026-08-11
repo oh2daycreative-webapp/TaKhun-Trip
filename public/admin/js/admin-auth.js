@@ -25,6 +25,7 @@
   const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
   const PLACE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
   const TRANSIENT_CODES = Object.freeze(["TIMEOUT", "NETWORK_ERROR", "HTTP_ERROR", "MALFORMED_RESPONSE", "SERVER_ERROR"]);
+  const APPLICATION_CODES = Object.freeze(["NOT_FOUND", "CONFLICT"]);
   const AUTH_INVALID_CODES = Object.freeze(["UNAUTHORIZED", "VALIDATION_ERROR", "FORBIDDEN"]);
   const SAFE_API_CODES = Object.freeze([
     "CONFIG_ERROR",
@@ -36,7 +37,9 @@
     "TIMEOUT",
     "NETWORK_ERROR",
     "HTTP_ERROR",
-    "MALFORMED_RESPONSE"
+    "MALFORMED_RESPONSE",
+    "NOT_FOUND",
+    "CONFLICT"
   ]);
   let validationGeneration = 0;
 
@@ -318,7 +321,7 @@
         clearSession();
         return { status: "unauthenticated" };
       }
-      return { status: "unconfirmed", code: TRANSIENT_CODES.includes(code) ? code : "SERVER_ERROR" };
+      return { status: "unconfirmed", code: TRANSIENT_CODES.includes(code) || APPLICATION_CODES.includes(code) ? code : "SERVER_ERROR" };
     }
     if (generation !== validationGeneration) return { status: "stale" };
     if (!exactKeys(response, ["admin", "expires_at"])) return { status: "unconfirmed", code: "MALFORMED_RESPONSE" };

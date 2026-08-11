@@ -977,6 +977,18 @@ test("validation distinguishes unauthorized from transient unconfirmed outcomes"
   }
 });
 
+test("NOT_FOUND and CONFLICT remain safe application outcomes without invalidating the session", async () => {
+  for (const code of ["NOT_FOUND", "CONFLICT"]) {
+    const loginHarness = loadAuth({ api: { login: async () => { throw apiError(code); } } });
+    assert.deepEqual(plain(await loginHarness.auth.login("operator", "Password", "dashboard.html")), { status: "error", code });
+
+    const storage = makeStorage({ initial: JSON.stringify(SESSION) });
+    const validationHarness = loadAuth({ storage, api: { validateSession: async () => { throw apiError(code); } } });
+    assert.deepEqual(plain(await validationHarness.auth.validateCurrentSession()), { status: "unconfirmed", code });
+    assert.deepEqual(storedSession(storage), SESSION);
+  }
+});
+
 test("protected guard reveals only after delayed authoritative success", async () => {
   const pending = deferred();
   const states = [];
