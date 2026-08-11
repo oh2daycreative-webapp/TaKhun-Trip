@@ -533,19 +533,19 @@ Task 8 is advisory and read-only: it stores no preview, approval flag, nonce, by
 **File allowlist**
 
 - Create: `public/admin/place-edit.html`, `public/admin/js/admin-place-edit.js`, `scripts/test-admin-place-edit.js`
-- Modify: `public/css/admin-places.css`, `scripts/test-admin-shell.js`, `scripts/test.ps1`
-- Test: `scripts/test-admin-place-edit.js`, `scripts/test-admin-shell.js`
+- Modify: `public/css/admin-places.css`, `scripts/test-admin-shell.js`, `scripts/test.ps1`, `scripts/test-media.js`
+- Test: `scripts/test-admin-place-edit.js`, `scripts/test-admin-shell.js`, `scripts/test-media.js`
 
 **Interfaces**
 
 - Consumes: strict URL grammar, Admin shell/auth, `getPlaceDetail`, `createPlace`, `savePlaceDraft`, `publishPlace`, `COMPLETE_EDITABLE_CONTENT`.
 - Produces: `TakhunAdminPlaceEdit.init()`; exact Create/no-query and Edit/query modes; normalized form snapshot and two-phase Save-and-Publish orchestration.
 
-- [ ] **RED:** Test independent strict query validation before API calls, no accidental Create on invalid context, fixed empty Create values, immutable ID, all exact content controls, labels, Thai/English ARIA tabs with Arrow/Home/End and retained values, draft vs publish requirements, exact normalized complete payload, Create redirect to canonical Edit, save-only vs save-then-publish, and “draft saved, publish failed” state. Assert no write retry and no invented optional/English content. Run the new test; failure must be missing page/controller.
-- [ ] **GREEN:** Build one full-page form with identity/status, bilingual content, area/category, details, contact/opening, related/public behavior, and action sections. Implement structural client feedback while keeping server validation authoritative. On success replace baseline from server/detail; never assume submitted content is stored.
-- [ ] Focused verification: `node scripts/test-admin-place-edit.js`; `node scripts/test-admin-shell.js`.
-- [ ] Dependency regressions: `node scripts/test-admin-api.js`; `node scripts/test-admin-auth.js`; `node scripts/test-admin-places.js`; `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1`.
-- [ ] Run `git diff --check`; stage only the six allowlisted files; run and inspect `git diff --cached --name-only` and `git diff --cached`.
+- [ ] **RED:** Test independent strict query validation before API calls, no accidental Create on invalid context, fixed empty Create values, immutable ID, all exact content controls, labels, Thai/English ARIA tabs with Arrow/Home/End and retained values, draft vs publish requirements, exact normalized complete payload, Create redirect to canonical Edit, save-only vs save-then-publish, and “draft saved, publish failed” state. Assert no write retry and no invented optional/English content. Run the new editor test; failure must be the missing page/controller. After `public/admin/place-edit.html` exists but before changing `scripts/test-media.js`, run `node scripts/test-media.js` and prove its exact static-page contract fails only because the tracked HTML-page total is now `28` while the committed expectation is `27`.
+- [ ] **GREEN:** Build one full-page form with identity/status, bilingual content, area/category, details, contact/opening, related/public behavior, and action sections. Implement structural client feedback while keeping server validation authoritative. On success replace baseline from server/detail; never assume submitted content is stored. In `scripts/test-media.js`, change only the exact approved static HTML-page expectation from `27` to `28` (including the test name and numeric assertion). The current contract discovers tracked HTML files by deterministic traversal and has no explicit approved-page list; do not add a permissive list or alter favicon, media-pipeline, manifest, rendering, or runtime assertions. If an explicit page inventory is introduced before execution, add only `public/admin/place-edit.html` in deterministic order. Keep exact-count coverage: do not use `>= 27`, a range, or dynamic expected-count logic that would stop detecting accidental pages.
+- [ ] Focused verification: `node scripts/test-admin-place-edit.js`; `node scripts/test-admin-shell.js`; `node scripts/test-media.js`.
+- [ ] Dependency regressions: `node scripts/test-admin-places.js`; `node scripts/test-admin-api.js`; `node scripts/test-admin-auth.js`; `node scripts/test-admin-place-service.js`; `node scripts/test-apps-script.js`; `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1`; `cmd /c npm test`; `cmd /c npm run build`.
+- [ ] Run the full repository JavaScript syntax check required by this plan, then `git diff --check`. Stage only these seven allowlisted files: `public/admin/place-edit.html`, `public/admin/js/admin-place-edit.js`, `scripts/test-admin-place-edit.js`, `public/css/admin-places.css`, `scripts/test-admin-shell.js`, `scripts/test.ps1`, and `scripts/test-media.js`. Run and inspect `git diff --cached --name-only` and `git diff --cached`.
 - [ ] Commit: `git commit -m "feat: build Admin Place editor"`.
 - [ ] **REVIEW GATE:** Review exact URL mode, full field mapping, bilingual tabs, two-phase action, safe DOM, and baseline handling.
 
