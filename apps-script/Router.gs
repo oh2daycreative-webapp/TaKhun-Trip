@@ -62,6 +62,7 @@ function routeRequest_(method, event) {
         if (action === "adminGetPlaceDetail") return createJsonResponse_(adminGetPlaceDetail_(body.token, body.payload));
         if (action === "adminCreatePlace") return createJsonResponse_(adminCreatePlace_(body.token, body.payload));
         if (action === "adminSavePlaceDraft") return createJsonResponse_(adminSavePlaceDraft_(body.token, body.payload));
+        if (action === "adminPublishPlace") return createJsonResponse_(adminPublishPlace_(body.token, body.payload));
       }
     }
 

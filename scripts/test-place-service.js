@@ -189,6 +189,41 @@ test("detail projection uses schema fields only and defaults unavailable joins",
   assert.equal("status" in detail || "nearby_place_ids" in detail || "admin_notes" in detail, false);
 });
 
+test("Public projection changes only after a complete draft snapshot is promoted", () => {
+  const { context, rows } = loadBackend();
+  const before = plain(context.buildPlaceDetailResponse_(rows, { place_id: "P-2", lang: "th" }));
+  const activeDraft = {
+    ...rows.find((row) => row.place_id === "P-2"),
+    name_th: "published only after promotion",
+    description_th: "new complete draft content",
+    draft_version: 4,
+    base_published_version: 1,
+    created_by: "ADM-private",
+    updated_by: "ADM-private",
+    raw_secret: "DRAFT-ONLY"
+  };
+
+  assert.notEqual(before.data.name_th, "published only after promotion");
+  assert.equal(JSON.stringify(before).includes("published only after promotion"), false);
+
+  const failedPublishRows = rows.map((row) => ({ ...row }));
+  assert.deepEqual(
+    plain(context.buildPlaceDetailResponse_(failedPublishRows, { place_id: "P-2", lang: "th" })),
+    before,
+    "a failed Publish must leave the retained Public snapshot unchanged"
+  );
+
+  const promotedRows = rows.map((row) => row.place_id === "P-2"
+    ? { ...activeDraft, status: "published", entity_version: 4, published_version: 2 }
+    : { ...row });
+  const after = plain(context.buildPlaceDetailResponse_(promotedRows, { place_id: "P-2", lang: "th" }));
+  assert.equal(after.data.name_th, "published only after promotion");
+  assert.equal(after.data.description, "new complete draft content");
+  for (const forbidden of ["draft_version", "base_published_version", "created_by", "updated_by", "raw_secret"]) {
+    assert.equal(JSON.stringify(after).includes(forbidden), false, `${forbidden} must not enter Public output`);
+  }
+});
+
 test("map returns only published finite in-range coordinate pairs", () => {
   const { context, rows } = loadBackend();
   const result = plain(context.buildMapPlacesResponse_(rows, {}));
