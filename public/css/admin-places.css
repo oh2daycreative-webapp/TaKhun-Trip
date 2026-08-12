@@ -48,5 +48,8 @@
 .admin-place-edit__tabs [role="tab"][aria-selected="true"] { border-bottom: 3px solid var(--color-primary); }
 .admin-place-edit__actions, .admin-place-edit__submit { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; }
 .admin-place-edit__notice { min-height: 1.5rem; }.admin-place-edit__foundation { color: var(--color-muted); }
+.admin-place-map-picker { grid-column: 1 / -1; min-width: 0; }.admin-place-map-picker > p { margin: .75rem 0; }.admin-place-map-picker [data-admin-place-map] { width: 100%; min-height: 300px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); box-sizing: border-box; }.admin-place-map-picker .button { display: inline-flex; min-height: 44px; align-items: center; }
+[data-admin-place-map] .leaflet-control-zoom a { display: flex; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; box-sizing: border-box; }
+[data-admin-place-map] .leaflet-control-zoom a:focus-visible { outline: 3px solid var(--color-primary-dark); outline-offset: 2px; }
 .admin-place-edit :focus-visible { outline: 3px solid var(--color-primary-dark); outline-offset: 2px; }
 @media (min-width: 700px) { .admin-place-edit__section { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 1rem; } .admin-place-edit__section h2, .admin-place-edit__tabs, .admin-place-edit__section > [role="tabpanel"], .admin-place-edit__section > p, .admin-place-edit__submit { grid-column: 1 / -1; } }

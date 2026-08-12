@@ -52,6 +52,7 @@ $required = @(
   "public/admin/js/admin-auth.js",
   "public/admin/js/admin-shell.js",
   "public/admin/js/admin-places.js",
+  "public/admin/js/admin-place-map.js",
   "public/admin/js/admin-place-edit.js",
   "public/favicon.svg",
   "public/assets/media/placeholders/hero.svg",
@@ -164,6 +165,8 @@ if ($LASTEXITCODE -ne 0) { throw "Admin shell verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin Places list verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-place-edit.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Place editor verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-place-map.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Place map verification failed." }
 & node (Join-Path $PSScriptRoot "test-crypto-service.js")
 if ($LASTEXITCODE -ne 0) { throw "CryptoService verification failed." }
 & node (Join-Path $PSScriptRoot "test-auth-service.js")
