@@ -744,7 +744,7 @@ If the editor loaded expected/working version N and Save returns `CONFLICT`, loc
 **File allowlist**
 
 - Create: none
-- Modify: `docs/DATA_SCHEMA.md`, `docs/API_SPEC.md`, `docs/ADMIN_CMS_SPEC.md`, `docs/DEVELOPMENT_RULES.md`, `docs/TESTING_CHECKLIST.md`
+- Modify: `docs/DATA_SCHEMA.md`, `docs/API_SPEC.md`, `docs/ADMIN_CMS_SPEC.md`, `docs/DEVELOPMENT_RULES.md`, `docs/TESTING_CHECKLIST.md`, `docs/ROUTES_AND_PAGES.md`
 - Test: documentation scans plus full repository test/build commands
 
 **Interfaces**
@@ -753,10 +753,14 @@ If the editor loaded expected/working version N and Save returns `CONFLICT`, loc
 - Produces: frozen documentation matching actual M7 behavior, with no unrelated historical rewrite.
 
 - [ ] **RED:** Before edits, run targeted documentation searches and record each mismatch: common vs Place statuses, physical `place_drafts`/versions/lifecycle fields, audit aliases, exact ten Admin actions and shapes, existing `NOT_FOUND` vs new `CONFLICT`, safe Edit return grammar, media origin/same-Place roles/gallery extension, dependency consumers, cache epoch, roles/no retry/compensation, migration and QA gates. The mismatch list is the failing documentation test.
-- [ ] **GREEN:** Update only the five named documents and make actual code the evidence. Preserve common statuses for non-Place entities and historical M6 contracts. Document every remote operation as human-controlled.
+- [ ] **GREEN:** Update only the six named documents and make actual code the evidence. Preserve common statuses for non-Place entities and historical M6 contracts. Document every remote operation as human-controlled.
+- [ ] Synchronize `docs/ROUTES_AND_PAGES.md` current/final Admin Places sections to the implemented page ownership and URL grammar: `admin/places.html` is the list; bare `admin/place-edit.html` is Create; `admin/place-edit.html?place_id=<canonical Place ID>` is Edit/read-only detail. Remove current-contract `admin/places.html?edit=...`, `places.html?edit=...`, `?edit=`, alternate `?id=`, fragment, extra-parameter, and arbitrary-query forms; none is a compatibility alias. Invalid Place Edit intent follows the implemented bounded safe-return fallback/navigation contract.
+- [ ] Replace current/final `docs/ROUTES_AND_PAGES.md` Place action wording with exactly the ten M7 Place-specific routed actions: `adminGetPlaces`, `adminGetPlaceDetail`, `adminCreatePlace`, `adminSavePlaceDraft`, `adminPublishPlace`, `adminInspectPlaceDependencies`, `adminUnpublishPlace`, `adminArchivePlace`, `adminRestorePlace`, and `adminGetPlaceMediaOptions`. Do not claim these ten actions are the entire global POST Router set, remove unrelated actions, or preserve `createPlace`/`updatePlace`/`deletePlace` as M7 aliases. Explicitly historical discussion may retain legacy names only when it cannot be read as the current/final contract.
+- [ ] Synchronize any current Admin Place not-found/navigation examples and role UX in `docs/ROUTES_AND_PAGES.md`: use the canonical Edit URL or exact safe fallback; `super_admin`/`editor` receive capability/lifecycle-authorized write UX, `reviewer`/`viewer` are read-only, and server authorization remains authoritative over browser presentation.
+- [ ] Include `docs/ROUTES_AND_PAGES.md` explicitly in the stale-contract search for `admin/places.html?edit=`, `places.html?edit=`, `createPlace`, `updatePlace`, `deletePlace`, and historical Edit aliases. Classify each match as legitimate explicitly historical context or stale current/final wording; correct the latter without blind replacement.
 - [ ] Focused verification: in the task window/path/branch, use `rg -n "admin(GetPlaces|GetPlaceDetail|GetPlaceMediaOptions|InspectPlaceDependencies|CreatePlace|SavePlaceDraft|PublishPlace|UnpublishPlace|ArchivePlace|RestorePlace)|place_drafts|gallery_media_ids|PLACE_PUBLIC_CACHE_EPOCH|CONFLICT|NOT_FOUND" docs` and compare names with source/tests.
 - [ ] Dependency regressions: `npm test`; `npm run build`; `Get-ChildItem -LiteralPath public,apps-script,scripts -Recurse -File -Include *.js,*.gs | ForEach-Object { node --check $_.FullName }` (Apps Script globals are syntax-checked only).
-- [ ] Run `git diff --check`; stage only the five allowlisted docs; run and inspect `git diff --cached --name-only` and `git diff --cached`.
+- [ ] Run `git diff --check`; stage only the six allowlisted docs; run and inspect `git diff --cached --name-only` and `git diff --cached`.
 - [ ] Commit: `git commit -m "docs: document Admin Places CMS contracts"`.
 - [ ] **REVIEW GATE:** Contract reviewer compares every approved design section 1–24 to code, tests, and one documentation location; any behavior/doc mismatch blocks final gates.
 
@@ -814,6 +818,7 @@ docs/API_SPEC.md
 docs/ADMIN_CMS_SPEC.md
 docs/DEVELOPMENT_RULES.md
 docs/TESTING_CHECKLIST.md
+docs/ROUTES_AND_PAGES.md
 scripts/test.ps1
 scripts/test-sheet-service.js
 scripts/test-admin-api.js
