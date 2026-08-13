@@ -53,6 +53,7 @@ $required = @(
   "public/admin/js/admin-shell.js",
   "public/admin/js/admin-places.js",
   "public/admin/js/admin-place-map.js",
+  "public/admin/js/admin-place-media.js",
   "public/admin/js/admin-place-edit.js",
   "public/favicon.svg",
   "public/assets/media/placeholders/hero.svg",
@@ -81,6 +82,7 @@ $required = @(
   "apps-script/SearchService.gs"
   "scripts/test-admin-place-schema.js",
   "scripts/test-admin-place-service.js",
+  "scripts/test-admin-place-media.js",
   "scripts/test-admin-places.js"
 )
 
@@ -167,6 +169,8 @@ if ($LASTEXITCODE -ne 0) { throw "Admin Places list verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin Place editor verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-place-map.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Place map verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-place-media.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Place media verification failed." }
 & node (Join-Path $PSScriptRoot "test-crypto-service.js")
 if ($LASTEXITCODE -ne 0) { throw "CryptoService verification failed." }
 & node (Join-Path $PSScriptRoot "test-auth-service.js")

@@ -195,7 +195,8 @@
         if (responseMode) {
           if (!Array.isArray(field) || field.length > 50 || field.some((id) => typeof id !== "string" || !MEDIA_ID_PATTERN.test(id)) ||
               new Set(field).size !== field.length) return false;
-        } else if (field !== "") return false;
+        } else if (field !== "" && (!Array.isArray(field) || field.length < 1 || field.length > 50 ||
+          field.some((id) => typeof id !== "string" || !MEDIA_ID_PATTERN.test(id)) || new Set(field).size !== field.length)) return false;
       } else if (key === "is_featured" || key === "is_main_route_point") {
         if (typeof field !== "boolean") return false;
       } else if (key === "latitude" || key === "longitude") {

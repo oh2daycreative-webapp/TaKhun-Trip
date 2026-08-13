@@ -73,6 +73,12 @@
     };
   }
 
+  function pictureModelForEntityRole(mediaId, entityType, entityId, role, lang = "th") {
+    const item = findItem(mediaId);
+    if (!item || item.entity_type !== entityType || item.entity_id !== entityId || item.role !== role) return null;
+    return pictureModel(mediaId, lang);
+  }
+
   function applyRequestOptions(image, options) {
     if (options.loading === "eager" || options.loading === "lazy") image.loading = options.loading;
     if (["high", "low", "auto"].includes(options.fetchPriority)) {
@@ -121,7 +127,9 @@
     fallback(placeholderPath(role));
     loadManifest().then(() => {
       if (mount._takhunMediaGeneration !== generation || !mount.isConnected) return;
-      const model = pictureModel(options.mediaId, options.lang);
+      const model = options.entityType && options.entityId && options.role
+        ? pictureModelForEntityRole(options.mediaId, options.entityType, options.entityId, options.role, options.lang)
+        : pictureModel(options.mediaId, options.lang);
       if (!model) return;
       const picture = global.document.createElement("picture");
       picture.setAttribute("data-media-runtime", "picture");
@@ -151,5 +159,5 @@
     return current;
   }
 
-  global.TakhunMedia = Object.freeze({ mediaIdFor, placeholderPath, isLocalGeneratedPath, isLocalPlaceholderPath, normalizeManifest, loadManifest, pictureModel, renderImage });
+  global.TakhunMedia = Object.freeze({ mediaIdFor, placeholderPath, isLocalGeneratedPath, isLocalPlaceholderPath, normalizeManifest, loadManifest, pictureModel, pictureModelForEntityRole, renderImage });
 })(window);

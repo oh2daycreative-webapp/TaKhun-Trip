@@ -162,6 +162,7 @@ function toPlaceDetail_(row, lang) {
     fee: localizedText_(row, "fee", lang),
     cover_image_url: trimText_(row.cover_image_url),
     gallery_image_urls: splitList_(row.gallery_image_urls),
+    gallery_media_ids: PlaceService_galleryMediaIds_(row.gallery_media_ids),
     video_url: trimText_(row.video_url),
     tags: splitList_(row.tags),
     recommended_duration: trimText_(row.recommended_duration),
@@ -172,6 +173,20 @@ function toPlaceDetail_(row, lang) {
       review_count: 0
     }
   };
+}
+
+function PlaceService_galleryMediaIds_(value) {
+  if (value === undefined || value === null || value === "") return [];
+  if (typeof value !== "string") return [];
+  var parts = value.split("|");
+  if (!parts.length || parts.length > 50 || parts.join("|") !== value) return [];
+  var seen = Object.create(null);
+  for (var index = 0; index < parts.length; index += 1) {
+    var mediaId = parts[index];
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(mediaId) || Object.prototype.hasOwnProperty.call(seen, mediaId)) return [];
+    seen[mediaId] = true;
+  }
+  return parts;
 }
 
 function toMapPlace_(row, lang) {

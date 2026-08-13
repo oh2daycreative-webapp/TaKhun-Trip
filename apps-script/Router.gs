@@ -67,6 +67,7 @@ function routeRequest_(method, event) {
         if (action === "adminUnpublishPlace") return createJsonResponse_(adminUnpublishPlace_(body.token, body.payload));
         if (action === "adminArchivePlace") return createJsonResponse_(adminArchivePlace_(body.token, body.payload));
         if (action === "adminRestorePlace") return createJsonResponse_(adminRestorePlace_(body.token, body.payload));
+        if (action === "adminGetPlaceMediaOptions") return createJsonResponse_(adminGetPlaceMediaOptions_(body.token, body.payload));
       }
     }
 

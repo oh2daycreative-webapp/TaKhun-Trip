@@ -410,6 +410,100 @@ test("Place requests reject unknown keys invalid IDs filters versions content an
   }
 });
 
+test("Create and Save Draft preserve strict ordered Gallery media requests at zero one many and fifty", async () => {
+  const galleries = [
+    "",
+    ["place-plc-gallery-one"],
+    ["place-plc-gallery-c", "place-plc-gallery-a", "place-plc-gallery-b"],
+    Array.from({ length: 50 }, (_value, index) => `place-plc-gallery-${String(index + 1).padStart(2, "0")}`)
+  ];
+  for (const gallery_media_ids of galleries) {
+    for (const method of ["createPlace", "savePlaceDraft"]) {
+      const response = method === "createPlace"
+        ? writeResult({ entity_version: 1, working_version: 1, published_version: null })
+        : writeResult();
+      const harness = loadAdminApi({ fetchImpl: async () => textResponse(success(response)) });
+      const content = editableContent({ gallery_media_ids });
+      const payload = method === "createPlace" ? { content } : { place_id: PLACE_ID, expected_version: 2, content };
+      await harness.api[method](TOKEN, payload);
+      assert.equal(harness.calls.length, 1, `${method} ${JSON.stringify(gallery_media_ids)}`);
+      const body = JSON.parse(harness.calls[0].options.body);
+      assert.equal(body.action, PLACE_METHODS[method]);
+      assert.equal(body.token, TOKEN);
+      assert.deepEqual(body.payload.content.gallery_media_ids, gallery_media_ids);
+      assert.deepEqual(Object.keys(body.payload.content).sort(), [...CONTENT_KEYS].sort());
+      assert.equal(JSON.stringify(body).includes("source_file"), false);
+      assertNoSecretTransport(harness, [TOKEN]);
+      assertSingleRequestCleanup(harness);
+    }
+  }
+});
+
+test("Create and Save Draft reject malformed Gallery media requests before transport", async () => {
+  const invalid = [
+    Array.from({ length: 51 }, (_value, index) => `gallery-${index + 1}`),
+    ["gallery-a", "gallery-a"], ["gallery-a", ""], ["gallery-a", "bad_id"], ["Gallery-A"],
+    ["https://example.test/gallery.webp"], ["media-source/private.webp"], ["C:/private/gallery.webp"],
+    [{ media_id: "gallery-a" }], [["gallery-a"]], "gallery-a,gallery-b", "gallery-a|gallery-b"
+  ];
+  for (const gallery_media_ids of invalid) {
+    for (const method of ["createPlace", "savePlaceDraft"]) {
+      const harness = loadAdminApi({ fetchImpl: async () => assert.fail("invalid Gallery request fetched") });
+      const content = editableContent({ gallery_media_ids });
+      const payload = method === "createPlace" ? { content } : { place_id: PLACE_ID, expected_version: 2, content };
+      assertSafeError(await captureError(Promise.resolve().then(() => harness.api[method](TOKEN, payload))), "VALIDATION_ERROR", [TOKEN]);
+      assert.equal(harness.calls.length, 0, `${method} ${JSON.stringify(gallery_media_ids)}`);
+    }
+  }
+});
+
+test("Gallery request and response mutation proofs reject every Task 14 contract rollback", async () => {
+  const ordered = ["gallery-c", "gallery-a", "gallery-b"];
+  const validRequest = async (source, gallery_media_ids = ordered) => {
+    const harness = loadAdminApi({ source, fetchImpl: async () => textResponse(success(writeResult())) });
+    await assert.doesNotReject(() => harness.api.savePlaceDraft(TOKEN, {
+      place_id: PLACE_ID, expected_version: 2, content: editableContent({ gallery_media_ids })
+    }));
+    assert.deepEqual(JSON.parse(harness.calls[0].options.body).payload.content.gallery_media_ids, gallery_media_ids);
+  };
+  const invalidRequest = async (source, gallery_media_ids) => {
+    const harness = loadAdminApi({ source, fetchImpl: async () => assert.fail("mutated invalid Gallery request fetched") });
+    assertSafeError(await captureError(Promise.resolve().then(() => harness.api.savePlaceDraft(TOKEN, {
+      place_id: PLACE_ID, expected_version: 2, content: editableContent({ gallery_media_ids })
+    }))), "VALIDATION_ERROR");
+    assert.equal(harness.calls.length, 0);
+  };
+  const cases = [
+    ["empty-only rollback", mutatedSource(
+      '} else if (field !== "" && (!Array.isArray(field) || field.length < 1 || field.length > 50 ||\n          field.some((id) => typeof id !== "string" || !MEDIA_ID_PATTERN.test(id)) || new Set(field).size !== field.length)) return false;',
+      '} else if (field !== "") return false;'
+    ), (source) => validRequest(source)],
+    ["arbitrary arrays", mutatedSource(
+      'field.some((id) => typeof id !== "string" || !MEDIA_ID_PATTERN.test(id)) || new Set(field).size !== field.length)) return false;',
+      'false) return false;'
+    ), (source) => invalidRequest(source, [{ media_id: "gallery-a" }])],
+    ["duplicates", mutatedSource(" || new Set(field).size !== field.length)) return false;", ")) return false;"),
+      (source) => invalidRequest(source, ["gallery-a", "gallery-a"])],
+    ["fifty-one", mutatedSource("field.length < 1 || field.length > 50 ||", "field.length < 1 ||"),
+      (source) => invalidRequest(source, Array.from({ length: 51 }, (_value, index) => `gallery-${index + 1}`))],
+    ["sorting", mutatedSource("if (!save) return { content: source.content };", "source.content.gallery_media_ids = Array.isArray(source.content.gallery_media_ids) ? source.content.gallery_media_ids.slice().sort() : source.content.gallery_media_ids;\n    if (!save) return { content: source.content };"),
+      (source) => validRequest(source)],
+    ["URL and path", mutatedSource(
+      'field.length < 1 || field.length > 50 ||\n          field.some((id) => typeof id !== "string" || !MEDIA_ID_PATTERN.test(id))',
+      'field.length < 1 || field.length > 50 ||\n          field.some((id) => typeof id !== "string" || false)'
+    ),
+      (source) => invalidRequest(source, ["https://example.test/gallery.webp"])],
+    ["response weakening", mutatedSource("        !validContent(data.content, true) ||", "        false ||"), async (source) => {
+      const malformed = detailResult(); malformed.content.gallery_media_ids = ["bad_id"];
+      const harness = loadAdminApi({ source, fetchImpl: async () => textResponse(success(malformed)) });
+      assertSafeError(await captureError(harness.api.getPlaceDetail(TOKEN, { place_id: PLACE_ID, view: "working" })), "MALFORMED_RESPONSE");
+    }]
+  ];
+  for (const [label, source, contract] of cases) {
+    await assert.rejects(() => contract(source), undefined, `${label} mutant must be caught`);
+  }
+});
+
 test("strict Place success validators accept only exact list detail media dependency and write projections", async () => {
   for (const method of Object.keys(PLACE_METHODS)) {
     const valid = successForMethod(method);

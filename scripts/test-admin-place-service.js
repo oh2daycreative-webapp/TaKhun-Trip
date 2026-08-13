@@ -61,6 +61,21 @@ const DEPENDENCY_HEADERS = {
 const DEPENDENCY_GROUPS = ["routes", "nearby_places", "products", "events", "gallery", "trip_templates", "reviews"];
 const focusArgument = process.argv.find((argument) => argument.startsWith("--focus="));
 const focus = focusArgument ? focusArgument.slice("--focus=".length).toLowerCase() : "";
+const MEDIA_MANIFEST_URL = "https://www.takhuntrip.example/assets/media/manifest/media-manifest.json";
+const MEDIA_ALLOWED_ORIGIN = "https://www.takhuntrip.example";
+
+function approvedMedia(media_id, entity_id, role = "gallery", overrides = {}) {
+  return {
+    media_id, entity_type: "place", entity_id, role, ratio: "3:2", required: false,
+    alt_th: "ภาพสถานที่", alt_en: "Place image", fallback: "assets/media/placeholders/gallery.svg",
+    outputs: [{ width: 640, height: 427, path: `assets/media/generated/places/${media_id}-640.webp`, bytes: 1234, sha256: "a".repeat(64) }],
+    source_file: "media-source/private.jpg", ...overrides
+  };
+}
+
+function approvedManifest(items = [approvedMedia("place-plc-published-gallery-a", "PLC-PUBLISHED")]) {
+  return { version: 1, items };
+}
 
 function baseContent(overrides = {}) {
   const content = Object.fromEntries(CONTENT_KEYS.map((key) => [key, ""]));
@@ -222,7 +237,7 @@ function table(headers, values) {
 
 function loadBackend(options = {}) {
   const data = options.data || fixtures();
-  const calls = { auth: [], reads: [], writes: [] };
+  const calls = { auth: [], reads: [], writes: [], fetches: [], propertyReads: [] };
   const role = options.role || "editor";
   const forbiddenWrite = (name) => (...args) => {
     calls.writes.push({ name, args });
@@ -255,7 +270,24 @@ function loadBackend(options = {}) {
     verifyAdminPlaceStatusMigration: forbiddenWrite("verifyAdminPlaceStatusMigration"),
     LockService: { getScriptLock: forbiddenWrite("getScriptLock") },
     CacheService: { getScriptCache: forbiddenWrite("getScriptCache") },
-    PropertiesService: { getScriptProperties: forbiddenWrite("getScriptProperties") },
+    PropertiesService: { getScriptProperties() { return {
+      getProperty(key) {
+        calls.propertyReads.push(key);
+        if (options.propertyError) throw new Error("private property failure");
+        if (key === "ADMIN_PLACE_MEDIA_MANIFEST_URL") return options.manifestUrl === undefined ? MEDIA_MANIFEST_URL : options.manifestUrl;
+        if (key === "ADMIN_PLACE_MEDIA_ALLOWED_ORIGIN") return options.allowedOrigin === undefined ? MEDIA_ALLOWED_ORIGIN : options.allowedOrigin;
+        return null;
+      },
+      setProperty: forbiddenWrite("setProperty"), deleteProperty: forbiddenWrite("deleteProperty")
+    }; } },
+    UrlFetchApp: { fetch(url, requestOptions) {
+      calls.fetches.push({ url, requestOptions });
+      if (options.fetchError) throw new Error("private manifest fetch failure");
+      return {
+        getResponseCode() { return options.responseCode === undefined ? 200 : options.responseCode; },
+        getContentText() { return options.manifestText === undefined ? JSON.stringify(options.manifest || approvedManifest()) : options.manifestText; }
+      };
+    } },
     ContentService: {
       MimeType: { JSON: "application/json" },
       createTextOutput(text) { return { text, mime: "", setMimeType(mime) { this.mime = mime; return this; } }; }
@@ -349,7 +381,11 @@ function loadTransactionBackend(action, options = {}) {
     sheets.place_drafts.rows.push(DRAFT_HEADERS.map((header) => draft("OTHER-PLACE", 1, 0)[header] ?? ""));
     sheets.place_drafts.formulas.push(new Set());
   }
-  const properties = new Map([["PLACE_PUBLIC_CACHE_EPOCH", "41"]]);
+  const properties = new Map([
+    ["PLACE_PUBLIC_CACHE_EPOCH", "41"],
+    ["ADMIN_PLACE_MEDIA_MANIFEST_URL", MEDIA_MANIFEST_URL],
+    ["ADMIN_PLACE_MEDIA_ALLOWED_ORIGIN", MEDIA_ALLOWED_ORIGIN]
+  ]);
   if (options.missingEpoch) properties.delete("PLACE_PUBLIC_CACHE_EPOCH");
   if (options.extraColumns) {
     sheets.places.headers.push("legacy_place_extra");
@@ -375,7 +411,7 @@ function loadTransactionBackend(action, options = {}) {
     sheets.activity_logs.rows.push(AUDIT_HEADERS.map((header) => existing[header]));
     sheets.activity_logs.formulas.push(new Set());
   }
-  const calls = { auth: [], reads: [], writes: [], events: [], sequence: [], propertyReads: [], propertyWrites: [] };
+  const calls = { auth: [], reads: [], writes: [], events: [], sequence: [], propertyReads: [], propertyWrites: [], fetches: [] };
   const lock = {
     released: 0,
     tryLock(timeout) {
@@ -479,6 +515,17 @@ function loadTransactionBackend(action, options = {}) {
         };
       }
     },
+    UrlFetchApp: { fetch(url, requestOptions) {
+      calls.fetches.push({ url, requestOptions, phase: runtime.phase });
+      if (options.fetchError) throw new Error("private manifest fetch failure");
+      return {
+        getResponseCode() { return options.responseCode === undefined ? 200 : options.responseCode; },
+        getContentText() { return options.manifestText === undefined ? JSON.stringify(options.manifest || approvedManifest([
+          approvedMedia("place-tx-place-gallery-a", "TX-PLACE"),
+          approvedMedia("place-tx-place-gallery-b", "TX-PLACE")
+        ])) : options.manifestText; }
+      };
+    } },
     SheetService_readTable_: readTable,
     SheetService_escapeHumanText_(value) {
       assert.equal(typeof value, "string");
@@ -813,7 +860,7 @@ function inspect(runtime, payload = { place_id: "PLC-PUBLISHED" }) {
   return plain(runtime.context.adminInspectPlaceDependencies_("TOKEN", payload));
 }
 
-test("Task 9 exports dependency inspection and exact lifecycle actions but no later action", () => {
+test("Task 14 exports dependency lifecycle and read-only media actions but no later action", () => {
   const create = loadTransactionBackend("CREATE");
   assert.equal(typeof create.context.adminCreatePlace_, "function");
   assert.equal(typeof create.context.adminSavePlaceDraft_, "function");
@@ -822,7 +869,145 @@ test("Task 9 exports dependency inspection and exact lifecycle actions but no la
   for (const action of ["adminUnpublishPlace_", "adminArchivePlace_", "adminRestorePlace_"]) {
     assert.equal(typeof create.context[action], "function", action);
   }
-  assert.equal(typeof create.context.adminGetPlaceMediaOptions_, "undefined");
+  assert.equal(typeof create.context.adminGetPlaceMediaOptions_, "function");
+});
+
+test("media options authorize every Admin role and return only exact same-Place Gallery safe projections", () => {
+  const items = [
+    approvedMedia("place-plc-published-gallery-b", "PLC-PUBLISHED", "gallery", { alt_th: "B" }),
+    approvedMedia("place-plc-published-cover", "PLC-PUBLISHED", "cover", { fallback: "assets/media/placeholders/cover.svg" }),
+    approvedMedia("place-plc-other-gallery-a", "PLC-OTHER"),
+    approvedMedia("place-plc-published-gallery-a", "PLC-PUBLISHED", "gallery", { alt_th: "A" })
+  ];
+  for (const role of ["super_admin", "editor", "reviewer", "viewer"]) {
+    const runtime = loadBackend({ role, manifest: approvedManifest(items) });
+    const result = plain(runtime.context.adminGetPlaceMediaOptions_("TOKEN", { place_id: "PLC-PUBLISHED", role: "gallery", page: 1, page_size: 20 }));
+    assert.equal(result.ok, true, role);
+    assert.deepEqual(result.data.items.map((item) => item.media_id), ["place-plc-published-gallery-a", "place-plc-published-gallery-b"]);
+    assert.deepEqual(Object.keys(result.data), ["items", "page", "page_size", "total", "total_pages"]);
+    for (const item of result.data.items) {
+      assert.deepEqual(Object.keys(item), ["media_id", "entity_type", "entity_id", "role", "alt_th", "alt_en", "fallback", "outputs"]);
+      assert.deepEqual(Object.keys(item.outputs[0]), ["width", "height", "path"]);
+    }
+    assert.equal(/source_file|bytes|sha256|media-source/.test(JSON.stringify(result)), false);
+    assert.deepEqual(runtime.calls.writes, []);
+    assert.equal(runtime.calls.fetches.length, 1);
+    assert.deepEqual(runtime.calls.propertyReads, ["ADMIN_PLACE_MEDIA_MANIFEST_URL", "ADMIN_PLACE_MEDIA_ALLOWED_ORIGIN"]);
+  }
+});
+
+test("media options reject unknown Place noncanonical requests and manifest authority failures safely and without retry", () => {
+  for (const payload of [
+    {}, { place_id: "../PLC" }, { place_id: "PLC-PUBLISHED", manifest_url: MEDIA_MANIFEST_URL },
+    { place_id: "PLC-PUBLISHED", role: "hero" }, { place_id: "PLC-PUBLISHED", page_size: 101 }
+  ]) {
+    const runtime = loadBackend();
+    assertError(plain(runtime.context.adminGetPlaceMediaOptions_("TOKEN", payload)), "VALIDATION_ERROR");
+    assert.equal(runtime.calls.fetches.length, 0);
+  }
+  const missing = loadBackend();
+  assertError(plain(missing.context.adminGetPlaceMediaOptions_("TOKEN", { place_id: "PLC-MISSING" })), "NOT_FOUND");
+  assert.equal(missing.calls.fetches.length, 0);
+  for (const options of [
+    { manifestUrl: "http://www.takhuntrip.example/manifest.json" },
+    { manifestUrl: "https://evil.example/manifest.json" },
+    { allowedOrigin: "https://evil.example" }, { fetchError: true }, { responseCode: 503 },
+    { manifestText: "not-json" }, { manifest: { version: 2, items: [] } },
+    { manifest: { version: 1, items: [approvedMedia("bad_id", "PLC-PUBLISHED")] } }
+  ]) {
+    const runtime = loadBackend(options);
+    assertError(plain(runtime.context.adminGetPlaceMediaOptions_("TOKEN", { place_id: "PLC-PUBLISHED" })), "SERVER_ERROR");
+    assert.equal(runtime.calls.fetches.length <= 1, true);
+    assert.deepEqual(runtime.calls.writes, []);
+  }
+});
+
+test("Save Draft persists exact authoritative Gallery order and rejects invalid Gallery before mutation", () => {
+  const valid = loadTransactionBackend("UPDATE_DRAFT");
+  const result = callSave(valid, writeContent({ gallery_media_ids: ["place-tx-place-gallery-b", "place-tx-place-gallery-a"] }));
+  assert.equal(result.ok, true);
+  assert.equal(sheetRecord(valid, "place_drafts").gallery_media_ids, "place-tx-place-gallery-b|place-tx-place-gallery-a");
+  assert.equal(valid.calls.propertyWrites.some((entry) => entry.key === "PLACE_PUBLIC_CACHE_EPOCH"), false);
+  assert.equal(valid.calls.fetches.length, 1);
+
+  const invalidValues = [
+    ["place-tx-place-gallery-a", "place-tx-place-gallery-a"],
+    Array.from({ length: 51 }, (_value, index) => `place-tx-place-gallery-${index + 1}`),
+    ["place-tx-place-cover"], ["place-other-gallery-a"], ["unknown-gallery"], ["Gallery-A"],
+    ["https://example.test/a.webp"], "place-tx-place-gallery-a|place-tx-place-gallery-b"
+  ];
+  for (const gallery_media_ids of invalidValues) {
+    const runtime = loadTransactionBackend("UPDATE_DRAFT");
+    const before = transactionBefore(runtime);
+    assertError(callSave(runtime, writeContent({ gallery_media_ids })), "VALIDATION_ERROR");
+    assertRestored(runtime, before);
+    assert.equal(runtime.calls.writes.length, 0, JSON.stringify(gallery_media_ids));
+  }
+});
+
+test("Create forbids nonempty Gallery before identity and Publish revalidates Gallery before mutation", () => {
+  const create = loadTransactionBackend("CREATE");
+  assertError(callCreate(create, writeContent({ gallery_media_ids: ["place-temp-gallery-a"] })), "VALIDATION_ERROR");
+  assert.deepEqual(create.calls.writes, []);
+  assert.deepEqual(create.calls.fetches, []);
+
+  const valid = loadTransactionBackend("PUBLISH");
+  valid.sheets.place_drafts.rows[0][DRAFT_HEADERS.indexOf("gallery_media_ids")] = "place-tx-place-gallery-b|place-tx-place-gallery-a";
+  assert.equal(callPublish(valid).ok, true);
+  assert.equal(sheetRecord(valid, "places").gallery_media_ids, "place-tx-place-gallery-b|place-tx-place-gallery-a");
+  assert.equal(valid.calls.fetches.length, 1);
+  assert.equal(valid.calls.propertyWrites.filter((entry) => entry.key === "PLACE_PUBLIC_CACHE_EPOCH").length, 1);
+
+  const rejected = loadTransactionBackend("PUBLISH", { manifest: approvedManifest([approvedMedia("place-tx-place-gallery-a", "TX-PLACE")]) });
+  rejected.sheets.place_drafts.rows[0][DRAFT_HEADERS.indexOf("gallery_media_ids")] = "place-tx-place-gallery-b";
+  const before = transactionBefore(rejected);
+  assertError(callPublish(rejected), "VALIDATION_ERROR");
+  assertRestored(rejected, before);
+  assert.equal(populatedRows(rejected, "activity_logs").length, 0);
+});
+
+test("Gallery authority mutation proofs reject same-Place role and serialization bypasses", () => {
+  const source = read("apps-script/AdminPlaceService.gs");
+  const authorityCases = [
+    {
+      label: "same Place",
+      source: source.replace(
+        'if (!item || item.entity_type !== "place" || item.entity_id !== placeId || item.role !== "gallery") {',
+        'if (!item || item.entity_type !== "place" || false || item.role !== "gallery") {'
+      ),
+      manifest: approvedManifest([approvedMedia("place-other-gallery-a", "PLC-OTHER")]),
+      ids: ["place-other-gallery-a"]
+    },
+    {
+      label: "Gallery role",
+      source: source.replace(
+        'if (!item || item.entity_type !== "place" || item.entity_id !== placeId || item.role !== "gallery") {',
+        'if (!item || item.entity_type !== "place" || item.entity_id !== placeId || false) {'
+      ),
+      manifest: approvedManifest([approvedMedia("place-tx-place-cover", "TX-PLACE", "cover", { fallback: "assets/media/placeholders/cover.svg" })]),
+      ids: ["place-tx-place-cover"]
+    }
+  ];
+  for (const item of authorityCases) {
+    assert.notEqual(item.source, source, `${item.label} mutation target must match`);
+    const runtime = loadTransactionBackend("UPDATE_DRAFT", { serviceSource: item.source, manifest: item.manifest });
+    assert.throws(() => {
+      assertError(callSave(runtime, writeContent({ gallery_media_ids: item.ids })), "VALIDATION_ERROR");
+      assert.equal(runtime.calls.writes.length, 0);
+    }, undefined, `${item.label} mutant must be rejected by executable behavior`);
+  }
+
+  const serializationBypass = source.replace(
+    'if (mediaIds && (parts.length > 50 || parts.join("|") !== value)) throw new Error("ADMIN_PLACE_LIST");',
+    'if (mediaIds && parts.length > 50) throw new Error("ADMIN_PLACE_LIST");'
+  );
+  assert.notEqual(serializationBypass, source, "serialization mutation target must match");
+  const runtime = loadTransactionBackend("PUBLISH", { serviceSource: serializationBypass });
+  runtime.sheets.place_drafts.rows[0][DRAFT_HEADERS.indexOf("gallery_media_ids")] = " place-tx-place-gallery-a";
+  assert.throws(() => {
+    assertError(callPublish(runtime), "VALIDATION_ERROR");
+    assert.equal(runtime.calls.writes.length, 0);
+  }, undefined, "noncanonical serialization mutant must be rejected by executable behavior");
 });
 
 test("dependencies authorize all Admin roles and reject fake role invalid session and noncanonical payloads", () => {
@@ -1125,7 +1310,7 @@ test("Create writes one lowercase generated identity one complete draft and one 
   assert.equal(audit.action, "CREATE");
   assert.equal(audit.entity_id, result.data.place_id);
   assert.equal(audit.actor_admin_id, "ADM-authoritative");
-  assert.equal(runtime.calls.propertyReads.length, 0);
+  assert.deepEqual(runtime.calls.propertyReads.slice(-2).map((entry) => entry.key), ["ADMIN_PLACE_MEDIA_MANIFEST_URL", "ADMIN_PLACE_MEDIA_ALLOWED_ORIGIN"]);
   assert.equal(runtime.calls.propertyWrites.length, 0);
   assert.equal(runtime.lock.released, 1);
   assert.equal(runtime.calls.sequence[0], "auth");
@@ -1753,7 +1938,7 @@ test("Publish mutation proofs catch skipped validation epoch audit and draft con
     {
       label: "validation",
       source: source.replace(
-        "      var promotedContent = AdminPlaceService_publishContent_(capturedDraft);",
+        "      var promotedContent = AdminPlaceService_publishContent_(capturedDraft, parameters.place_id);",
         "      var promotedContent = AdminPlaceService_contentForPromotionWithoutValidation_(capturedDraft);"
       ),
       prepare(runtime) { runtime.context.AdminPlaceService_contentForPromotionWithoutValidation_ = () => writeContent({ name_th: "" }); },
@@ -1905,6 +2090,20 @@ test("Restore returns archived content to draft only while preserving retained d
     assert.deepEqual(runtime.calls.propertyWrites, []);
     assert.equal(sheetRecord(runtime, "activity_logs").action, "RESTORE");
     assertError(publicPlaceDetail(runtime), "NOT_FOUND");
+  }
+});
+
+test("Unpublish and Restore reconstruct exact canonical Gallery storage at the Sheet boundary", () => {
+  for (const action of ["UNPUBLISH", "RESTORE"]) {
+    for (const gallery of ["", "place-tx-place-gallery-b|place-tx-place-gallery-a"]) {
+      const runtime = loadTransactionBackend(action);
+      runtime.sheets.places.rows[0][PLACE_HEADERS.indexOf("gallery_media_ids")] = gallery;
+      const result = callLifecycle(runtime, action);
+      assert.equal(result.ok, true, `${action} ${gallery || "empty"}`);
+      const stored = sheetRecord(runtime, "place_drafts").gallery_media_ids;
+      assert.equal(typeof stored, "string", `${action} must store a scalar Gallery value`);
+      assert.equal(stored, gallery, `${action} must preserve exact canonical Gallery order`);
+    }
   }
 });
 

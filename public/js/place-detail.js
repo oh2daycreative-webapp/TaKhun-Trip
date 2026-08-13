@@ -136,7 +136,7 @@
       return fallback;
     };
     if (!global.TakhunMedia?.renderImage) { const fallback = fallbackFactory(); mount.append(fallback); return fallback; }
-    return global.TakhunMedia.renderImage(mount, { mediaId, type: options.type || "place", role: options.hero ? "hero" : options.gallery ? "gallery" : "cover", className: options.className || "", decorative: options.decorative === true, loading: options.loading, fetchPriority: options.fetchPriority, sizes: options.sizes, fallbackAlt: options.fallbackAlt, lang: global.TakhunI18n?.getCurrentLang?.(), fallbackFactory });
+    return global.TakhunMedia.renderImage(mount, { mediaId, type: options.type || "place", entityType: options.entityType, entityId: options.entityId, role: options.hero ? "hero" : options.gallery ? "gallery" : "cover", className: options.className || "", decorative: options.decorative === true, loading: options.loading, fetchPriority: options.fetchPriority, sizes: options.sizes, fallbackAlt: options.fallbackAlt, lang: global.TakhunI18n?.getCurrentLang?.(), fallbackFactory });
   }
 
   function renderSummary(place, lang, mount, reviewSummary) {
@@ -203,18 +203,40 @@
     global.document.body.classList.remove("has-modal");
     trigger?.focus?.();
   }
-  function openLightbox(source, name, trigger) {
+  function openLightbox(source, name, trigger, placeId) {
     const dialog = global.document.querySelector("[data-detail-lightbox]");
     const media = dialog.querySelector("[data-lightbox-media]");
-    media.replaceChildren(); appendImage(media, source, name, { className: "detail-lightbox__image" });
+    media.replaceChildren(); appendImage(media, source, name, { className: "detail-lightbox__image", gallery: true, entityType: "place", entityId: placeId, loading: "eager", sizes: "90vw" });
     dialog._returnFocus = trigger; dialog.hidden = false; dialog.classList.add("is-open");
     global.document.body.classList.add("has-modal");
     dialog.querySelector("[data-lightbox-close]")?.focus();
   }
   function renderGallery(place, lang) {
     const mount = global.document.querySelector("[data-detail-gallery]");
+    const ids = Array.isArray(place.gallery_media_ids) ? place.gallery_media_ids : [];
     mount.hidden = true;
     mount.replaceChildren();
+    if (!ids.length || !global.TakhunMedia?.pictureModelForEntityRole || !global.TakhunMedia?.loadManifest) return;
+    const generation = Number(mount._takhunGalleryGeneration || 0) + 1;
+    mount._takhunGalleryGeneration = generation;
+    global.TakhunMedia.loadManifest().then(() => {
+      if (mount._takhunGalleryGeneration !== generation) return;
+      const grid = make("div", "detail-gallery__grid");
+      for (const mediaId of ids) {
+        if (!global.TakhunMedia.pictureModelForEntityRole(mediaId, "place", place.place_id, "gallery", lang)) continue;
+        const button = make("button", "detail-gallery__item");
+        button.type = "button";
+        button.setAttribute("aria-label", format("place_detail.image_alt", { name: localized(place, "name", lang) }));
+        const media = make("span", "detail-gallery__media");
+        appendImage(media, mediaId, localized(place, "name", lang), { gallery: true, entityType: "place", entityId: place.place_id, className: "detail-gallery__image", loading: "lazy", sizes: "(min-width: 900px) 33vw, (min-width: 600px) 50vw, 100vw" });
+        button.append(media);
+        button.addEventListener("click", () => openLightbox(mediaId, localized(place, "name", lang), button, place.place_id));
+        grid.append(button);
+      }
+      if (!grid.children.length) return;
+      mount.append(heading("detail-gallery-title", t("place_detail.gallery")), grid);
+      mount.hidden = false;
+    });
   }
 
   function renderNearby(place, lang) {

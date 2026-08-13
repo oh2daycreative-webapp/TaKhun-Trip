@@ -56,6 +56,11 @@ foreach ($page in $otherPages) {
 foreach ($contract in @('parsePlaceId','validatePlaceId','findPublishedPlace','resolvePage','setPageState','encodeURIComponent','TAKHUN_FAVORITES','aria-pressed','navigator\.share','clipboard','AbortError','keydown','Escape','replaceChildren','textContent','takhun:languagechange','document\.title','place_detail\.image_alt')) {
   Assert-Match $controller $contract "Missing Place Detail behavior contract: $contract"
 }
+Assert-Match $controller 'gallery_media_ids' "Place Detail Gallery must consume only the Published ordered media-ID projection."
+Assert-Match $controller 'pictureModelForEntityRole' "Place Detail Gallery must use entity/role-checked media lookup."
+Assert-Match $controller 'gallery:\s*true' "Place Detail Gallery must render through the shared Gallery role."
+Assert-Match $controller 'loading:\s*"lazy"' "Place Detail Gallery images must lazy load."
+if ($controller -match 'gallery_image_urls') { throw "Place Detail must keep legacy gallery_image_urls inert." }
 if ($controller -match '\.innerHTML\s*=') { throw "Dynamic Place Detail rendering must not assign innerHTML." }
 if (($html + $controller) -match 'href\s*=\s*["'']#["'']') { throw "Place Detail actions must not use href=#." }
 Assert-Match $controller 'TakhunReviews\.createController' "Place Detail must mount the isolated Reviews controller."
@@ -83,5 +88,87 @@ if ($data -match 'MOCK-REVIEW-|is_demo:\s*true') { throw "Shared place data must
 
 & node (Join-Path $PSScriptRoot "test-place-detail.js")
 if ($LASTEXITCODE -ne 0) { throw "Place Detail behavior verification failed." }
+
+$galleryBehavior = @'
+"use strict";
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
+const root = process.argv[2];
+const controllerPath = path.join(root, "public/js/place-detail.js");
+const production = fs.readFileSync(controllerPath, "utf8");
+const marker = "  global.TakhunPlaceDetail = Object.freeze";
+assert.notEqual(production.indexOf(marker), -1);
+const source = production.replace(marker, "  global.__renderGallery = renderGallery;\n" + marker);
+function element(tag = "div") {
+  return {
+    tagName: tag.toUpperCase(), children: [], hidden: false, attributes: {}, className: "", textContent: "", type: "",
+    setAttribute(name, value) { this.attributes[name] = String(value); },
+    append(...nodes) { this.children.push(...nodes); },
+    replaceChildren(...nodes) { this.children = [...nodes]; },
+    addEventListener(name, listener) { this.listeners ||= {}; this.listeners[name] = listener; },
+    querySelector() { return null; }
+  };
+}
+const gallery = element("section");
+const checks = [];
+const renders = [];
+const document = {
+  readyState: "loading", addEventListener() {}, createElement: element,
+  querySelector(selector) { return selector === "[data-detail-gallery]" ? gallery : null; }
+};
+const context = {
+  console, URL, URLSearchParams, document, location: { search: "", href: "https://example.test/place-detail.html" },
+  history: {}, navigator: {}, localStorage: {}, addEventListener() {},
+  TakhunI18n: {
+    getCurrentLang() { return "th"; }, t(key) { return key; },
+    pickLangValue(item, field, lang) { return item[`${field}_${lang}`] || item[`${field}_th`] || ""; }
+  },
+  TakhunMedia: {
+    loadManifest() { return Promise.resolve({ version: 1, items: [] }); },
+    pictureModelForEntityRole(mediaId, entityType, entityId, role) {
+      checks.push([mediaId, entityType, entityId, role]);
+      return mediaId === "gallery-valid" && entityType === "place" && entityId === "P-2" && role === "gallery" ? { src: "local" } : null;
+    },
+    renderImage(mount, options) { renders.push(options); const image = element("img"); mount.append(image); return image; }
+  }
+};
+context.window = context;
+vm.runInNewContext(source, context, { filename: controllerPath });
+(async () => {
+  context.__renderGallery({ place_id: "P-2", name_th: "Published Place", gallery_media_ids: ["gallery-valid", "gallery-wrong"] }, "th");
+  await Promise.resolve(); await Promise.resolve();
+  assert.deepEqual(checks, [
+    ["gallery-valid", "place", "P-2", "gallery"],
+    ["gallery-wrong", "place", "P-2", "gallery"]
+  ]);
+  assert.equal(gallery.hidden, false);
+  assert.equal(gallery.children.length, 2);
+  assert.equal(renders.length, 1);
+  assert.equal(renders[0].mediaId, "gallery-valid");
+  assert.equal(renders[0].entityId, "P-2");
+  assert.equal(renders[0].role, "gallery");
+  assert.equal(renders[0].loading, "lazy");
+
+  context.__renderGallery({
+    place_id: "P-2", name_th: "Published Place", gallery_media_ids: [],
+    gallery_image_urls: ["https://legacy.example/private.jpg"], draft_gallery_media_ids: ["gallery-valid"]
+  }, "th");
+  await Promise.resolve();
+  assert.equal(gallery.hidden, true);
+  assert.equal(gallery.children.length, 0);
+  assert.equal(renders.length, 1, "legacy or Draft-only media must not render after Published projection is empty");
+  process.stdout.write("Place Detail Gallery behavioral rendering and isolation verification passed.\n");
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+'@
+$galleryBehaviorPath = Join-Path ([System.IO.Path]::GetTempPath()) ("takhun-place-gallery-{0}.js" -f [guid]::NewGuid().ToString("N"))
+try {
+  [System.IO.File]::WriteAllText($galleryBehaviorPath, $galleryBehavior, [System.Text.UTF8Encoding]::new($false))
+  & node $galleryBehaviorPath $root
+  if ($LASTEXITCODE -ne 0) { throw "Place Detail Gallery behavioral verification failed." }
+} finally {
+  Remove-Item -LiteralPath $galleryBehaviorPath -Force -ErrorAction SilentlyContinue
+}
 
 Write-Host "Place Detail page contract verification passed."
