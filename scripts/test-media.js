@@ -411,6 +411,31 @@ async function run() {
     assert.equal(JSON.stringify(normalized).includes("source_file"), false);
   });
 
+  await test("runtime resolves Gallery media only for the exact entity type identity and role", async () => {
+    const manifest = { version: 1, items: [{
+      media_id: "place-p2-gallery-a", entity_type: "place", entity_id: "P-2", role: "gallery",
+      ratio: "3:2", required: false, alt_th: "Gallery A", alt_en: "Gallery A EN",
+      fallback: "assets/media/placeholders/gallery.svg",
+      outputs: [{ width: 640, height: 427, path: "assets/media/generated/places/place-p2-gallery-a-640.webp" }]
+    }, {
+      media_id: "place-p2-cover", entity_type: "place", entity_id: "P-2", role: "cover",
+      ratio: "3:2", required: true, alt_th: "Cover", alt_en: "Cover",
+      fallback: "assets/media/placeholders/cover.svg",
+      outputs: [{ width: 640, height: 427, path: "assets/media/generated/places/place-p2-cover-640.webp" }]
+    }] };
+    const { api } = loadBrowserMedia({ fetch: async () => ({ ok: true, json: async () => manifest }) });
+    await api.loadManifest();
+    assert.equal(api.pictureModelForEntityRole("place-p2-gallery-a", "place", "P-2", "gallery", "en").alt, "Gallery A EN");
+    for (const args of [
+      ["place-p2-gallery-a", "place", "P-OTHER", "gallery", "th"],
+      ["place-p2-gallery-a", "gallery", "P-2", "gallery", "th"],
+      ["place-p2-gallery-a", "place", "P-2", "cover", "th"],
+      ["place-p2-cover", "place", "P-2", "gallery", "th"],
+      ["unknown-gallery", "place", "P-2", "gallery", "th"]
+    ]) assert.equal(api.pictureModelForEntityRole(...args), null);
+    assert.equal(api.mediaIdFor("place", "P-2"), "place-p-2-cover");
+  });
+
   await test("runtime helper rejects external content and resolves local role placeholders", () => {
     const { api, source } = loadBrowserMedia();
     assert.equal(api.placeholderPath("product"), "assets/media/placeholders/product.svg");
@@ -560,11 +585,11 @@ async function run() {
     assert.equal(disconnected.mount.querySelector("[data-media-runtime]"), initial);
   });
 
-  await test("all 27 HTML pages link the local favicon with correct relative paths", () => {
+  await test("all 28 HTML pages link the local favicon with correct relative paths", () => {
     const htmlFiles = [];
     const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).forEach((entry) => entry.isDirectory() ? walk(path.join(dir, entry.name)) : entry.name.endsWith(".html") && htmlFiles.push(path.join(dir, entry.name)));
     walk(path.join(root, "public"));
-    assert.equal(htmlFiles.length, 27);
+    assert.equal(htmlFiles.length, 28);
     for (const file of htmlFiles) {
       const html = fs.readFileSync(file, "utf8");
       const expected = file.includes(`${path.sep}admin${path.sep}`) ? "../favicon.svg" : "favicon.svg";

@@ -162,6 +162,7 @@ function toPlaceDetail_(row, lang) {
     fee: localizedText_(row, "fee", lang),
     cover_image_url: trimText_(row.cover_image_url),
     gallery_image_urls: splitList_(row.gallery_image_urls),
+    gallery_media_ids: PlaceService_galleryMediaIds_(row.gallery_media_ids),
     video_url: trimText_(row.video_url),
     tags: splitList_(row.tags),
     recommended_duration: trimText_(row.recommended_duration),
@@ -172,6 +173,20 @@ function toPlaceDetail_(row, lang) {
       review_count: 0
     }
   };
+}
+
+function PlaceService_galleryMediaIds_(value) {
+  if (value === undefined || value === null || value === "") return [];
+  if (typeof value !== "string") return [];
+  var parts = value.split("|");
+  if (!parts.length || parts.length > 50 || parts.join("|") !== value) return [];
+  var seen = Object.create(null);
+  for (var index = 0; index < parts.length; index += 1) {
+    var mediaId = parts[index];
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(mediaId) || Object.prototype.hasOwnProperty.call(seen, mediaId)) return [];
+    seen[mediaId] = true;
+  }
+  return parts;
 }
 
 function toMapPlace_(row, lang) {
@@ -296,7 +311,7 @@ function pickParameters_(parameters, allowedKeys) {
 }
 
 function publicCacheKey_(action, parameters) {
-  var parts = ["public", action];
+  var parts = ["public", action, PlaceService_cacheEpochKey_()];
   Object.keys(parameters || {}).sort().forEach(function (key) {
     parts.push(key + "=" + encodeURIComponent(trimText_(parameters[key])));
   });
@@ -305,8 +320,9 @@ function publicCacheKey_(action, parameters) {
 
 function getCachedPublicResponse_(action, parameters, loader) {
   var cache = null;
-  var key = publicCacheKey_(action, parameters);
+  var key = null;
   try {
+    key = publicCacheKey_(action, parameters);
     cache = CacheService.getScriptCache();
     var cached = cache.get(key);
     if (cached) {
@@ -320,12 +336,53 @@ function getCachedPublicResponse_(action, parameters, loader) {
   var response = loader();
   if (response && response.ok === true) {
     try {
-      if (cache) cache.put(key, JSON.stringify(response), PLACE_CACHE_SECONDS_);
+      if (cache && key) cache.put(key, JSON.stringify(response), PLACE_CACHE_SECONDS_);
     } catch (_cacheWriteError) {
       // The uncached response remains valid.
     }
   }
   return response;
+}
+
+function PlaceService_cacheEpoch_() {
+  var properties;
+  var value;
+  try {
+    properties = PropertiesService.getScriptProperties();
+    if (!properties || typeof properties.getProperty !== "function") throw new Error("unavailable");
+    value = properties.getProperty(PLACE_PUBLIC_CACHE_EPOCH_PROPERTY_);
+  } catch (_placeCacheEpochReadError) {
+    throw new Error("PLACE_CACHE_EPOCH_READ");
+  }
+  if (value === null) return 1;
+  return PlaceService_validateCacheEpochValue_(value);
+}
+
+function PlaceService_cacheEpochKey_() {
+  return "place-epoch:" + PlaceService_cacheEpoch_();
+}
+
+function PlaceService_bumpCacheEpoch_() {
+  var current = PlaceService_cacheEpoch_();
+  if (current >= Number.MAX_SAFE_INTEGER) throw new Error("PLACE_CACHE_EPOCH_OVERFLOW");
+  var next = current + 1;
+  var properties;
+  try {
+    properties = PropertiesService.getScriptProperties();
+    if (!properties || typeof properties.setProperty !== "function" || typeof properties.getProperty !== "function") throw new Error("unavailable");
+    properties.setProperty(PLACE_PUBLIC_CACHE_EPOCH_PROPERTY_, String(next));
+    if (properties.getProperty(PLACE_PUBLIC_CACHE_EPOCH_PROPERTY_) !== String(next)) throw new Error("mismatch");
+  } catch (_placeCacheEpochBumpError) {
+    throw new Error("PLACE_CACHE_EPOCH_BUMP");
+  }
+  return next;
+}
+
+function PlaceService_validateCacheEpochValue_(value) {
+  if (typeof value !== "string" || !/^[1-9]\d*$/.test(value)) throw new Error("PLACE_CACHE_EPOCH_INVALID");
+  var epoch = Number(value);
+  if (!Number.isSafeInteger(epoch) || epoch < 1 || String(epoch) !== value) throw new Error("PLACE_CACHE_EPOCH_INVALID");
+  return epoch;
 }
 
 function successResponse_(data) {

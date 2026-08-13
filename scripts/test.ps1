@@ -24,6 +24,7 @@ $required = @(
   "public/admin/login.html",
   "public/admin/dashboard.html",
   "public/admin/places.html",
+  "public/admin/place-edit.html",
   "public/admin/routes.html",
   "public/admin/products.html",
   "public/admin/events.html",
@@ -35,6 +36,7 @@ $required = @(
   "public/css/components.css",
   "public/css/mobile.css",
   "public/css/admin.css",
+  "public/css/admin-places.css",
   "public/css/map.css",
   "public/js/config.js",
   "public/js/api.js",
@@ -49,6 +51,10 @@ $required = @(
   "public/admin/js/admin-api.js",
   "public/admin/js/admin-auth.js",
   "public/admin/js/admin-shell.js",
+  "public/admin/js/admin-places.js",
+  "public/admin/js/admin-place-map.js",
+  "public/admin/js/admin-place-media.js",
+  "public/admin/js/admin-place-edit.js",
   "public/favicon.svg",
   "public/assets/media/placeholders/hero.svg",
   "public/assets/media/placeholders/cover.svg",
@@ -62,6 +68,8 @@ $required = @(
   "apps-script/Router.gs",
   "apps-script/ApiResponse.gs",
   "apps-script/SheetService.gs",
+  "apps-script/AdminPlaceSchema.gs",
+  "apps-script/AdminPlaceService.gs",
   "apps-script/SettingsService.gs",
   "apps-script/CategoryService.gs",
   "apps-script/PlaceService.gs",
@@ -72,6 +80,11 @@ $required = @(
   "apps-script/HomeService.gs"
   "apps-script/ReviewService.gs"
   "apps-script/SearchService.gs"
+  "scripts/test-admin-place-schema.js",
+  "scripts/test-admin-place-service.js",
+  "scripts/test-admin-place-media.js",
+  "scripts/test-admin-places.js",
+  "scripts/test-admin-place-regressions.js"
 )
 
 $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root $_)) })
@@ -151,12 +164,28 @@ if ($LASTEXITCODE -ne 0) { throw "Admin API transport verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin browser auth verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-shell.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin shell verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-places.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Places list verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-places-accessibility.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Places accessibility verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-place-edit.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Place editor verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-place-map.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Place map verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-place-media.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Place media verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-place-regressions.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Place integrated regression verification failed." }
 & node (Join-Path $PSScriptRoot "test-crypto-service.js")
 if ($LASTEXITCODE -ne 0) { throw "CryptoService verification failed." }
 & node (Join-Path $PSScriptRoot "test-auth-service.js")
 if ($LASTEXITCODE -ne 0) { throw "AuthService verification failed." }
 & node (Join-Path $PSScriptRoot "test-sheet-service.js")
 if ($LASTEXITCODE -ne 0) { throw "SheetService verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-place-schema.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Place schema verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-place-service.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Place service verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-schema.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin auth schema verification failed." }
 & node (Join-Path $PSScriptRoot "test-settings-service.js")

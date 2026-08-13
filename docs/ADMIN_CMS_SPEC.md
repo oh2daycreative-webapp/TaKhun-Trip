@@ -368,6 +368,8 @@ adminGetDashboard
 
 ## 9. Manage Places
 
+**M7 note:** the detailed M7 contract is section 30. This older planning section is retained only as historical/general context; its hide/delete, five-status, and legacy CRUD API examples are not the implemented M7 Place behavior.
+
 ### 9.1 File
 
 ```text
@@ -1085,7 +1087,7 @@ Session หมดอายุ กรุณาเข้าสู่ระบบ�
 |---|---|
 | login.html | `adminLogin` |
 | dashboard.html | `adminGetDashboard` |
-| places.html | `adminGetPlaces`, `createPlace`, `updatePlace`, `deletePlace` |
+| places.html / place-edit.html (M7) | `adminGetPlaces`, `adminGetPlaceDetail`, `adminCreatePlace`, `adminSavePlaceDraft`, `adminPublishPlace`, `adminInspectPlaceDependencies`, `adminUnpublishPlace`, `adminArchivePlace`, `adminRestorePlace`, `adminGetPlaceMediaOptions` |
 | routes.html | `adminGetRoutes`, `createRoute`, `updateRoute`, `deleteRoute` |
 | products.html | `adminGetProducts`, `createProduct`, `updateProduct`, `deleteProduct` |
 | events.html | `adminGetEvents`, `createEvent`, `updateEvent`, `deleteEvent` |
@@ -1275,7 +1277,43 @@ Session หมดอายุ กรุณาเข้าสู่ระบบ�
 
 ---
 
-## 30. Final Admin CMS Direction
+## 30. M7 Admin Places authoritative CMS override
+
+This section supersedes older future/MVP Place CRUD, five-status, hide/delete, and generic Gallery-upload wording for the completed M7 Place module. It does not change the lifecycle or future scope of other Admin entities.
+
+### 30.1 Implemented pages, roles, and lifecycle
+
+`admin/places.html` is the responsive Admin Places list and `admin/place-edit.html` is the Create/Edit experience. The list supports search, category/status filters, pagination, default exclusion of archived Places, desktop table/mobile cards, cover projection, lifecycle/derived-state badges, and links to the editor.
+
+The four authoritative roles are `super_admin`, `editor`, `reviewer`, and `viewer`. `super_admin` and `editor` may perform Place writes subject to lifecycle/capability rules. `reviewer` and `viewer` are read-only; reviewers can inspect working and published views where present, while viewer presentation is ordinary read-only detail. The browser removes write controls and renders semantic read-only content rather than a disabled editable form, but every server call independently enforces authorization.
+
+Place status is only `draft`, `published`, and `archived`. Create creates a draft; Save Draft preserves or creates the isolated working draft; Publish promotes that draft; Unpublish changes published to draft; Archive changes draft or published to archived; Restore changes archived to draft and never directly publishes. `published_with_draft`/“Published + Draft Revision” is a derived list display state only.
+
+### 30.2 Editor, version, and conflict UX
+
+The editor supports Thai and English content, fixed categories, immutable server-generated ID display, map coordinates, derived Hero, and ordered Gallery selection. Thai is required for Publish; English remains optional with Public Thai fallback. A published Place's draft is separate from its last published snapshot, so Save Draft never changes Public output.
+
+Dirty state is semantic rather than raw-string comparison: trimmed scalar and URL text, list semantics, numeric meaning, canonical booleans, coordinate numeric semantics, and ordered Gallery IDs. This normalization is comparison-only and must not rewrite what the user typed.
+
+Writes carry `expected_version`. On `CONFLICT`, local input and stale expected version remain while “Keep Editing” is chosen. There is no force-save, automatic retry, or automatic merge. Explicit “Reload Latest” is a read that replaces content, version, and baseline only after the user confirms; it may discard local changes. Save/Publish controls prevent duplicate submission, and unsaved-change warnings clear only after the applicable confirmed save/discard.
+
+### 30.3 Map and media policy
+
+The map picker starts at viewport latitude `8.900000`, longitude `98.800000`, zoom `10`; this is a viewport only, never Place data. It uses at most one marker. Map click/drag coordinates are written with `Number(value).toFixed(6)`. Valid manual coordinate text remains visually as entered while its numeric meaning synchronizes the map; blank or partial values never become `0,0`. There is no geolocation, autosave, or direct Admin API call from the map component; manual inputs are a complete keyboard alternative.
+
+Hero is derived from the approved same-Place `cover` manifest item and cannot be selected. Gallery is 0–50 unique, ordered, same-Place approved manifest items with `role = gallery`; no Gallery upload UI exists. The UI sends `""` or an ordered ID array and the Sheet stores `""` or pipe serialization. It rejects cross-Place media, cover-as-Gallery, duplicates, more than 50 items, arbitrary URLs, and source/filesystem paths. Only the published Gallery projects to Public in exact stored order; drafts never leak and invalid published serialization becomes an empty Gallery.
+
+### 30.4 Archive, accessibility, and responsive behavior
+
+Dependency preview is advisory and lists seven groups: routes, nearby_places, products, events, gallery, trip_templates, and reviews. Archive confirmation is explicit; at execution, the server locks, rereads, and reinspects dependencies. The Archive result displays that fresh safe data. No browser preview/token/hash/count authorizes Archive. Route relationships are `route_places.place_id` → `route_places.route_id` → `routes.route_id`.
+
+The editor has a semantic validation summary and moves focus to the first invalid input. Dialogs contain keyboard focus and restore it on close; bilingual tabs use tablist/tab/tabpanel semantics; relevant controls have 44×44 targets; Gallery selection/order is keyboard-operable; async state is announced through live status. It supports narrow reflow without a forced horizontal page scroll, reduced motion, and desktop/mobile parity. These are implementation requirements, not a claim of formal accessibility certification.
+
+### 30.5 Pending operator work
+
+Tasks 1–18 are implemented locally with automated tests/build. No remote release operation is implied: deployment, Script Property changes, Sheet schema setup, backup, legacy migration dry-run/execution/verification/rollback, staging/production manual QA, production release, branch push, PR, and merge remain human-only and pending.
+
+## 31. Final Admin CMS Direction
 
 Admin / CMS ของ **Takhun Trip** ต้องเป็นระบบที่:
 

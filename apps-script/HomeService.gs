@@ -21,10 +21,11 @@ var HomeService_CONFIG_ = {
 
 function getHomeData_(parameters) {
   var lang = HomeService_language_(parameters && parameters.lang);
-  var cacheKey = "public:getHomeData:lang=" + lang;
+  var cacheKey = null;
   var cache = null;
 
   try {
+    cacheKey = "public:getHomeData:" + PlaceService_cacheEpochKey_() + ":lang=" + lang;
     cache = CacheService.getScriptCache();
     var cached = cache.get(cacheKey);
     if (cached) {
@@ -44,7 +45,7 @@ function getHomeData_(parameters) {
 
   if (!HomeService_validResponse_(response)) return HomeService_serverError_();
   try {
-    if (cache) cache.put(cacheKey, JSON.stringify(response), HomeService_CACHE_SECONDS_);
+    if (cache && cacheKey) cache.put(cacheKey, JSON.stringify(response), HomeService_CACHE_SECONDS_);
   } catch (_homeCacheWriteError) {
     // Return the successful uncached response.
   }

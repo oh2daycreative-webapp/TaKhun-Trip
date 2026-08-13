@@ -135,6 +135,65 @@ function SheetService_updateObjectAtRow_(sheetName, sourceRowNumber, record) {
   });
 }
 
+function SheetService_appendObjectWithRow_(sheetName, requiredHeaders, record) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) {
+    throw new Error("Data append is invalid.");
+  }
+
+  var fields = Object.keys(record);
+  var sheet = SheetService_getSheet_(sheetName);
+  var values = sheet.getDataRange().getValues();
+  if (!values || !values.length || sheet.getLastRow() < 1) {
+    throw new Error("Data headers are not available.");
+  }
+  var headers = SheetService_normalizeHeaders_(values[0]);
+  SheetService_assertUniqueHeaders_(headers, SheetService_validateRequiredHeaders_(requiredHeaders));
+  SheetService_assertUniqueHeaders_(headers, fields);
+
+  var row = headers.map(function (header) {
+    return Object.prototype.hasOwnProperty.call(record, header) ? record[header] : "";
+  });
+  var sourceRowNumber = sheet.getLastRow() + 1;
+  sheet.getRange(sourceRowNumber, 1, 1, headers.length).setValues([row]);
+  return SheetService_rowResult_(headers, sourceRowNumber, row);
+}
+
+function SheetService_replaceObjectAtRow_(sheetName, sourceRowNumber, record) {
+  if (!Number.isSafeInteger(sourceRowNumber) || sourceRowNumber < 2) {
+    throw new Error("Data row number is invalid.");
+  }
+  if (!record || typeof record !== "object" || Array.isArray(record)) {
+    throw new Error("Data replacement is invalid.");
+  }
+
+  var fields = Object.keys(record);
+  if (!fields.length) throw new Error("Data replacement is empty.");
+  var sheet = SheetService_getSheet_(sheetName);
+  if (sourceRowNumber > sheet.getLastRow()) throw new Error("Data row is not available.");
+  var values = sheet.getDataRange().getValues();
+  if (!values || !values.length) throw new Error("Data headers are not available.");
+  var headers = SheetService_normalizeHeaders_(values[0]);
+  var headerMap = SheetService_assertUniqueHeaders_(headers, fields);
+  var row = sheet.getRange(sourceRowNumber, 1, 1, headers.length).getValues()[0];
+  while (row.length < headers.length) row.push("");
+  fields.forEach(function (field) { row[headerMap[field]] = record[field]; });
+  sheet.getRange(sourceRowNumber, 1, 1, headers.length).setValues([row]);
+  return SheetService_rowResult_(headers, sourceRowNumber, row);
+}
+
+function SheetService_clearRow_(sheetName, sourceRowNumber) {
+  if (!Number.isSafeInteger(sourceRowNumber) || sourceRowNumber < 2) {
+    throw new Error("Data row number is invalid.");
+  }
+  var sheet = SheetService_getSheet_(sheetName);
+  if (sourceRowNumber > sheet.getLastRow()) throw new Error("Data row is not available.");
+  var values = sheet.getDataRange().getValues();
+  if (!values || !values.length) throw new Error("Data headers are not available.");
+  var headers = SheetService_normalizeHeaders_(values[0]);
+  SheetService_assertUniqueHeaders_(headers, []);
+  sheet.getRange(sourceRowNumber, 1, 1, headers.length).clearContent();
+}
+
 function SheetService_ensureHeaders_(sheetName, requiredHeaders) {
   var sheet = SheetService_getSheet_(sheetName);
   var required = SheetService_validateRequiredHeaders_(requiredHeaders);
@@ -283,6 +342,12 @@ function SheetService_validateRequiredHeaders_(requiredHeaders) {
     seen[header] = true;
     return header;
   });
+}
+
+function SheetService_rowResult_(headers, sourceRowNumber, row) {
+  var projected = Object.create(null);
+  headers.forEach(function (header, index) { projected[header] = row[index]; });
+  return { sourceRowNumber: sourceRowNumber, values: projected };
 }
 
 function SheetService_isAuthTimestampField_(fieldName) {

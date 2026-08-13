@@ -27,13 +27,16 @@ function data() {
 }
 
 function cache() { const values = new Map(); const puts = []; return { values, puts, get(key) { return values.get(key) || null; }, put(key, value, ttl) { puts.push({ key, value, ttl }); values.set(key, value); } }; }
+function properties(initial = "1") { const values = new Map(); if (initial !== null) values.set("PLACE_PUBLIC_CACHE_EPOCH", initial); return { values, getProperty(key) { return values.has(key) ? values.get(key) : null; } }; }
 function load(options = {}) {
-  const source = data(); const store = options.cache || cache(); const reads = [];
-  const context = { JSON, Object, Math, Number, String, Array, Date, RegExp, encodeURIComponent, isFinite, CacheService: { getScriptCache: () => store }, readSheetObjects_: (name) => { reads.push(name); return source[name]; } };
+  const source = data(); const store = options.cache || cache(); const propertyStore = options.properties || properties(); const reads = [];
+  const context = { JSON, Object, Math, Number, String, Array, Date, RegExp, encodeURIComponent, isFinite, CacheService: { getScriptCache: () => store }, PropertiesService: { getScriptProperties: () => propertyStore }, readSheetObjects_: (name) => { reads.push(name); return source[name]; } };
   vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(root, "apps-script/Config.gs"), "utf8"), context, { filename: "apps-script/Config.gs" });
+  vm.runInContext(fs.readFileSync(path.join(root, "apps-script/PlaceService.gs"), "utf8"), context, { filename: "apps-script/PlaceService.gs" });
   const file = path.join(root, "apps-script/EventService.gs");
   vm.runInContext(fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "", context, { filename: "apps-script/EventService.gs" });
-  return { context, source, store, reads };
+  return { context, source, store, reads, properties: propertyStore };
 }
 function required(context, name) { assert.equal(typeof context[name], "function", `${name} must be implemented by EventService.gs`); return context[name]; }
 function test(name, fn) { try { fn(); process.stdout.write(`PASS ${name}\n`); } catch (error) { process.stderr.write(`FAIL ${name}\n${error.stack}\n`); process.exitCode = 1; } }
@@ -96,6 +99,26 @@ test("event list cache key changes at the local calendar boundary", () => {
   context.getEvents_({ status: "upcoming", lang: "th" });
   assert.deepEqual(reads, ["events", "events"]);
   assert.notEqual(store.puts[0].key, store.puts[1].key);
+});
+
+test("only Event Detail changes namespace with the Place epoch", () => {
+  const propertyStore = properties("1"); const store = cache();
+  const { context, reads } = load({ cache: store, properties: propertyStore });
+  context.EventService_today_ = () => "2026-07-15";
+  context.getEvents_({ status: "all", epoch: "client" });
+  const listReads = reads.length;
+  propertyStore.values.set("PLACE_PUBLIC_CACHE_EPOCH", "2");
+  context.getEvents_({ status: "all" });
+  assert.equal(reads.length, listReads);
+  assert.equal(store.puts[0].key.includes("place-epoch"), false);
+
+  context.getEventDetail_({ event_id: "EV-TODAY" });
+  const detailReads = reads.length;
+  assert.match(store.puts.at(-1).key, /:getEventDetail:place-epoch:2:/);
+  propertyStore.values.set("PLACE_PUBLIC_CACHE_EPOCH", "3");
+  context.getEventDetail_({ event_id: "EV-TODAY" });
+  assert.equal(reads.length, detailReads + 2);
+  assert.match(store.puts.at(-1).key, /:getEventDetail:place-epoch:3:/);
 });
 
 if (process.exitCode) process.exit(process.exitCode);

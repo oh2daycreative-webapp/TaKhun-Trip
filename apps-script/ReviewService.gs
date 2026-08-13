@@ -138,8 +138,9 @@ function ReviewService_publicProjection_(row) {
 
 function ReviewService_cached_(parameters, loader) {
   var cache = null;
-  var key = ReviewService_cacheKey_(parameters);
+  var key = null;
   try {
+    key = ReviewService_cacheKey_(parameters);
     cache = CacheService.getScriptCache();
     var cached = cache.get(key);
     if (cached) {
@@ -151,14 +152,14 @@ function ReviewService_cached_(parameters, loader) {
   }
   var response = loader();
   if (response && response.ok === true) {
-    try { if (cache) cache.put(key, JSON.stringify(response), ReviewService_CACHE_SECONDS_); }
+    try { if (cache && key) cache.put(key, JSON.stringify(response), ReviewService_CACHE_SECONDS_); }
     catch (_reviewCacheWriteError) { /* Return the successful uncached response. */ }
   }
   return response;
 }
 
 function ReviewService_cacheKey_(parameters) {
-  return ["public", "getReviews", "place_id=" + encodeURIComponent(parameters.place_id), "page=" + parameters.page, "page_size=" + parameters.page_size].join(":");
+  return ["public", "getReviews", PlaceService_cacheEpochKey_(), "place_id=" + encodeURIComponent(parameters.place_id), "page=" + parameters.page, "page_size=" + parameters.page_size].join(":");
 }
 
 function ReviewService_timestampValue_(value) {

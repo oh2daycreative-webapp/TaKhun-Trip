@@ -36,9 +36,27 @@ for (const { name, source } of sources) {
   }
 }
 
-const postActions = ["submitReview", "adminLogin", "adminValidateSession", "adminLogout"];
+const postActions = [
+  "submitReview", "adminLogin", "adminValidateSession", "adminLogout",
+  "adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace",
+  "adminInspectPlaceDependencies", "adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace",
+  "adminGetPlaceMediaOptions"
+];
 
 function assertStaticPostActionAllowlist(source) {
+  for (const pattern of [
+    /(?:\/(?:\\\/|[^/\r\n])+\/[dgimsuvy]*|[A-Za-z_$][\w$]*)\s*\.\s*test\s*\(\s*(?:action|body\s*\.\s*action)\s*\)/,
+    /(?:action|body\s*\.\s*action)\s*\.\s*(?:startsWith|endsWith|includes|match|search)\s*\(/,
+    /(?:\[[^\]\r\n]*\]|[A-Za-z_$][\w$]*)\s*\.\s*(?:includes|indexOf|some|find)\s*\(\s*(?:action|body\s*\.\s*action)\b/,
+    /\bif\s*\(\s*!?\s*[A-Za-z_$][\w$]*\s*\(\s*(?:action|body\s*\.\s*action)\s*(?:,|\))/
+  ]) {
+    assert.doesNotMatch(source, pattern, "Router must use only exact literal action equality branches");
+  }
+  assert.doesNotMatch(
+    source,
+    /\b[A-Za-z_$][\w$]*\s*\[\s*(?:action|body\s*\.\s*action)\s*\]\s*\(/,
+    "Router must use static action branches"
+  );
   const dispatchSource = source.replace(
     /\btypeof\s+(?:action|body\s*\.\s*action)\s*===\s*"[^"]+"/g,
     ""
@@ -72,6 +90,10 @@ assert.throws(
 );
 assert.doesNotThrow(() => assertStaticPostActionAllowlist(`${router}\nif (typeof body.action === "string") validateActionType_();`));
 assert.doesNotThrow(() => assertStaticPostActionAllowlist(`${router}\nif (unrelatedField === "unrelated-value") keepUnrelated_();`));
+assert.throws(
+  () => assertStaticPostActionAllowlist(`${router}\nhandlers[action](body.payload);`),
+  /Router must use static action branches/
+);
 assert.match(router, /createJsonResponse_\(/);
 assert.match(router, /UNKNOWN_ACTION/);
 assert.match(router, /SERVER_ERROR/);
@@ -110,10 +132,52 @@ function createRouterRuntime({ routerSource = router, json = JSON } = {}) {
       return { ok: true, data: { action } };
     };
   }
+  for (const action of ["adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace", "adminInspectPlaceDependencies", "adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace", "adminGetPlaceMediaOptions"]) {
+    context[`${action}_`] = (...args) => {
+      calls.push({ action, args });
+      return { ok: true, data: { action } };
+    };
+  }
   vm.createContext(context);
   vm.runInContext(apiResponse, context, { filename: "apps-script/ApiResponse.gs" });
   vm.runInContext(routerSource, context, { filename: "apps-script/Router.gs" });
   return { context, calls };
+}
+
+// Admin Place actions forward only the body token and payload, never query/header authority.
+for (const action of ["adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace", "adminInspectPlaceDependencies", "adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace", "adminGetPlaceMediaOptions"]) {
+  const runtime = createRouterRuntime();
+  const token = "BODY_TOKEN";
+  const payload = action === "adminGetPlaces" ? { status: "draft" } :
+    action === "adminGetPlaceDetail" ? { place_id: "P-1", view: "working" } :
+      action === "adminCreatePlace" ? { content: { marker: "create" } } :
+        action === "adminSavePlaceDraft" ? { place_id: "P-1", expected_version: 3, content: { marker: "save" } } :
+          action === "adminPublishPlace" || action === "adminUnpublishPlace" || action === "adminRestorePlace" ?
+            { place_id: "P-1", expected_version: 3 } :
+            action === "adminArchivePlace" ? { place_id: "P-1", expected_version: 3, confirmed: true } :
+      { place_id: "P-1" };
+  assert.deepEqual(post(runtime, { action, token, payload }, {
+    parameter: { action: "adminLogout", token: "QUERY_TOKEN", payload: "QUERY_PAYLOAD" },
+    headers: { Authorization: "Bearer HEADER_TOKEN" }, token: "EVENT_TOKEN", payload: "EVENT_PAYLOAD"
+  }), { ok: true, data: { action } });
+  assert.deepEqual(runtime.calls, [{ action, args: [token, payload] }]);
+}
+
+// Removing the Task 14 branch reconstructs the committed pre-Task-14 thirteen-action
+// Router and must fail the current exact fourteen-action contract.
+{
+  const preTask14 = router.replace(/^\s*if \(action === "adminGetPlaceMediaOptions"\).*\r?\n/m, "");
+  assert.throws(() => assertStaticPostActionAllowlist(preTask14), /Router POST action comparisons must be exactly the approved allowlist/);
+}
+
+// Removing the Task 9 branches reconstructs the committed pre-Task-9 ten-action
+// Router and must fail the current exact thirteen-action contract.
+{
+  const preTask9 = router
+    .replace(/^\s*if \(action === "adminUnpublishPlace"\).*\r?\n/m, "")
+    .replace(/^\s*if \(action === "adminArchivePlace"\).*\r?\n/m, "")
+    .replace(/^\s*if \(action === "adminRestorePlace"\).*\r?\n/m, "");
+  assert.throws(() => assertStaticPostActionAllowlist(preTask9), /Router POST action comparisons must be exactly the approved allowlist/);
 }
 
 function response(output) {
@@ -165,7 +229,7 @@ function assertSafeError(output, code) {
   assert.equal("data" in output, false);
 }
 
-// The direct-body mutation is a real fifth dispatch path, and the static allowlist rejects its source.
+// The direct-body mutation is a real additional dispatch path, and the static allowlist rejects its source.
 {
   const directBodyMutation = router.replace(
     '        if (action === "adminLogout") return createJsonResponse_(adminLogout_(body.token));',
@@ -184,6 +248,40 @@ function assertSafeError(output, code) {
   assert.throws(
     () => assertStaticPostActionAllowlist(directBodyMutation),
     /Router POST action comparisons must be exactly the approved allowlist/
+  );
+}
+
+// Every broad/helper-gated mutation is executable, admits a ninth action, and must be rejected structurally.
+for (const [label, branch, helper] of [
+  ["regex test", '        if (/^adminFuture$/.test(action)) return createJsonResponse_(adminFuture_(body.payload));', ""],
+  ["prefix test", '        if (action.startsWith("adminFuture")) return createJsonResponse_(adminFuture_(body.payload));', ""],
+  [
+    "allowlist includes",
+    '        if (allowedActions.includes(action)) return createJsonResponse_(adminFuture_(body.payload));',
+    '\nvar allowedActions = ["adminFuture"];\n'
+  ],
+  [
+    "helper gate",
+    '        if (isFutureAction_(action)) return createJsonResponse_(adminFuture_(body.payload));',
+    '\nfunction isFutureAction_(candidate) { return candidate === "adminFuture"; }\n'
+  ]
+]) {
+  const mutation = router.replace(
+    '        if (action === "adminSavePlaceDraft") return createJsonResponse_(adminSavePlaceDraft_(body.token, body.payload));',
+    '        if (action === "adminSavePlaceDraft") return createJsonResponse_(adminSavePlaceDraft_(body.token, body.payload));\n' + branch
+  ) + helper;
+  assert.notEqual(mutation, router, `${label} mutation target must match production Router source`);
+  const runtime = createRouterRuntime({ routerSource: mutation });
+  runtime.context.adminFuture_ = (...args) => {
+    runtime.calls.push({ action: "adminFuture", args });
+    return { ok: true, data: { action: "adminFuture" } };
+  };
+  const payload = { sentinel: label };
+  assert.deepEqual(post(runtime, { action: "adminFuture", payload }), { ok: true, data: { action: "adminFuture" } });
+  assert.deepEqual(runtime.calls, [{ action: "adminFuture", args: [payload] }]);
+  assert.throws(
+    () => assertStaticPostActionAllowlist(mutation),
+    /Router must use only exact literal action equality branches/
   );
 }
 
@@ -215,7 +313,7 @@ function assertSafeError(output, code) {
   assert.equal(runtime.calls.length, 0);
 }
 
-// Each permitted POST action reaches exactly one bounded service argument from the JSON body.
+// Each pre-Task-3 POST action reaches exactly one bounded service argument from the JSON body.
 {
   const runtime = createRouterRuntime();
   const loginPayload = { username: "  MiXeD_User  ", password: "\tP@ss Word  \n" };
@@ -407,7 +505,7 @@ for (const action of publicGetActions) {
 }
 
 // GET and query values cannot activate Admin actions or deliver URL/header tokens.
-for (const action of ["adminLogin", "adminValidateSession", "adminLogout"]) {
+for (const action of ["adminLogin", "adminValidateSession", "adminLogout", "adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace", "adminInspectPlaceDependencies", "adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace", "adminGetPlaceMediaOptions"]) {
   for (const parameter of [
     { action, token: "T".repeat(43) },
     { method: action, token: "T".repeat(43) },
@@ -433,7 +531,7 @@ for (const editorOnlyName of ["setupAdminAuthSchema", "benchmarkAdminPbkdf2", "b
 }
 
 // Every Admin exception is converted to the existing fixed server-safe envelope with no leak.
-for (const action of ["adminLogin", "adminValidateSession", "adminLogout"]) {
+for (const action of ["adminLogin", "adminValidateSession", "adminLogout", "adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace", "adminInspectPlaceDependencies", "adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace", "adminGetPlaceMediaOptions"]) {
   for (const thrown of [
     new Error("ordinary failure"),
     "string failure",
@@ -446,7 +544,7 @@ for (const action of ["adminLogin", "adminValidateSession", "adminLogout"]) {
     runtime.context[`${action}_`] = () => { throw thrown; };
     const body = action === "adminLogin"
       ? { action, payload: { username: "operator", password: "SENTINEL_PASSWORD_DO_NOT_LOG" } }
-      : { action, token: "SENTINEL_RAW_TOKEN_DO_NOT_LOG" };
+      : { action, token: "SENTINEL_RAW_TOKEN_DO_NOT_LOG", payload: {} };
     const output = post(runtime, body);
     assert.deepEqual(output, safeServerError);
     for (const secret of ["SENTINEL_PASSWORD_DO_NOT_LOG", "SENTINEL_RAW_TOKEN_DO_NOT_LOG", "ordinary failure", "string failure", "object failure", "spreadsheetId", "internal Sheet", "stack"]) {
@@ -463,6 +561,10 @@ for (const action of ["submitReview", "getGallery", "searchAll"]) {
     ? post(runtime, { action, payload: {} })
     : response(runtime.context.routeRequest_("GET", { parameter: { action } }));
   assert.deepEqual(output, safeServerError);
+}
+
+for (const migration of ["setupAdminPlaceSchema", "inspectAdminPlaceStatusMigration", "migrateAdminPlaceLegacyStatuses", "verifyAdminPlaceStatusMigration"]) {
+  assert.doesNotMatch(router, new RegExp(`\\b${migration}\\b`), `Task 18 keeps ${migration} operator-only and non-routed`);
 }
 
 if (process.exitCode) process.exit(process.exitCode);

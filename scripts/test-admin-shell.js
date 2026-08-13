@@ -14,6 +14,7 @@ const css = fs.readFileSync(path.join(root, "public/css/admin.css"), "utf8");
 const pageFixtures = [
   ["dashboard", "ภาพรวมระบบ"],
   ["places", "จัดการสถานที่"],
+  ["place-edit", "เพิ่มหรือแก้ไขสถานที่"],
   ["routes", "จัดการเส้นทาง"],
   ["products", "จัดการสินค้าและบริการ"],
   ["events", "จัดการกิจกรรม"],
@@ -22,7 +23,7 @@ const pageFixtures = [
   ["settings", "ตั้งค่าระบบ"],
   ["404", "404 — ไม่พบหน้า Admin"]
 ];
-const normalPageKeys = pageFixtures.slice(0, -1).map(([key]) => key);
+const normalPageKeys = pageFixtures.slice(0, -1).map(([key]) => key).filter((key) => key !== "place-edit");
 const tests = [];
 
 function test(name, fn) {
@@ -295,7 +296,7 @@ test("all protected pages declare the source guard and one semantic shared shell
     assert.equal(occurrences(html, /<a class="admin-skip-link"/g), 1, `${key}: skip link`);
     assert.match(html, /class="admin-skip-link"[^>]+href="#admin-main"[^>]+data-admin-skip[^>]+hidden/);
     assert.equal(occurrences(html, /<header\b/g), 1, `${key}: header`);
-    assert.equal(occurrences(html, /<nav\b/g), 1, `${key}: nav`);
+    assert.equal(occurrences(html, /<nav\b/g), key === "places" ? 2 : 1, `${key}: nav`);
     assert.equal(occurrences(html, /<main\b/g), 1, `${key}: main`);
     assert.equal(occurrences(html, /<h1\b/g), 1, `${key}: h1`);
     assert.match(html, new RegExp(`<h1 id="page-title" data-admin-page-title>${heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</h1>`));
@@ -321,7 +322,16 @@ test("all protected pages load exact dependencies in safe order and explicitly i
     const positions = ordered.map((src) => html.indexOf(`<script src="${src}" defer></script>`));
     assert.equal(positions.every((position) => position >= 0), true, `${key}: missing dependency`);
     assert.equal(positions.every((position, index) => index === 0 || positions[index - 1] < position), true, `${key}: script order`);
-    assert.equal(occurrences(html, /TakhunAdminShell\.init\(\)/g), 1, `${key}: init invocation`);
+    if (key === "places" || key === "place-edit") {
+      const controller = key === "places" ? "admin-places" : "admin-place-edit";
+      const initializer = key === "places" ? "TakhunAdminPlaces" : "TakhunAdminPlaceEdit";
+      const controllerPosition = html.indexOf(`<script src="js/${controller}.js" defer></script>`);
+      assert.equal(controllerPosition > positions[positions.length - 1], true, `${key}: controller dependency`);
+      assert.equal(occurrences(html, new RegExp(`${initializer}\\.init\\(\\)`, "g")), 1, `${key}: controller init invocation`);
+      assert.equal(occurrences(html, /TakhunAdminShell\.init\(\)/g), 0, `${key}: shell init is controller-owned`);
+    } else {
+      assert.equal(occurrences(html, /TakhunAdminShell\.init\(\)/g), 1, `${key}: init invocation`);
+    }
     assert.equal(html.indexOf("admin-auth-pending") < positions[0], true, `${key}: guard must precede scripts`);
   }
 });
@@ -330,6 +340,7 @@ test("protected placeholders retain Milestone intent without metrics CRUD modera
   const forbidden = /(?:metric|analytics|chart|<table\b|<form\b|data-admin-(?:count|create|edit|delete|publish|upload)|เพิ่ม|แก้ไข|ลบ|เผยแพร่|อัปโหลด|อนุมัติรีวิว|จัดการบทบาท|language-switch)/i;
   for (const [key] of pageFixtures) {
     const html = htmlFor(key);
+    if (key === "places" || key === "place-edit") continue;
     assert.match(html, /class="placeholder"/);
     if (key !== "404") assert.match(html, /หน้านี้อยู่ระหว่างการจัดเตรียม/);
     else assert.match(html, /ไม่พบหน้า Admin/);

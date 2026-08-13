@@ -49,15 +49,23 @@ function createCache(options = {}) {
   };
 }
 
+function createProperties(initial = "1") {
+  const values = new Map();
+  if (initial !== null) values.set("PLACE_PUBLIC_CACHE_EPOCH", initial);
+  return { values, getProperty(key) { return values.has(key) ? values.get(key) : null; } };
+}
+
 function load(options = {}) {
   const rows = clone(options.rows || baseRows());
   const cache = options.cache || createCache();
+  const properties = options.properties || createProperties();
   const reads = [];
   const builderCalls = [];
   const context = {
     JSON, Object, Math, Number, String, Array, Date, RegExp,
     encodeURIComponent, decodeURIComponent, isFinite,
     CacheService: { getScriptCache: () => { if (options.throwCacheService) throw new Error("cache unavailable"); return cache; } },
+    PropertiesService: { getScriptProperties: () => properties },
     readSheetObjects_: (name) => {
       reads.push(name);
       if (options.failRead === name) throw new Error(`source failed: ${name}`);
@@ -65,6 +73,7 @@ function load(options = {}) {
     }
   };
   vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(root, "apps-script", "Config.gs"), "utf8"), context, { filename: "apps-script/Config.gs" });
   serviceFiles.forEach((name) => vm.runInContext(fs.readFileSync(path.join(root, "apps-script", name), "utf8"), context, { filename: `apps-script/${name}` }));
   ["buildPlacesResponse_", "RouteService_buildRoutesResponse_", "ProductService_buildProductsResponse_", "EventService_buildEventsResponse_"].forEach((name) => {
     const original = context[name];
@@ -77,7 +86,7 @@ function load(options = {}) {
   });
   ["getPlaces_", "getRoutes_", "getProducts_", "getEvents_"].forEach((name) => { context[name] = () => { throw new Error(`Search must not call cached endpoint ${name}`); }; });
   if (fs.existsSync(searchFile)) vm.runInContext(fs.readFileSync(searchFile, "utf8"), context, { filename: "apps-script/SearchService.gs" });
-  return { context, rows, cache, reads, builderCalls };
+  return { context, rows, cache, reads, builderCalls, properties };
 }
 
 function required(context, name = "searchAll_") {
@@ -134,10 +143,10 @@ test("NFC whitespace lowercase and effective language produce canonical cache ke
   const decomposed = "Cafe\u0301   NEEDLE";
   const first = load({ rows: { places: [], products: [], events: [], routes: [] } });
   required(first.context)({ keyword: `  ${decomposed} `, lang: "unknown", ignored: "x" });
-  assert.equal(first.cache.gets[0], "public:searchAll:keyword=caf%C3%A9%20needle:lang=th");
+  assert.equal(first.cache.gets[0], "public:searchAll:place-epoch:1:keyword=caf%C3%A9%20needle:lang=th");
   const second = load({ rows: { places: [], products: [], events: [], routes: [] } });
   required(second.context)({ keyword: "CAFÉ NEEDLE", lang: "en", domain: "gallery" });
-  assert.equal(second.cache.gets[0], "public:searchAll:keyword=caf%C3%A9%20needle:lang=en");
+  assert.equal(second.cache.gets[0], "public:searchAll:place-epoch:1:keyword=caf%C3%A9%20needle:lang=en");
   assert.deepEqual(second.builderCalls.map((call) => call.parameters.lang), ["en", "en", "en", "en"]);
 });
 
@@ -236,7 +245,7 @@ test("cache hit miss exact validation TTL failures and errors follow contract", 
     JSON.stringify({ ok: true, data: { places: [], products: [], events: [], routes: [], total: "0" }, message: "success" })
   ];
   invalidVariants.forEach((cached) => {
-    const cache = createCache(); cache.values.set("public:searchAll:keyword=needle:lang=th", cached);
+    const cache = createCache(); cache.values.set("public:searchAll:place-epoch:1:keyword=needle:lang=th", cached);
     const recovery = load({ cache, rows: { places: [], products: [], events: [], routes: [] } });
     assertExactSuccess(plain(required(recovery.context)({ keyword: "needle" }))); assert.equal(recovery.reads.length, 4); assert.equal(cache.puts.length, 1);
   });
@@ -245,6 +254,20 @@ test("cache hit miss exact validation TTL failures and errors follow contract", 
   const unavailable = load({ throwCacheService: true, rows: { places: [], products: [], events: [], routes: [] } });
   assertExactSuccess(plain(required(unavailable.context)({ keyword: "needle" }))); assert.equal(unavailable.reads.length, 4);
   const error = load({ failRead: "places" }); required(error.context)({ keyword: "needle" }); assert.equal(error.cache.puts.length, 0);
+});
+
+test("Search cache becomes unreachable after the Place epoch changes", () => {
+  const properties = createProperties("1");
+  const loaded = load({ properties });
+  const first = plain(required(loaded.context)({ keyword: "place", lang: "en", epoch: "client" }));
+  const reads = loaded.reads.length;
+  assert.deepEqual(plain(required(loaded.context)({ keyword: "place", lang: "en" })), first);
+  assert.equal(loaded.reads.length, reads);
+  properties.values.set("PLACE_PUBLIC_CACHE_EPOCH", "2");
+  assert.deepEqual(plain(required(loaded.context)({ keyword: "place", lang: "en" })), first);
+  assert.equal(loaded.reads.length, reads * 2);
+  assert.match(loaded.cache.puts.at(-1).key, /^public:searchAll:place-epoch:2:/);
+  assert.equal(JSON.stringify(first).includes("epoch"), false);
 });
 
 if (process.exitCode) process.exit(process.exitCode);

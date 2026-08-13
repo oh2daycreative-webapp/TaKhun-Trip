@@ -58,6 +58,16 @@ function routeRequest_(method, event) {
         if (action === "adminLogin") return createJsonResponse_(adminLogin_(body.payload));
         if (action === "adminValidateSession") return createJsonResponse_(adminValidateSession_(body.token));
         if (action === "adminLogout") return createJsonResponse_(adminLogout_(body.token));
+        if (action === "adminGetPlaces") return createJsonResponse_(adminGetPlaces_(body.token, body.payload));
+        if (action === "adminGetPlaceDetail") return createJsonResponse_(adminGetPlaceDetail_(body.token, body.payload));
+        if (action === "adminCreatePlace") return createJsonResponse_(adminCreatePlace_(body.token, body.payload));
+        if (action === "adminSavePlaceDraft") return createJsonResponse_(adminSavePlaceDraft_(body.token, body.payload));
+        if (action === "adminPublishPlace") return createJsonResponse_(adminPublishPlace_(body.token, body.payload));
+        if (action === "adminInspectPlaceDependencies") return createJsonResponse_(adminInspectPlaceDependencies_(body.token, body.payload));
+        if (action === "adminUnpublishPlace") return createJsonResponse_(adminUnpublishPlace_(body.token, body.payload));
+        if (action === "adminArchivePlace") return createJsonResponse_(adminArchivePlace_(body.token, body.payload));
+        if (action === "adminRestorePlace") return createJsonResponse_(adminRestorePlace_(body.token, body.payload));
+        if (action === "adminGetPlaceMediaOptions") return createJsonResponse_(adminGetPlaceMediaOptions_(body.token, body.payload));
       }
     }
 

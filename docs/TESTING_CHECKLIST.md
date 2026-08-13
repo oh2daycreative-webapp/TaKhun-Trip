@@ -1086,3 +1086,39 @@ During controlled recovery, manually delete any remaining `ADMIN_BOOTSTRAP_USERN
 During Tasks 1-11, an agent must not access Apps Script remotely, open or edit a remote Apps Script project, read or modify Google Sheets, read or modify Script Properties, create or read credentials, create `ADMIN_AUTH_RANDOM_KEY`, run `setupAdminAuthSchema()`, run `benchmarkAdminPbkdf2()`, run `bootstrapFirstAdmin()`, deploy backend or frontend, send staging requests, push, or create a pull request.
 
 Task 12 and Gates A-L are **HUMAN-ONLY** operations after Tasks 1-11 implementation and review are approved. Documentation of a future operation is not authorization to perform it.
+
+## 28. M7 Admin Places local regression checklist
+
+Run the focused Admin Place suites plus the full repository regression and build; do not rely on volatile test counts. Focused suites cover schema/migration controls, service lifecycle/authorization/concurrency/audit behavior, list/editor/map/media behavior, accessibility, and integrated M7 regressions.
+
+- [ ] Exact M7 Place Router actions remain `adminGetPlaces`, `adminGetPlaceDetail`, `adminCreatePlace`, `adminSavePlaceDraft`, `adminPublishPlace`, `adminInspectPlaceDependencies`, `adminUnpublishPlace`, `adminArchivePlace`, `adminRestorePlace`, and `adminGetPlaceMediaOptions`; no legacy alias, dynamic dispatch, or unrelated global action is admitted by this Place-specific set.
+- [ ] All four roles: `super_admin`/`editor` can write only when lifecycle permits; fabricated reviewer/viewer writes return `FORBIDDEN`; server authorization is independent of visible controls.
+- [ ] Create → draft, Draft Save, Publish, Unpublish → draft, Archive from draft/published → archived, Restore → draft only; `published_with_draft` is display-only.
+- [ ] New Draft and published-working Draft isolation: Public Places, Detail, Map, Home, Search, Route Detail, Trip Templates, Product Detail, Event Detail, and Reviews retain published data until Publish; drafts, unpublished, and archived content do not leak.
+- [ ] `expected_version` stale writes return `CONFLICT`, write nothing, and create no success audit; no force save, automatic retry, or auto merge. Conflict UI keeps edits and reloads latest only by explicit action.
+- [ ] Dependency preview lists routes, nearby_places, products, events, gallery, trip_templates, and reviews, while Archive recomputes under lock and returns fresh execution-time safe dependencies. Verify the route relationship through `route_places`, never `routes.place_ids`.
+- [ ] Gallery rejects cross-Place, cover-role, duplicate, over-50, URL, and source-path selections; published ordered Gallery projects correctly; draft Gallery never reaches Public.
+- [ ] Epoch lifecycle matrix: no bump for Draft Save, media-options read, draft Archive, Restore; bump for Publish, Unpublish, published Archive; failed epoch-changing transactions restore the prior epoch.
+- [ ] Safe return accepts only `place-edit.html` or exactly one canonical `place_id`; reject historical edit query, extra/duplicate query, fragment, traversal, external/credential/auth-material input and fall back to `places.html`.
+- [ ] Migration functions are non-routed and never execute during normal requests. Test dry-run/operator controls, deterministic legacy mapping, verification, and rollback gates without mutating a real Sheet.
+- [ ] Accessibility regression: semantic validation summary/first-invalid focus, dialog keyboard containment/focus return, bilingual tabs, read-only semantic views, 44×44 targets, manual map alternative, keyboard Gallery ordering, live status, reduced motion, and mobile/desktop parity.
+
+Required local commands:
+
+```text
+node scripts/test-admin-place-schema.js
+node scripts/test-admin-place-service.js
+node scripts/test-admin-places.js
+node scripts/test-admin-place-edit.js
+node scripts/test-admin-place-map.js
+node scripts/test-admin-place-media.js
+node scripts/test-admin-places-accessibility.js
+node scripts/test-admin-place-regressions.js
+npm test
+npm run build
+git diff --check
+```
+
+## 29. M7 human-only release gates
+
+Local implementation/test/build completion does not perform remote work. The following remain pending human operations: `clasp push`; Apps Script deployment; Script Property setup/change; production or staging Sheet backup/schema setup; legacy migration dry-run, execution, verification, and rollback exercise; staging/production manual QA; production release; branch push; PR; and merge. Do not mark any as complete without recorded human evidence.

@@ -1194,7 +1194,23 @@ private keys
 
 ---
 
-## 36. Final Development Direction
+## 36. M7 Admin Places engineering rules
+
+M7 Place work is a dedicated Admin boundary, not generic CMS infrastructure. Public Place APIs remain read-only and Public projections expose only published Place content. The Place lifecycle is exactly `draft`, `published`, and `archived`; this Place-specific rule does not redefine global legacy statuses for other entities. Never persist `published_with_draft`.
+
+Use the explicit Place Router actions and explicit `TakhunAdminApi` façade methods only; do not add generic action dispatch, legacy `createPlace`/`updatePlace`/`deletePlace` aliases, GET writes, query tokens, cookies, or `Authorization` headers. Client transport is POST JSON in a `text/plain;charset=utf-8` body, one fetch, 12-second timeout, no retry, and strict safe response validation. Server authorization and role checks remain authoritative for `super_admin`, `editor`, `reviewer`, and `viewer`.
+
+For Place writes, treat IDs, lifecycle status, timestamps, actors, versions, and audits as server controlled. Use `expected_version` under the script lock; return safe `CONFLICT` on staleness. Never add force overwrite, automatic merge, automatic retry, polling, or a client-owned dependency authorization mechanism. Archive must reinvestigate the seven dependency groups under lock; a preview is advisory only. Every successful write must create the verified M7 audit and failures must use the action-specific verified compensation path.
+
+Do not conflate draft and published data. `places` owns identity/lifecycle/server metadata and the last published snapshot; `place_drafts` contains zero or one active working revision. Draft saves do not change Public content. Respect `PLACE_PUBLIC_CACHE_EPOCH`: Publish, Unpublish, and published Archive bump it; Save Draft, media-option reads, draft Archive, and Restore do not; failed epoch-changing work restores the prior value.
+
+Media is manifest-backed only. Hero is derived from a same-Place `cover`; Gallery contains 0–50 unique, ordered same-Place approved `gallery` IDs. Do not build uploads, accept URL/source-path media, or revive `gallery_image_urls`. Map components do not geolocate, autosave, or call Admin APIs; their default viewport is not data and map-originated values use six decimals.
+
+For editor changes, preserve raw input while using semantic dirty comparison. Keep local edits on `CONFLICT`; Reload Latest is explicit and replaces baseline/content/version after confirmation. Preserve the M7 accessibility contract: validation summary/first-invalid focus, dialog containment/focus return, accessible language tabs, semantic read-only views, 44×44 targets, keyboard media operations, live status, manual map input, reduced motion, and narrow reflow.
+
+Schema setup/migration and deployment are operator-only. Do not route or invoke migration during requests. A human must back up, dry-run, verify, migrate, verify/rollback, then separately perform staged deployment and QA. No credential, property value, private endpoint, source media path, or production identifier belongs in committed docs/source.
+
+## 37. Final Development Direction
 
 การพัฒนา **Takhun Trip** ต้องยึดหลัก:
 

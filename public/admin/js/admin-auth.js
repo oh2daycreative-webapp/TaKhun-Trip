@@ -4,9 +4,12 @@
   const STORAGE_KEY = "TAKHUN_ADMIN_SESSION";
   const DEFAULT_RETURN = "dashboard.html";
   const LOGIN_PAGE = "login.html";
+  const PLACE_EDIT_PAGE = "place-edit.html";
+  const PLACE_EDIT_FALLBACK = "places.html";
   const ALLOWED_RETURN_PAGES = Object.freeze([
     "dashboard.html",
     "places.html",
+    PLACE_EDIT_PAGE,
     "routes.html",
     "products.html",
     "events.html",
@@ -20,7 +23,9 @@
   const USERNAME_PATTERN = /^[a-z0-9][a-z0-9._-]{2,63}$/;
   const TOKEN_PATTERN = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
   const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+  const PLACE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
   const TRANSIENT_CODES = Object.freeze(["TIMEOUT", "NETWORK_ERROR", "HTTP_ERROR", "MALFORMED_RESPONSE", "SERVER_ERROR"]);
+  const APPLICATION_CODES = Object.freeze(["NOT_FOUND", "CONFLICT"]);
   const AUTH_INVALID_CODES = Object.freeze(["UNAUTHORIZED", "VALIDATION_ERROR", "FORBIDDEN"]);
   const SAFE_API_CODES = Object.freeze([
     "CONFIG_ERROR",
@@ -32,7 +37,9 @@
     "TIMEOUT",
     "NETWORK_ERROR",
     "HTTP_ERROR",
-    "MALFORMED_RESPONSE"
+    "MALFORMED_RESPONSE",
+    "NOT_FOUND",
+    "CONFLICT"
   ]);
   let validationGeneration = 0;
 
@@ -209,25 +216,51 @@
     return /(?:^|[?&#;])[^=&#;]*(?:token|password|passwd|credential|session|auth|username)[^=&#;]*(?:=|$)/i.test(decoded);
   }
 
+  function targetBasename(target) {
+    const slash = target.pathname.lastIndexOf("/");
+    return target.pathname.slice(slash + 1);
+  }
+
+  function candidateTargetsPlaceEdit(candidate) {
+    if (typeof candidate !== "string") return false;
+    return /(?:^|[\/\\])place-edit\.html(?:$|[?#\/\\%]|[\u0000-\u0020])/.test(candidate.trim());
+  }
+
+  function safePlaceEditReturn(target) {
+    const suffix = target.href.slice(target.origin.length + target.pathname.length);
+    if (suffix.includes("#")) return null;
+    if (!suffix) return PLACE_EDIT_PAGE;
+    if (!suffix.startsWith("?") || suffix.length === 1 || suffix.includes("&")) return null;
+    const entries = Array.from(target.searchParams.entries());
+    if (entries.length !== 1 || entries[0][0] !== "place_id") return null;
+    const placeId = entries[0][1];
+    if (!PLACE_ID_PATTERN.test(placeId)) return null;
+    return `${PLACE_EDIT_PAGE}?place_id=${encodeURIComponent(placeId)}`;
+  }
+
   function safeReturnPath(candidate) {
-    if (typeof candidate !== "string" || !candidate || candidate !== candidate.trim()) return DEFAULT_RETURN;
-    if (candidate.startsWith("//") || decodedCandidateIsUnsafe(candidate)) return DEFAULT_RETURN;
+    const intendedFallback = candidateTargetsPlaceEdit(candidate) ? PLACE_EDIT_FALLBACK : DEFAULT_RETURN;
+    if (typeof candidate !== "string" || !candidate || candidate !== candidate.trim()) return intendedFallback;
     let current;
     let target;
     try {
       current = new URL(global.location.href);
       target = new URL(candidate, current);
     } catch (_urlError) {
-      return DEFAULT_RETURN;
+      return intendedFallback;
     }
-    if (target.origin !== current.origin || target.username || target.password) return DEFAULT_RETURN;
-    if (target.protocol !== "https:" && target.protocol !== "http:") return DEFAULT_RETURN;
+    const fallback = intendedFallback === PLACE_EDIT_FALLBACK || targetBasename(target) === PLACE_EDIT_PAGE ?
+      PLACE_EDIT_FALLBACK : DEFAULT_RETURN;
+    if (candidate.startsWith("//") || decodedCandidateIsUnsafe(candidate)) return fallback;
+    if (target.origin !== current.origin || target.username || target.password) return fallback;
+    if (target.protocol !== "https:" && target.protocol !== "http:") return fallback;
     const slash = current.pathname.lastIndexOf("/");
     const directory = current.pathname.slice(0, slash + 1);
-    if (!target.pathname.startsWith(directory)) return DEFAULT_RETURN;
+    if (!target.pathname.startsWith(directory)) return fallback;
     const basename = target.pathname.slice(directory.length);
-    if (!basename || basename.includes("/") || !ALLOWED_RETURN_PAGES.includes(basename)) return DEFAULT_RETURN;
+    if (!basename || basename.includes("/") || !ALLOWED_RETURN_PAGES.includes(basename)) return fallback;
     if (basename === LOGIN_PAGE) return DEFAULT_RETURN;
+    if (basename === PLACE_EDIT_PAGE) return safePlaceEditReturn(target) || PLACE_EDIT_FALLBACK;
     return `${basename}${target.search}${target.hash}`;
   }
 
@@ -288,7 +321,7 @@
         clearSession();
         return { status: "unauthenticated" };
       }
-      return { status: "unconfirmed", code: TRANSIENT_CODES.includes(code) ? code : "SERVER_ERROR" };
+      return { status: "unconfirmed", code: TRANSIENT_CODES.includes(code) || APPLICATION_CODES.includes(code) ? code : "SERVER_ERROR" };
     }
     if (generation !== validationGeneration) return { status: "stale" };
     if (!exactKeys(response, ["admin", "expires_at"])) return { status: "unconfirmed", code: "MALFORMED_RESPONSE" };

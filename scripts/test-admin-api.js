@@ -19,6 +19,124 @@ const ADMIN = Object.freeze({
   display_name: "ผู้ดูแลระบบ",
   role: "super_admin"
 });
+const PLACE_ID = "PLC-12345678-1234-4234-8234-123456789abc";
+const CONTENT_KEYS = [
+  "name_th", "name_en", "slug", "district", "province", "route_group", "category", "sub_category",
+  "short_description_th", "short_description_en", "description_th", "description_en", "activities_th", "activities_en",
+  "highlight_th", "highlight_en", "address_th", "address_en", "facilities_th", "facilities_en", "phone", "line_url",
+  "facebook_url", "website_url", "google_maps_url", "latitude", "longitude", "coordinate_status", "open_time_th",
+  "open_time_en", "fee_th", "fee_en", "tags", "recommended_duration", "best_time_th", "best_time_en",
+  "nearby_place_ids", "is_featured", "is_main_route_point", "sort_order", "gallery_media_ids"
+];
+const PLACE_METHODS = Object.freeze({
+  getPlaces: "adminGetPlaces",
+  getPlaceDetail: "adminGetPlaceDetail",
+  getPlaceMediaOptions: "adminGetPlaceMediaOptions",
+  inspectPlaceDependencies: "adminInspectPlaceDependencies",
+  createPlace: "adminCreatePlace",
+  savePlaceDraft: "adminSavePlaceDraft",
+  publishPlace: "adminPublishPlace",
+  unpublishPlace: "adminUnpublishPlace",
+  archivePlace: "adminArchivePlace",
+  restorePlace: "adminRestorePlace"
+});
+const WRITE_METHODS = ["createPlace", "savePlaceDraft", "publishPlace", "unpublishPlace", "archivePlace", "restorePlace"];
+
+function editableContent(overrides = {}) {
+  const content = Object.fromEntries(CONTENT_KEYS.map((key) => [key, ""]));
+  return Object.assign(content, {
+    name_th: "สถานที่", district: "ban_ta_khun", province: "สุราษฎร์ธานี", category: "nature",
+    coordinate_status: "verified", latitude: 8.9, longitude: 98.7, tags: ["lake"], nearby_place_ids: [],
+    is_featured: false, is_main_route_point: false, sort_order: 1, gallery_media_ids: ""
+  }, overrides);
+}
+
+function writeResult(overrides = {}) {
+  return Object.assign({
+    place_id: PLACE_ID, status: "draft", entity_version: 2, working_version: 2, published_version: 1,
+    has_active_draft: true, created_at: "2026-08-08T10:00:00.000Z", updated_at: "2026-08-08T11:00:00.000Z"
+  }, overrides);
+}
+
+function safeMedia(overrides = {}) {
+  return Object.assign({
+    media_id: `place-${PLACE_ID.toLowerCase()}-cover`, entity_type: "place", entity_id: PLACE_ID, role: "cover",
+    alt_th: "ภาพสถานที่", alt_en: "Place", fallback: "assets/media/placeholders/cover.svg",
+    outputs: [{ width: 640, height: 360, path: "assets/media/generated/place-cover-test-640.webp" }]
+  }, overrides);
+}
+
+function listResult() {
+  return {
+    items: [{
+      place_id: PLACE_ID, name_th: "สถานที่", name_en: "Place", category: "nature",
+      area_summary: { district: "ban_ta_khun", province: "สุราษฎร์ธานี" }, status: "published",
+      has_active_draft: true, display_state: "published_with_draft", cover: null,
+      created_at: "2026-08-08T10:00:00.000Z", updated_at: "2026-08-08T11:00:00.000Z"
+    }], page: 1, page_size: 20, total: 1, total_pages: 1
+  };
+}
+
+function detailResult() {
+  return {
+    place_id: PLACE_ID, status: "published", has_active_draft: true, display_state: "published_with_draft",
+    entity_version: 2, working_version: 2, published_version: 1, content: editableContent({ gallery_media_ids: [] }),
+    media: { cover: null, gallery: [] },
+    capabilities: {
+      can_write: true, can_publish: true, can_unpublish: true, can_archive: true, can_restore: false,
+      can_view_working: true, can_view_published: true
+    },
+    created_at: "2026-08-08T10:00:00.000Z", updated_at: "2026-08-08T11:00:00.000Z"
+  };
+}
+
+function dependencyResult() {
+  return {
+    place_id: PLACE_ID, checked_at: "2026-08-08T11:00:00.000Z",
+    groups: Object.fromEntries(["routes", "nearby_places", "products", "events", "gallery", "trip_templates", "reviews"]
+      .map((key) => [key, key === "routes" ? [{ entity_id: "ROUTE-1", label: "Route" }] : []]))
+  };
+}
+
+function archiveDependencies(overrides = {}) {
+  return Object.assign(Object.fromEntries(
+    ["routes", "nearby_places", "products", "events", "gallery", "trip_templates", "reviews"].map((key) => [key, []])
+  ), overrides);
+}
+
+function validInvocation(api, method) {
+  const content = editableContent();
+  const calls = {
+    getPlaces: () => api.getPlaces(TOKEN, { keyword: "lake", category: "nature", status: "all", page: 1, page_size: 20 }),
+    getPlaceDetail: () => api.getPlaceDetail(TOKEN, { place_id: PLACE_ID, view: "working" }),
+    getPlaceMediaOptions: () => api.getPlaceMediaOptions(TOKEN, { place_id: PLACE_ID, keyword: "cover", role: "all", page: 1, page_size: 20 }),
+    inspectPlaceDependencies: () => api.inspectPlaceDependencies(TOKEN, { place_id: PLACE_ID }),
+    createPlace: () => api.createPlace(TOKEN, { content }),
+    savePlaceDraft: () => api.savePlaceDraft(TOKEN, { place_id: PLACE_ID, expected_version: 2, content }),
+    publishPlace: () => api.publishPlace(TOKEN, { place_id: PLACE_ID, expected_version: 2 }),
+    unpublishPlace: () => api.unpublishPlace(TOKEN, { place_id: PLACE_ID, expected_version: 2 }),
+    archivePlace: () => api.archivePlace(TOKEN, { place_id: PLACE_ID, expected_version: 2, confirmed: true }),
+    restorePlace: () => api.restorePlace(TOKEN, { place_id: PLACE_ID, expected_version: 2 })
+  };
+  return calls[method]();
+}
+
+function successForMethod(method) {
+  if (method === "getPlaces") return listResult();
+  if (method === "getPlaceDetail") return detailResult();
+  if (method === "getPlaceMediaOptions") return { items: [safeMedia()], page: 1, page_size: 20, total: 1, total_pages: 1 };
+  if (method === "inspectPlaceDependencies") return dependencyResult();
+  if (method === "createPlace") return writeResult({ entity_version: 1, working_version: 1, published_version: null });
+  const result = writeResult({
+    status: method === "publishPlace" ? "published" : method === "archivePlace" ? "archived" : "draft",
+    has_active_draft: method !== "publishPlace",
+    published_version: 1
+  });
+  if (method === "archivePlace") result.dependencies = archiveDependencies({
+    routes: [{ entity_id: "ROUTE-1", label: "Route" }]
+  });
+  return result;
+}
 
 function plain(value) {
   return JSON.parse(JSON.stringify(value));
@@ -243,11 +361,313 @@ function test(name, run) {
   tests.push({ name, run });
 }
 
-test("exports exactly the frozen login validateSession and logout surface", async () => {
+test("exports exactly the frozen auth and explicit Place facade surface", async () => {
   const { api } = loadAdminApi();
-  assert.deepEqual(Object.keys(api).sort(), ["login", "logout", "validateSession"]);
+  assert.deepEqual(Object.keys(api).sort(), ["login", "logout", "validateSession", ...Object.keys(PLACE_METHODS)].sort());
   assert.equal(Object.isFrozen(api), true);
   for (const name of Object.keys(api)) assert.equal(typeof api[name], "function");
+  for (const forbidden of ["request", "call", "rawFetch", "dispatch"]) assert.equal(forbidden in api, false);
+});
+
+test("every Place facade owns its exact action token and single POST transport", async () => {
+  for (const [method, action] of Object.entries(PLACE_METHODS)) {
+    const harness = loadAdminApi({ fetchImpl: async () => textResponse(success(successForMethod(method))) });
+    try {
+      await validInvocation(harness.api, method);
+    } catch (error) {
+      assert.fail(`${method} rejected its valid contract with ${error && error.code}`);
+    }
+    assert.equal(harness.calls.length, 1, method);
+    assert.equal(harness.calls[0].url, ENDPOINT);
+    assert.equal(harness.calls[0].options.method, "POST");
+    assert.deepEqual(plain(harness.calls[0].options.headers), { "Content-Type": "text/plain;charset=utf-8" });
+    const body = JSON.parse(harness.calls[0].options.body);
+    assert.equal(body.action, action);
+    assert.equal(body.token, TOKEN);
+    assert.equal(JSON.stringify(body).split(TOKEN).length - 1, 1);
+    assertNoSecretTransport(harness, [TOKEN]);
+    assertSingleRequestCleanup(harness);
+  }
+});
+
+test("Place requests reject unknown keys invalid IDs filters versions content and Archive preview authority before fetch", async () => {
+  const cases = [
+    ["getPlaces", (api) => api.getPlaces(TOKEN, { future: true })],
+    ["getPlaces", (api) => api.getPlaces(TOKEN, { status: "hidden" })],
+    ["getPlaces", (api) => api.getPlaces(TOKEN, { category: "future" })],
+    ["getPlaces", (api) => api.getPlaces(TOKEN, { page_size: 101 })],
+    ["getPlaces", (api) => api.getPlaces(` ${TOKEN}`, {})],
+    ["getPlaceDetail", (api) => api.getPlaceDetail(TOKEN, { place_id: ` ${PLACE_ID}`, view: "working" })],
+    ["getPlaceDetail", (api) => api.getPlaceDetail(TOKEN, { place_id: PLACE_ID })],
+    ["getPlaceMediaOptions", (api) => api.getPlaceMediaOptions(TOKEN, { place_id: PLACE_ID, role: "hero" })],
+    ["inspectPlaceDependencies", (api) => api.inspectPlaceDependencies(TOKEN, { place_id: PLACE_ID, confirmed: true })],
+    ["createPlace", (api) => api.createPlace(TOKEN, { place_id: PLACE_ID, content: editableContent() })],
+    ["createPlace", (api) => api.createPlace(TOKEN, { content: editableContent({ status: "published" }) })],
+    ["createPlace", (api) => api.createPlace(TOKEN, { content: editableContent({ name_en: "unsafe\u0000text" }) })],
+    ["createPlace", (api) => api.createPlace(TOKEN, { content: editableContent({ website_url: "https://bad_host.example/place" }) })],
+    ["createPlace", (api) => api.createPlace(TOKEN, { content: editableContent({ tags: ["unsafe\u0001tag"] }) })],
+    ["savePlaceDraft", (api) => api.savePlaceDraft(TOKEN, { place_id: PLACE_ID, expected_version: 0, content: editableContent() })],
+    ["publishPlace", (api) => api.publishPlace(TOKEN, { place_id: PLACE_ID, expected_version: 2, force: true })],
+    ["unpublishPlace", (api) => api.unpublishPlace(TOKEN, { place_id: PLACE_ID, expected_version: "2" })],
+    ["archivePlace", (api) => api.archivePlace(TOKEN, { place_id: PLACE_ID, expected_version: 2, confirmed: false })],
+    ["archivePlace", (api) => api.archivePlace(TOKEN, { place_id: PLACE_ID, expected_version: 2, confirmed: true, dependency_count: 0 })],
+    ["restorePlace", (api) => api.restorePlace(TOKEN, { place_id: PLACE_ID, expected_version: 2, preview_token: "unsafe" })]
+  ];
+  for (const [label, invoke] of cases) {
+    const harness = loadAdminApi({ fetchImpl: async () => assert.fail("invalid request fetched") });
+    assertSafeError(await captureError(Promise.resolve().then(() => invoke(harness.api))), "VALIDATION_ERROR", [TOKEN]);
+    assert.equal(harness.calls.length, 0, label);
+  }
+});
+
+test("Create and Save Draft preserve strict ordered Gallery media requests at zero one many and fifty", async () => {
+  const galleries = [
+    "",
+    ["place-plc-gallery-one"],
+    ["place-plc-gallery-c", "place-plc-gallery-a", "place-plc-gallery-b"],
+    Array.from({ length: 50 }, (_value, index) => `place-plc-gallery-${String(index + 1).padStart(2, "0")}`)
+  ];
+  for (const gallery_media_ids of galleries) {
+    for (const method of ["createPlace", "savePlaceDraft"]) {
+      const response = method === "createPlace"
+        ? writeResult({ entity_version: 1, working_version: 1, published_version: null })
+        : writeResult();
+      const harness = loadAdminApi({ fetchImpl: async () => textResponse(success(response)) });
+      const content = editableContent({ gallery_media_ids });
+      const payload = method === "createPlace" ? { content } : { place_id: PLACE_ID, expected_version: 2, content };
+      await harness.api[method](TOKEN, payload);
+      assert.equal(harness.calls.length, 1, `${method} ${JSON.stringify(gallery_media_ids)}`);
+      const body = JSON.parse(harness.calls[0].options.body);
+      assert.equal(body.action, PLACE_METHODS[method]);
+      assert.equal(body.token, TOKEN);
+      assert.deepEqual(body.payload.content.gallery_media_ids, gallery_media_ids);
+      assert.deepEqual(Object.keys(body.payload.content).sort(), [...CONTENT_KEYS].sort());
+      assert.equal(JSON.stringify(body).includes("source_file"), false);
+      assertNoSecretTransport(harness, [TOKEN]);
+      assertSingleRequestCleanup(harness);
+    }
+  }
+});
+
+test("Create and Save Draft reject malformed Gallery media requests before transport", async () => {
+  const invalid = [
+    Array.from({ length: 51 }, (_value, index) => `gallery-${index + 1}`),
+    ["gallery-a", "gallery-a"], ["gallery-a", ""], ["gallery-a", "bad_id"], ["Gallery-A"],
+    ["https://example.test/gallery.webp"], ["media-source/private.webp"], ["C:/private/gallery.webp"],
+    [{ media_id: "gallery-a" }], [["gallery-a"]], "gallery-a,gallery-b", "gallery-a|gallery-b"
+  ];
+  for (const gallery_media_ids of invalid) {
+    for (const method of ["createPlace", "savePlaceDraft"]) {
+      const harness = loadAdminApi({ fetchImpl: async () => assert.fail("invalid Gallery request fetched") });
+      const content = editableContent({ gallery_media_ids });
+      const payload = method === "createPlace" ? { content } : { place_id: PLACE_ID, expected_version: 2, content };
+      assertSafeError(await captureError(Promise.resolve().then(() => harness.api[method](TOKEN, payload))), "VALIDATION_ERROR", [TOKEN]);
+      assert.equal(harness.calls.length, 0, `${method} ${JSON.stringify(gallery_media_ids)}`);
+    }
+  }
+});
+
+test("Gallery request and response mutation proofs reject every Task 14 contract rollback", async () => {
+  const ordered = ["gallery-c", "gallery-a", "gallery-b"];
+  const validRequest = async (source, gallery_media_ids = ordered) => {
+    const harness = loadAdminApi({ source, fetchImpl: async () => textResponse(success(writeResult())) });
+    await assert.doesNotReject(() => harness.api.savePlaceDraft(TOKEN, {
+      place_id: PLACE_ID, expected_version: 2, content: editableContent({ gallery_media_ids })
+    }));
+    assert.deepEqual(JSON.parse(harness.calls[0].options.body).payload.content.gallery_media_ids, gallery_media_ids);
+  };
+  const invalidRequest = async (source, gallery_media_ids) => {
+    const harness = loadAdminApi({ source, fetchImpl: async () => assert.fail("mutated invalid Gallery request fetched") });
+    assertSafeError(await captureError(Promise.resolve().then(() => harness.api.savePlaceDraft(TOKEN, {
+      place_id: PLACE_ID, expected_version: 2, content: editableContent({ gallery_media_ids })
+    }))), "VALIDATION_ERROR");
+    assert.equal(harness.calls.length, 0);
+  };
+  const cases = [
+    ["empty-only rollback", mutatedSource(
+      '} else if (field !== "" && (!Array.isArray(field) || field.length < 1 || field.length > 50 ||\n          field.some((id) => typeof id !== "string" || !MEDIA_ID_PATTERN.test(id)) || new Set(field).size !== field.length)) return false;',
+      '} else if (field !== "") return false;'
+    ), (source) => validRequest(source)],
+    ["arbitrary arrays", mutatedSource(
+      'field.some((id) => typeof id !== "string" || !MEDIA_ID_PATTERN.test(id)) || new Set(field).size !== field.length)) return false;',
+      'false) return false;'
+    ), (source) => invalidRequest(source, [{ media_id: "gallery-a" }])],
+    ["duplicates", mutatedSource(" || new Set(field).size !== field.length)) return false;", ")) return false;"),
+      (source) => invalidRequest(source, ["gallery-a", "gallery-a"])],
+    ["fifty-one", mutatedSource("field.length < 1 || field.length > 50 ||", "field.length < 1 ||"),
+      (source) => invalidRequest(source, Array.from({ length: 51 }, (_value, index) => `gallery-${index + 1}`))],
+    ["sorting", mutatedSource("if (!save) return { content: source.content };", "source.content.gallery_media_ids = Array.isArray(source.content.gallery_media_ids) ? source.content.gallery_media_ids.slice().sort() : source.content.gallery_media_ids;\n    if (!save) return { content: source.content };"),
+      (source) => validRequest(source)],
+    ["URL and path", mutatedSource(
+      'field.length < 1 || field.length > 50 ||\n          field.some((id) => typeof id !== "string" || !MEDIA_ID_PATTERN.test(id))',
+      'field.length < 1 || field.length > 50 ||\n          field.some((id) => typeof id !== "string" || false)'
+    ),
+      (source) => invalidRequest(source, ["https://example.test/gallery.webp"])],
+    ["response weakening", mutatedSource("        !validContent(data.content, true) ||", "        false ||"), async (source) => {
+      const malformed = detailResult(); malformed.content.gallery_media_ids = ["bad_id"];
+      const harness = loadAdminApi({ source, fetchImpl: async () => textResponse(success(malformed)) });
+      assertSafeError(await captureError(harness.api.getPlaceDetail(TOKEN, { place_id: PLACE_ID, view: "working" })), "MALFORMED_RESPONSE");
+    }]
+  ];
+  for (const [label, source, contract] of cases) {
+    await assert.rejects(() => contract(source), undefined, `${label} mutant must be caught`);
+  }
+});
+
+test("strict Place success validators accept only exact list detail media dependency and write projections", async () => {
+  for (const method of Object.keys(PLACE_METHODS)) {
+    const valid = successForMethod(method);
+    const accepted = loadAdminApi({ fetchImpl: async () => textResponse(success(valid)) });
+    assert.deepEqual(plain(await validInvocation(accepted.api, method)), valid);
+    const malformed = Array.isArray(valid) ? valid.slice() : { ...valid, internal_row: 7 };
+    const rejected = loadAdminApi({ fetchImpl: async () => textResponse(success(malformed)) });
+    assertSafeError(await captureError(validInvocation(rejected.api, method)), "MALFORMED_RESPONSE", [TOKEN, "internal_row"]);
+  }
+  const badDependency = dependencyResult();
+  badDependency.groups.eighth = [];
+  const dependencies = loadAdminApi({ fetchImpl: async () => textResponse(success(badDependency)) });
+  assertSafeError(await captureError(dependencies.api.inspectPlaceDependencies(TOKEN, { place_id: PLACE_ID })), "MALFORMED_RESPONSE");
+  const badDependencyItem = dependencyResult();
+  badDependencyItem.groups.routes[0].source_row = 7;
+  const dependencyItem = loadAdminApi({ fetchImpl: async () => textResponse(success(badDependencyItem)) });
+  assertSafeError(await captureError(dependencyItem.api.inspectPlaceDependencies(TOKEN, { place_id: PLACE_ID })), "MALFORMED_RESPONSE");
+  const badMedia = { items: [safeMedia({ entity_id: "PLC-OTHER" })], page: 1, page_size: 20, total: 1, total_pages: 1 };
+  const media = loadAdminApi({ fetchImpl: async () => textResponse(success(badMedia)) });
+  assertSafeError(await captureError(media.api.getPlaceMediaOptions(TOKEN, { place_id: PLACE_ID })), "MALFORMED_RESPONSE");
+  const impossibleList = listResult();
+  Object.assign(impossibleList.items[0], { status: "draft", has_active_draft: false, display_state: "draft" });
+  const list = loadAdminApi({ fetchImpl: async () => textResponse(success(impossibleList)) });
+  assertSafeError(await captureError(list.api.getPlaces(TOKEN, {})), "MALFORMED_RESPONSE");
+  const impossibleSave = writeResult({ status: "archived", has_active_draft: true });
+  const save = loadAdminApi({ fetchImpl: async () => textResponse(success(impossibleSave)) });
+  assertSafeError(await captureError(save.api.savePlaceDraft(TOKEN, {
+    place_id: PLACE_ID, expected_version: 2, content: editableContent()
+  })), "MALFORMED_RESPONSE");
+  const wrongListRole = listResult();
+  wrongListRole.items[0].cover = safeMedia({ role: "gallery" });
+  const listRole = loadAdminApi({ fetchImpl: async () => textResponse(success(wrongListRole)) });
+  assertSafeError(await captureError(listRole.api.getPlaces(TOKEN, {})), "MALFORMED_RESPONSE");
+  const wrongDetailRoles = detailResult();
+  wrongDetailRoles.media = { cover: safeMedia({ role: "gallery" }), gallery: [safeMedia({ role: "cover" })] };
+  const detailRoles = loadAdminApi({ fetchImpl: async () => textResponse(success(wrongDetailRoles)) });
+  assertSafeError(await captureError(detailRoles.api.getPlaceDetail(TOKEN, { place_id: PLACE_ID, view: "working" })), "MALFORMED_RESPONSE");
+  const wrongOptionRole = { items: [safeMedia({ role: "gallery" })], page: 1, page_size: 20, total: 1, total_pages: 1 };
+  const optionRole = loadAdminApi({ fetchImpl: async () => textResponse(success(wrongOptionRole)) });
+  assertSafeError(await captureError(optionRole.api.getPlaceMediaOptions(TOKEN, {
+    place_id: PLACE_ID, role: "cover", page: 1, page_size: 20
+  })), "MALFORMED_RESPONSE");
+  const impossibleCapabilities = detailResult();
+  Object.assign(impossibleCapabilities, { status: "archived", display_state: "archived" });
+  Object.assign(impossibleCapabilities.capabilities, { can_publish: true, can_archive: true, can_restore: false });
+  const capabilities = loadAdminApi({ fetchImpl: async () => textResponse(success(impossibleCapabilities)) });
+  assertSafeError(await captureError(capabilities.api.getPlaceDetail(TOKEN, { place_id: PLACE_ID, view: "working" })), "MALFORMED_RESPONSE");
+  const missingPublishVersion = writeResult({ status: "published", has_active_draft: false, published_version: null });
+  const publishVersion = loadAdminApi({ fetchImpl: async () => textResponse(success(missingPublishVersion)) });
+  assertSafeError(await captureError(publishVersion.api.publishPlace(TOKEN, {
+    place_id: PLACE_ID, expected_version: 2
+  })), "MALFORMED_RESPONSE");
+  for (const unsafeMedia of [
+    safeMedia({ media_id: "place-arbitrary-cover" }),
+    safeMedia({ fallback: "media-source/private.jpg" }),
+    safeMedia({ outputs: [{ width: 640, height: 360, path: "scripts/admin-auth.js" }] }),
+    safeMedia({ outputs: [{ width: 640, height: 360, path: "assets/media/generated/%2e%2e/private.webp" }] })
+  ]) {
+    const unsafeList = listResult();
+    unsafeList.items[0].cover = unsafeMedia;
+    const unsafe = loadAdminApi({ fetchImpl: async () => textResponse(success(unsafeList)) });
+    assertSafeError(await captureError(unsafe.api.getPlaces(TOKEN, {})), "MALFORMED_RESPONSE");
+  }
+});
+
+test("Archive alone requires the exact ordered seven-group execution dependency projection", async () => {
+  const exact = successForMethod("archivePlace");
+  const accepted = loadAdminApi({ fetchImpl: async () => textResponse(success(exact)) });
+  assert.deepEqual(plain(await accepted.api.archivePlace(TOKEN, {
+    place_id: PLACE_ID, expected_version: 2, confirmed: true
+  })), exact);
+  assert.equal(accepted.calls.length, 1);
+  assert.deepEqual(JSON.parse(accepted.calls[0].options.body), {
+    action: "adminArchivePlace", token: TOKEN,
+    payload: { place_id: PLACE_ID, expected_version: 2, confirmed: true }
+  });
+  assertNoSecretTransport(accepted, [TOKEN]);
+  assertSingleRequestCleanup(accepted);
+
+  const invalid = [
+    writeResult({ status: "archived", dependencies: undefined }),
+    { ...exact, dependencies: Object.fromEntries(Object.entries(exact.dependencies).filter(([key]) => key !== "reviews")) },
+    { ...exact, dependencies: { ...exact.dependencies, extra_group: [] } },
+    { ...exact, dependencies: { ...exact.dependencies, events: {} } },
+    { ...exact, dependencies: { ...exact.dependencies, routes: [{ entity_id: "bad id", label: "Route" }] } },
+    { ...exact, dependencies: { ...exact.dependencies, routes: [{ entity_id: "ROUTE-1", label: "" }] } },
+    { ...exact, dependencies: { ...exact.dependencies, routes: [{ entity_id: "ROUTE-1", label: "   " }] } },
+    { ...exact, dependencies: { ...exact.dependencies, routes: [{ entity_id: "ROUTE-1", label: " Route " }] } },
+    { ...exact, dependencies: { ...exact.dependencies, routes: [{ entity_id: "ROUTE-1", label: "Route", source_row: 7 }] } },
+    { ...exact, dependencies: { ...exact.dependencies, routes: [{ entity_id: "ROUTE-2", label: "Second" }, { entity_id: "ROUTE-1", label: "First" }] } },
+    { ...exact, internal_lock: "private" }
+  ];
+  delete invalid[0].dependencies;
+  for (const response of invalid) {
+    const harness = loadAdminApi({ fetchImpl: async () => textResponse(success(response)) });
+    assertSafeError(await captureError(harness.api.archivePlace(TOKEN, {
+      place_id: PLACE_ID, expected_version: 2, confirmed: true
+    })), "MALFORMED_RESPONSE", [TOKEN, "private"]);
+    assert.equal(harness.calls.length, 1);
+    assertSingleRequestCleanup(harness);
+  }
+
+  for (const method of ["createPlace", "savePlaceDraft", "publishPlace", "unpublishPlace", "restorePlace"]) {
+    const response = successForMethod(method);
+    response.dependencies = archiveDependencies();
+    const harness = loadAdminApi({ fetchImpl: async () => textResponse(success(response)) });
+    assertSafeError(await captureError(validInvocation(harness.api, method)), "MALFORMED_RESPONSE");
+  }
+});
+
+test("Place projection assertions reject an executable arbitrary-object acceptance mutation", async () => {
+  const source = mutatedSource(
+    "    if (validated) return validated;\n    throw safeError(\"MALFORMED_RESPONSE\");",
+    "    if (validated) return validated;\n    if (action === \"adminGetPlaces\") return data;\n    throw safeError(\"MALFORMED_RESPONSE\");"
+  );
+  await proveContractRejects(async () => {
+    const harness = loadAdminApi({ source, fetchImpl: async () => textResponse(success({ arbitrary: true })) });
+    assertSafeError(await captureError(harness.api.getPlaces(TOKEN, {})), "MALFORMED_RESPONSE");
+  });
+});
+
+test("every Place write remains single-fetch across network timeout HTTP malformed conflict and rate-limit outcomes", async () => {
+  for (const method of WRITE_METHODS) {
+    const fixtures = [
+      { code: "NETWORK_ERROR", fetchImpl: async () => { throw new TypeError(`offline ${TOKEN}`); } },
+      { code: "HTTP_ERROR", fetchImpl: async () => textResponse("secret", { ok: false, status: 503 }) },
+      { code: "MALFORMED_RESPONSE", fetchImpl: async () => textResponse("not-json") },
+      { code: "CONFLICT", fetchImpl: async () => textResponse({ ok: false, error: { code: "CONFLICT", message: `raw ${TOKEN}` } }) },
+      { code: "RATE_LIMITED", fetchImpl: async () => textResponse({ ok: false, error: { code: "RATE_LIMITED", message: `raw ${TOKEN}` } }) }
+    ];
+    for (const fixture of fixtures) {
+      const harness = loadAdminApi({ fetchImpl: fixture.fetchImpl });
+      assertSafeError(await captureError(validInvocation(harness.api, method)), fixture.code, [TOKEN, "raw", "secret"]);
+      assertSingleRequestCleanup(harness);
+    }
+    let fetchCount = 0;
+    const timeout = loadAdminApi({
+      fetchImpl: async (_url, options) => {
+        fetchCount += 1;
+        return new Promise((_resolve, reject) => options.signal.addEventListener("abort", () => {
+          const error = new Error(`aborted ${TOKEN}`);
+          error.name = "AbortError";
+          reject(error);
+        }));
+      }
+    });
+    const pending = validInvocation(timeout.api, method);
+    timeout.timers[0].callback();
+    assertSafeError(await captureError(pending), "TIMEOUT", [TOKEN]);
+    assert.equal(fetchCount, 1, method);
+    assert.equal(timeout.calls.length, 1, method);
+    assert.equal(timeout.controllers[0].abortCount, 1, method);
+    assert.deepEqual(timeout.clearedTimerIds, [timeout.timers[0].id], method);
+  }
 });
 
 test("login preserves credential strings and uses exact POST transport", async () => {
@@ -362,15 +782,23 @@ test("rejects malformed top-level and backend error envelopes safely", async () 
 });
 
 test("normalizes every documented backend code and clears its exact timer", async () => {
-  for (const code of ["VALIDATION_ERROR", "UNAUTHORIZED", "RATE_LIMITED", "SERVER_ERROR", "FORBIDDEN"]) {
+  for (const code of ["VALIDATION_ERROR", "UNAUTHORIZED", "RATE_LIMITED", "SERVER_ERROR", "FORBIDDEN", "NOT_FOUND", "CONFLICT"]) {
     await assertBackendErrorCleanup(code);
   }
   await assertBackendErrorCleanup("INTERNAL_DATABASE_DETAIL");
 });
 
+test("backend-code assertions reject an executable arbitrary-code acceptance mutation", async () => {
+  const source = mutatedSource(
+    "    const code = BACKEND_ERROR_CODES.includes(result.error.code) ? result.error.code : \"SERVER_ERROR\";",
+    "    const code = typeof result.error.code === \"string\" ? result.error.code : \"SERVER_ERROR\";"
+  );
+  await proveContractRejects(() => assertBackendErrorCleanup("INTERNAL_DATABASE_DETAIL", source));
+});
+
 test("backend-error cleanup assertions reject a timer-leak mutation", async () => {
   const source = mutatedSource(
-    '      return parseEnvelope(body.action, rawText);\n    } finally {\n      if (timer !== null) global.clearTimeout(timer);\n    }',
+    '      return parseEnvelope(body, rawText);\n    } finally {\n      if (timer !== null) global.clearTimeout(timer);\n    }',
     '      try {\n        const parsed = parseEnvelope(body.action, rawText);\n        if (timer !== null) global.clearTimeout(timer);\n        return parsed;\n      } catch (error) {\n        if (!BACKEND_ERROR_CODES.includes(error.code) && timer !== null) global.clearTimeout(timer);\n        throw error;\n      }\n    } finally {\n      /* test-only mutation omits the authoritative cleanup */\n    }'
   );
   await proveContractRejects(() => assertBackendErrorCleanup("UNAUTHORIZED", source));
@@ -410,6 +838,13 @@ test("strictly validates login success and rejects security-bearing projections"
     const harness = loadAdminApi({ fetchImpl: async () => textResponse(success(data)) });
     assertSafeError(await captureError(harness.api.login("operator", "password")), "MALFORMED_RESPONSE", ["password", TOKEN]);
   }
+});
+
+test("login and session projections retain the existing 100-code-point supplementary Unicode contract", async () => {
+  const displayName = "\u{1F600}".repeat(100);
+  const admin = { ...ADMIN, display_name: displayName };
+  const harness = loadAdminApi({ fetchImpl: async () => textResponse(success({ admin, token: TOKEN, expires_at: EXPIRES_AT })) });
+  assert.equal((await harness.api.login("operator", "Password")).admin.display_name, displayName);
 });
 
 test("strictly validates session and logout success without token or audit metadata", async () => {

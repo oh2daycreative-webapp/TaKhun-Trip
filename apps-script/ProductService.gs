@@ -178,8 +178,9 @@ function ProductService_sort_(rows) {
 
 function ProductService_cached_(action, parameters, loader) {
   var cache = null;
-  var key = ProductService_cacheKey_(action, parameters);
+  var key = null;
   try {
+    key = ProductService_cacheKey_(action, parameters);
     cache = CacheService.getScriptCache();
     var cached = cache.get(key);
     if (cached) {
@@ -191,7 +192,7 @@ function ProductService_cached_(action, parameters, loader) {
   }
   var response = loader();
   if (response && response.ok === true) {
-    try { if (cache) cache.put(key, JSON.stringify(response), ProductService_CACHE_SECONDS_); }
+    try { if (cache && key) cache.put(key, JSON.stringify(response), ProductService_CACHE_SECONDS_); }
     catch (_productServiceCacheWriteError) { /* Return the successful uncached response. */ }
   }
   return response;
@@ -199,6 +200,7 @@ function ProductService_cached_(action, parameters, loader) {
 
 function ProductService_cacheKey_(action, parameters) {
   var parts = ["public", action];
+  if (action === "getProductDetail") parts.push(PlaceService_cacheEpochKey_());
   Object.keys(parameters || {}).sort().forEach(function (key) {
     parts.push(key + "=" + encodeURIComponent(ProductService_trim_(parameters[key])));
   });
