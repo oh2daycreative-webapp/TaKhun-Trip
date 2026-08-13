@@ -165,6 +165,8 @@ if ($LASTEXITCODE -ne 0) { throw "Admin browser auth verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin shell verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-places.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Places list verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-places-accessibility.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Places accessibility verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-place-edit.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Place editor verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-place-map.js")

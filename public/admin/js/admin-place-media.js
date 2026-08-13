@@ -61,9 +61,10 @@
         if (control) control.disabled = !available;
       }
     }
-    function render() {
+    function render(focusRequest, actionAnnouncement) {
       availableMount.replaceChildren();
       selectedMount.replaceChildren();
+      let focusTarget = null;
       for (const item of gallery) {
         const label = selected.includes(item.media_id) ? `เลือกแล้ว: ${item.alt_th || item.alt_en || item.media_id}` : `เลือก: ${item.alt_th || item.alt_en || item.media_id}`;
         const button = make("button", "admin-place-media__option");
@@ -74,6 +75,7 @@
         button.addEventListener("click", () => add(item.media_id));
         button.append(preview(item, "admin-place-media__preview"), make("span", "admin-place-media__option-label", label));
         availableMount.append(button);
+        if (focusRequest && focusRequest.surface === "options" && focusRequest.mediaId === item.media_id && !button.disabled) focusTarget = button;
       }
       selected.forEach((mediaId, index) => {
         const item = galleryById[mediaId];
@@ -86,25 +88,28 @@
         const removeButton = make("button", "admin-place-media__remove", "นำออก"); removeButton.type = "button";
         removeButton.setAttribute("aria-label", `นำ ${mediaId} ออกจากแกลเลอรี`); removeButton.addEventListener("click", () => remove(mediaId));
         row.append(label, up, down, removeButton); selectedMount.append(row);
+        if (focusRequest && focusRequest.surface === "selected" && focusRequest.mediaId === mediaId) focusTarget = [up, down, removeButton].find((button) => !button.disabled) || removeButton;
       });
       if (mounts.page) mounts.page.textContent = totalPages ? `หน้า ${page} จาก ${totalPages}` : "ไม่มีรายการ";
       if (mounts.previous) mounts.previous.disabled = page <= 1;
       if (mounts.next) mounts.next.disabled = !totalPages || page >= totalPages;
-      announce(`เลือกแล้ว ${selected.length} จากสูงสุด ${MAX_SELECTED} ภาพ`);
+      announce(actionAnnouncement || `เลือกแล้ว ${selected.length} จากสูงสุด ${MAX_SELECTED} ภาพ`);
+      if (focusRequest && !focusTarget) focusTarget = status;
+      if (focusTarget && typeof focusTarget.focus === "function") focusTarget.focus();
     }
     function add(mediaId) {
       if (!galleryById[mediaId] || selected.includes(mediaId) || selected.length >= MAX_SELECTED) return false;
-      selected = [...selected, mediaId]; render(); return true;
+      selected = [...selected, mediaId]; render({ surface:"selected", mediaId }, `เลือก ${mediaId} แล้ว ${selected.length} จากสูงสุด ${MAX_SELECTED} ภาพ`); return true;
     }
     function remove(mediaId) {
       if (!selected.includes(mediaId)) return false;
-      selected = selected.filter((id) => id !== mediaId); render(); return true;
+      selected = selected.filter((id) => id !== mediaId); render({ surface:"options", mediaId }, `นำออก ${mediaId} แล้ว เลือก ${selected.length} จากสูงสุด ${MAX_SELECTED} ภาพ`); return true;
     }
     function move(mediaId, direction) {
       const index = selected.indexOf(mediaId);
       const target = index + direction;
       if (index < 0 || (direction !== -1 && direction !== 1) || target < 0 || target >= selected.length) return false;
-      const next = selected.slice(); [next[index], next[target]] = [next[target], next[index]]; selected = next; render(); return true;
+      const next = selected.slice(); [next[index], next[target]] = [next[target], next[index]]; selected = next; render({ surface:"selected", mediaId }, `เลื่อน ${mediaId} ไปเป็นลำดับ ${target + 1} แล้ว เลือก ${selected.length} จากสูงสุด ${MAX_SELECTED} ภาพ`); return true;
     }
 
     if (options.mode !== "edit" || !placeId) {
