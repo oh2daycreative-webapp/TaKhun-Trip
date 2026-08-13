@@ -365,20 +365,27 @@
     return items.some((item) => !item) ? null : { items, page: data.page, page_size: data.page_size, total: data.total, total_pages: data.total_pages };
   }
 
-  function safeDependencies(data) {
-    if (!exactKeys(data, ["place_id", "checked_at", "groups"]) || !validPlaceId(data.place_id) || !validTimestamp(data.checked_at) ||
-        !exactKeys(data.groups, DEPENDENCY_GROUP_KEYS)) return null;
+  function safeDependencyGroups(source) {
+    if (!exactKeys(source, DEPENDENCY_GROUP_KEYS)) return null;
     const groups = {};
     for (const key of DEPENDENCY_GROUP_KEYS) {
-      if (!Array.isArray(data.groups[key]) || data.groups[key].length > 10000) return null;
+      if (!Array.isArray(source[key]) || source[key].length > 10000) return null;
       let prior = "";
-      groups[key] = data.groups[key].map((item) => {
-        if (!exactKeys(item, ["entity_id", "label"]) || !validPlaceId(item.entity_id) || !validPlaceText(item.label, 1, 20000) || item.entity_id <= prior) return null;
+      groups[key] = source[key].map((item) => {
+        if (!exactKeys(item, ["entity_id", "label"]) || !validPlaceId(item.entity_id) ||
+            !validPlaceText(item.label, 1, 20000) || item.label !== item.label.trim() || item.entity_id <= prior) return null;
         prior = item.entity_id;
         return { entity_id: item.entity_id, label: item.label };
       });
       if (groups[key].some((item) => !item)) return null;
     }
+    return groups;
+  }
+
+  function safeDependencies(data) {
+    if (!exactKeys(data, ["place_id", "checked_at", "groups"]) || !validPlaceId(data.place_id) || !validTimestamp(data.checked_at)) return null;
+    const groups = safeDependencyGroups(data.groups);
+    if (!groups) return null;
     return { place_id: data.place_id, checked_at: data.checked_at, groups };
   }
 
@@ -399,6 +406,14 @@
         action === "adminPublishPlace" && data.published_version === null ||
         action === "adminUnpublishPlace" && (data.published_version === null || data.published_version >= data.entity_version)) return null;
     return { ...data };
+  }
+
+  function safeArchiveWrite(data) {
+    const writeKeys = ["place_id", "status", "entity_version", "working_version", "published_version", "has_active_draft", "created_at", "updated_at"];
+    if (!exactKeys(data, [...writeKeys, "dependencies"])) return null;
+    const write = safeWrite(Object.fromEntries(writeKeys.map((key) => [key, data[key]])), "adminArchivePlace");
+    const dependencies = safeDependencyGroups(data.dependencies);
+    return write && dependencies ? { ...write, dependencies } : null;
   }
 
   function validateSuccess(body, data) {
@@ -423,7 +438,8 @@
     else if (action === "adminGetPlaceDetail") validated = safeDetail(data);
     else if (action === "adminGetPlaceMediaOptions") validated = safeMediaList(data, body.payload.place_id, body.payload.role);
     else if (action === "adminInspectPlaceDependencies") validated = safeDependencies(data);
-    else if (["adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace", "adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace"].includes(action)) {
+    else if (action === "adminArchivePlace") validated = safeArchiveWrite(data);
+    else if (["adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace", "adminUnpublishPlace", "adminRestorePlace"].includes(action)) {
       validated = safeWrite(data, action);
     }
     if (validated) return validated;

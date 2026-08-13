@@ -72,6 +72,15 @@
 .admin-place-readonly__image { display: block; width: 100%; max-width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: cover; border-radius: var(--radius-sm); }
 .admin-place-readonly__figure figcaption { margin-top: .4rem; color: var(--color-muted); overflow-wrap: anywhere; }
 .admin-place-readonly__gallery-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 1rem; margin: 0; padding: 0; list-style-position: inside; }
+.admin-place-dialog { width: min(42rem, calc(100% - 2rem)); max-height: calc(100vh - 2rem); padding: 1.25rem; overflow: auto; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-primary-dark); }
+.admin-place-dialog::backdrop { background: rgb(0 0 0 / .55); }
+.admin-place-dialog h2 { margin-top: 0; }
+.admin-place-dialog__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .75rem; margin-top: 1rem; }
+.admin-place-dialog__actions .button { min-width: 44px; min-height: 44px; }
+.admin-place-dialog__dependencies { display: grid; gap: .75rem; max-height: 50vh; overflow: auto; }
+.admin-place-dialog__dependency-group { padding: .75rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
+.admin-place-dialog__dependency-group h3, .admin-place-dialog__dependency-group p { margin-block: 0 .5rem; }
+.admin-place-dialog__dependency-group ul { margin: 0; padding-inline-start: 1.25rem; }
 @media (max-width: 560px) { .admin-place-media__selected-item { grid-template-columns: 1fr 1fr; }.admin-place-media__label { grid-column: 1 / -1; } }
 @media (max-width: 560px) { .admin-place-readonly__definitions { grid-template-columns: 1fr; }.admin-place-readonly__term { padding-bottom: .2rem; border-bottom: 0; }.admin-place-readonly__value { padding-top: .2rem; } }
 @media (min-width: 700px) { .admin-place-edit__section { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 1rem; } .admin-place-edit__section h2, .admin-place-edit__tabs, .admin-place-edit__section > [role="tabpanel"], .admin-place-edit__section > p, .admin-place-edit__submit { grid-column: 1 / -1; } }

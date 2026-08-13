@@ -98,6 +98,12 @@ function dependencyResult() {
   };
 }
 
+function archiveDependencies(overrides = {}) {
+  return Object.assign(Object.fromEntries(
+    ["routes", "nearby_places", "products", "events", "gallery", "trip_templates", "reviews"].map((key) => [key, []])
+  ), overrides);
+}
+
 function validInvocation(api, method) {
   const content = editableContent();
   const calls = {
@@ -121,11 +127,15 @@ function successForMethod(method) {
   if (method === "getPlaceMediaOptions") return { items: [safeMedia()], page: 1, page_size: 20, total: 1, total_pages: 1 };
   if (method === "inspectPlaceDependencies") return dependencyResult();
   if (method === "createPlace") return writeResult({ entity_version: 1, working_version: 1, published_version: null });
-  return writeResult({
+  const result = writeResult({
     status: method === "publishPlace" ? "published" : method === "archivePlace" ? "archived" : "draft",
     has_active_draft: method !== "publishPlace",
     published_version: 1
   });
+  if (method === "archivePlace") result.dependencies = archiveDependencies({
+    routes: [{ entity_id: "ROUTE-1", label: "Route" }]
+  });
+  return result;
 }
 
 function plain(value) {
@@ -566,6 +576,51 @@ test("strict Place success validators accept only exact list detail media depend
     unsafeList.items[0].cover = unsafeMedia;
     const unsafe = loadAdminApi({ fetchImpl: async () => textResponse(success(unsafeList)) });
     assertSafeError(await captureError(unsafe.api.getPlaces(TOKEN, {})), "MALFORMED_RESPONSE");
+  }
+});
+
+test("Archive alone requires the exact ordered seven-group execution dependency projection", async () => {
+  const exact = successForMethod("archivePlace");
+  const accepted = loadAdminApi({ fetchImpl: async () => textResponse(success(exact)) });
+  assert.deepEqual(plain(await accepted.api.archivePlace(TOKEN, {
+    place_id: PLACE_ID, expected_version: 2, confirmed: true
+  })), exact);
+  assert.equal(accepted.calls.length, 1);
+  assert.deepEqual(JSON.parse(accepted.calls[0].options.body), {
+    action: "adminArchivePlace", token: TOKEN,
+    payload: { place_id: PLACE_ID, expected_version: 2, confirmed: true }
+  });
+  assertNoSecretTransport(accepted, [TOKEN]);
+  assertSingleRequestCleanup(accepted);
+
+  const invalid = [
+    writeResult({ status: "archived", dependencies: undefined }),
+    { ...exact, dependencies: Object.fromEntries(Object.entries(exact.dependencies).filter(([key]) => key !== "reviews")) },
+    { ...exact, dependencies: { ...exact.dependencies, extra_group: [] } },
+    { ...exact, dependencies: { ...exact.dependencies, events: {} } },
+    { ...exact, dependencies: { ...exact.dependencies, routes: [{ entity_id: "bad id", label: "Route" }] } },
+    { ...exact, dependencies: { ...exact.dependencies, routes: [{ entity_id: "ROUTE-1", label: "" }] } },
+    { ...exact, dependencies: { ...exact.dependencies, routes: [{ entity_id: "ROUTE-1", label: "   " }] } },
+    { ...exact, dependencies: { ...exact.dependencies, routes: [{ entity_id: "ROUTE-1", label: " Route " }] } },
+    { ...exact, dependencies: { ...exact.dependencies, routes: [{ entity_id: "ROUTE-1", label: "Route", source_row: 7 }] } },
+    { ...exact, dependencies: { ...exact.dependencies, routes: [{ entity_id: "ROUTE-2", label: "Second" }, { entity_id: "ROUTE-1", label: "First" }] } },
+    { ...exact, internal_lock: "private" }
+  ];
+  delete invalid[0].dependencies;
+  for (const response of invalid) {
+    const harness = loadAdminApi({ fetchImpl: async () => textResponse(success(response)) });
+    assertSafeError(await captureError(harness.api.archivePlace(TOKEN, {
+      place_id: PLACE_ID, expected_version: 2, confirmed: true
+    })), "MALFORMED_RESPONSE", [TOKEN, "private"]);
+    assert.equal(harness.calls.length, 1);
+    assertSingleRequestCleanup(harness);
+  }
+
+  for (const method of ["createPlace", "savePlaceDraft", "publishPlace", "unpublishPlace", "restorePlace"]) {
+    const response = successForMethod(method);
+    response.dependencies = archiveDependencies();
+    const harness = loadAdminApi({ fetchImpl: async () => textResponse(success(response)) });
+    assertSafeError(await captureError(validInvocation(harness.api, method)), "MALFORMED_RESPONSE");
   }
 });
 

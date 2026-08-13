@@ -2036,6 +2036,9 @@ test("Archive re-inspects dependencies under lock and applies exact published an
     const runtime = loadTransactionBackend("ARCHIVE", { archiveDraftSource: draftSource });
     const result = callLifecycle(runtime, "ARCHIVE");
     assert.equal(result.ok, true);
+    assert.deepEqual(Object.keys(result.data), [...WRITE_SUCCESS_KEYS, "dependencies"]);
+    assert.deepEqual(Object.keys(result.data.dependencies), DEPENDENCY_GROUPS);
+    for (const group of DEPENDENCY_GROUPS) assert.deepEqual(result.data.dependencies[group], []);
     assert.equal(result.data.status, "archived");
     assert.equal(result.data.entity_version, 5);
     assert.equal(result.data.published_version, draftSource ? null : 3);
@@ -2065,6 +2068,37 @@ test("Archive re-inspects dependencies under lock and applies exact published an
   });
   assert.equal(callLifecycle(appeared, "ARCHIVE").ok, true, "fresh valid dependency is detected and confirmed server-side");
   assert.equal(appeared.calls.reads.some((entry) => entry.name === "route_places"), true);
+
+  const changed = loadTransactionBackend("ARCHIVE");
+  const previewA = plain(changed.context.adminInspectPlaceDependencies_("TOKEN", { place_id: "TX-PLACE" })).data.groups;
+  assert.deepEqual(previewA.routes, []);
+  changed.sheets.routes.rows.push(DEPENDENCY_HEADERS.routes.map((header) => ({
+    route_id: "ROUTE-B", name_th: "Execution dependency B", name_en: "", status: "published"
+  })[header]));
+  changed.sheets.routes.formulas.push(new Set());
+  changed.sheets.route_places.rows.push(DEPENDENCY_HEADERS.route_places.map((header) => ({
+    route_place_id: "RP-B", route_id: "ROUTE-B", place_id: "TX-PLACE", status: "published"
+  })[header]));
+  changed.sheets.route_places.formulas.push(new Set());
+  const execution = callLifecycle(changed, "ARCHIVE");
+  assert.equal(execution.ok, true);
+  assert.deepEqual(execution.data.dependencies, {
+    routes: [{ entity_id: "ROUTE-B", label: "Execution dependency B" }],
+    nearby_places: [], products: [], events: [], gallery: [], trip_templates: [], reviews: []
+  });
+  assert.equal("checked_at" in execution.data.dependencies, false);
+  assert.equal(JSON.stringify(execution.data).includes("sourceRowNumber"), false);
+
+  const removed = loadTransactionBackend("ARCHIVE", {
+    products: [{ product_id: "PRODUCT-A", name_th: "Preview dependency A", name_en: "", related_place_id: "TX-PLACE", status: "published" }]
+  });
+  const nonzeroPreview = plain(removed.context.adminInspectPlaceDependencies_("TOKEN", { place_id: "TX-PLACE" })).data.groups;
+  assert.deepEqual(nonzeroPreview.products, [{ entity_id: "PRODUCT-A", label: "Preview dependency A" }]);
+  removed.sheets.products.rows = [];
+  removed.sheets.products.formulas = [];
+  const emptyExecution = callLifecycle(removed, "ARCHIVE");
+  assert.equal(emptyExecution.ok, true);
+  for (const group of DEPENDENCY_GROUPS) assert.deepEqual(emptyExecution.data.dependencies[group], []);
 
   const stalePreview = loadTransactionBackend("ARCHIVE", {
     route_places: [{ route_place_id: "RP-NEW", route_id: "ROUTE-MISSING", place_id: "TX-PLACE", status: "published" }]
@@ -2165,7 +2199,10 @@ test("Task 9 mutation proofs reject skipped confirmation reinspection draft sync
     },
     {
       label: "locked dependency reinspection",
-      source: source.replace("      AdminPlaceService_inspectDependencies_(parameters.place_id);", "      void parameters.place_id;"),
+      source: source.replace(
+        "      var dependencies = AdminPlaceService_inspectDependencies_(parameters.place_id).groups;",
+        "      var dependencies = { routes: [], nearby_places: [], products: [], events: [], gallery: [], trip_templates: [], reviews: [] };"
+      ),
       run(runtime) { assertError(callLifecycle(runtime, "ARCHIVE"), "SERVER_ERROR"); },
       runtime: (serviceSource) => loadTransactionBackend("ARCHIVE", {
         serviceSource,

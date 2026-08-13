@@ -340,10 +340,12 @@ function adminArchivePlace_(token, payload) {
       var state = AdminPlaceService_captureState_(parameters.place_id, includeEpoch);
       var lifecycle = AdminPlaceService_requireLifecycleState_(state, parameters.expected_version, ["draft", "published"]);
       if ((lifecycle.status === "published") !== includeEpoch) throw new Error("ADMIN_PLACE_STATE_VERIFY");
-      AdminPlaceService_inspectDependencies_(parameters.place_id);
-      return AdminPlaceService_applyLifecycleWrite_(
+      var dependencies = AdminPlaceService_inspectDependencies_(parameters.place_id).groups;
+      var result = AdminPlaceService_applyLifecycleWrite_(
         admin, state, lifecycle, "ARCHIVE", "archived", false, includeEpoch, false
       );
+      if (result && result.ok === true && result.data) result.data.dependencies = dependencies;
+      return result;
     });
   });
 }
