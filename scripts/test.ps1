@@ -83,7 +83,8 @@ $required = @(
   "scripts/test-admin-place-schema.js",
   "scripts/test-admin-place-service.js",
   "scripts/test-admin-place-media.js",
-  "scripts/test-admin-places.js"
+  "scripts/test-admin-places.js",
+  "scripts/test-admin-place-regressions.js"
 )
 
 $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root $_)) })
@@ -173,6 +174,8 @@ if ($LASTEXITCODE -ne 0) { throw "Admin Place editor verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin Place map verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-place-media.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Place media verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-place-regressions.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Place integrated regression verification failed." }
 & node (Join-Path $PSScriptRoot "test-crypto-service.js")
 if ($LASTEXITCODE -ne 0) { throw "CryptoService verification failed." }
 & node (Join-Path $PSScriptRoot "test-auth-service.js")

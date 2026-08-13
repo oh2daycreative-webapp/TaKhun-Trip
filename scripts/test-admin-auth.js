@@ -1583,6 +1583,16 @@ test("runner invokes Admin Auth and propagates its failure immediately", async (
   assert.match(runner, /node \(Join-Path \$PSScriptRoot "test-admin-auth\.js"\)\r?\nif \(\$LASTEXITCODE -ne 0\) \{ throw "Admin browser auth verification failed\." \}/);
 });
 
+test("Task 18 rejects the historical edit query from the bounded Place Edit return", async () => {
+  const { auth } = loadAuth({ href: "https://site.example/admin/login.html" });
+  assert.equal(auth.safeReturnPath("place-edit.html?edit=BTK-001"), "places.html");
+  const source = mutatedSource('if (entries.length !== 1 || entries[0][0] !== "place_id") return null;', 'if (entries.length !== 1 || !["place_id", "edit"].includes(entries[0][0])) return null;');
+  await proveContractRejects(async () => {
+    const { auth: mutated } = loadAuth({ source, href: "https://site.example/admin/login.html" });
+    assert.equal(mutated.safeReturnPath("place-edit.html?edit=BTK-001"), "places.html");
+  });
+});
+
 (async () => {
   for (const { name, run } of tests) {
     await run();

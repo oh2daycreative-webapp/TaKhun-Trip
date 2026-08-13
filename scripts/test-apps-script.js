@@ -563,5 +563,9 @@ for (const action of ["submitReview", "getGallery", "searchAll"]) {
   assert.deepEqual(output, safeServerError);
 }
 
+for (const migration of ["setupAdminPlaceSchema", "inspectAdminPlaceStatusMigration", "migrateAdminPlaceLegacyStatuses", "verifyAdminPlaceStatusMigration"]) {
+  assert.doesNotMatch(router, new RegExp(`\\b${migration}\\b`), `Task 18 keeps ${migration} operator-only and non-routed`);
+}
+
 if (process.exitCode) process.exit(process.exitCode);
 process.stdout.write(`Apps Script Router verification passed for ${sources.length} files and ${declarations.size} unique functions.\n`);
