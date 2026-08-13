@@ -40,6 +40,8 @@ GET {SCRIPT_URL}?action=getPlaces
 
 ตัวอย่าง POST:
 
+> Historical/general CMS example only: `createPlace` below is not an M7 Place Router action or compatibility alias. Section 21 is authoritative for M7 Place requests.
+
 ```json
 {
   "action": "createPlace",
@@ -1268,7 +1270,7 @@ Response คืน original `expires_at`; there is no renewed expiry, sliding re
 
 ## 7A. Milestone 6 transport and Router contract
 
-Exact POST action allowlist:
+Exact POST action allowlist (Milestone 6 historical; superseded for M7 Place actions by section 21):
 
 ```text
 submitReview
@@ -1313,7 +1315,7 @@ All protected authorization is server-authoritative on every call. Session expir
 
 ## 7B. Future Admin CMS API direction
 
-Sections 7.3 through 7.29 describe future Admin CMS direction. They are not Router actions or implemented CRUD/moderation features in Milestone 6.
+Except for the M7 Place replacement in section 21, sections 7.3 through 7.29 describe future Admin CMS direction. They are not Router actions or implemented CRUD/moderation features in Milestone 6.
 
 ---
 
@@ -2513,7 +2515,52 @@ API จะถือว่าผ่านเมื่อ:
 
 ---
 
-## 21. Final API Direction
+## 21. M7 Admin Places authoritative API override
+
+This section replaces the older future-CRUD Place material in sections 7.4–7.7 for M7 only. It does not make the remaining future Admin CMS examples routed APIs.
+
+### 21.1 Router and server actions
+
+The Router exposes only these M7 Place actions, all by POST: `adminGetPlaces`, `adminGetPlaceDetail`, `adminCreatePlace`, `adminSavePlaceDraft`, `adminPublishPlace`, `adminInspectPlaceDependencies`, `adminUnpublishPlace`, `adminArchivePlace`, `adminRestorePlace`, and `adminGetPlaceMediaOptions`. Existing POST actions `adminLogin`, `adminValidateSession`, and `adminLogout` remain available. There is no generic arbitrary-action dispatcher and the older `createPlace`, `updatePlace`, and `deletePlace` examples are not routed M7 aliases.
+
+Every protected request carries the raw session token in the JSON body only. Requests use `POST`, `Content-Type: text/plain;charset=utf-8`, a 12-second client timeout, and exactly one fetch with no automatic retry. There is no `Authorization` header, query token, or cookie-token contract. The server validates the session and role for every action; browser role presentation is never authorization.
+
+### 21.2 Place façade and request grammar
+
+`TakhunAdminApi` provides explicit methods only: `getPlaces`, `getPlaceDetail`, `getPlaceMediaOptions`, `inspectPlaceDependencies`, `createPlace`, `savePlaceDraft`, `publishPlace`, `unpublishPlace`, `archivePlace`, and `restorePlace` (alongside login/session/logout). Its Place requests map one-to-one to the routed action names above.
+
+- List: `{ keyword?, category?, status?, page?, page_size? }`; empty status defaults to non-archived and `all` includes archived.
+- Detail: `{ place_id, view }`, where `view` is `working` or `published`.
+- Media options: `{ place_id, role?, page?, page_size?, keyword? }`, with optional `role` `all`, `cover`, or `gallery`.
+- Dependency inspection: `{ place_id }`.
+- Create: `{ content }`; the server generates the immutable `place_id` and creates a draft.
+- Draft save: `{ place_id, expected_version, content }`.
+- Publish, Unpublish, and Restore: `{ place_id, expected_version }`.
+- Archive: `{ place_id, expected_version, confirmed: true }`.
+
+Content uses `gallery_media_ids` as `""` or an ordered ID array. Client-supplied status, ID, actor, timestamps, versions, or audit fields are not writable.
+
+Success projections expose only safe fields. Detail/write responses include `place_id`, `status`, `entity_version`, `working_version`, `published_version`, `has_active_draft`, `created_at`, and `updated_at`; detail additionally exposes safe content/media/capabilities. List display state may be `published_with_draft` only when a published Place has an active draft; it is derived, not persisted.
+
+### 21.3 Lifecycle, concurrency, dependencies, and cache
+
+Place lifecycle is `draft`, `published`, `archived`: Create → draft; Save Draft preserves draft or a published Place's working draft; Publish promotes an active draft; Unpublish published → draft; Archive draft/published → archived; Restore archived → draft only. Draft saves do not mutate Public data. Server-side `expected_version` checking under the write lock returns `CONFLICT` for stale input. There is no force overwrite, automatic retry, or automatic merge.
+
+`adminInspectPlaceDependencies` is advisory. Archive rereads the Place/version and recomputes dependencies under lock; its successful response contains fresh safe dependency groups: `routes`, `nearby_places`, `products`, `events`, `gallery`, `trip_templates`, and `reviews`. No preview token, hash, or count is authority. Route dependencies follow `route_places.place_id` → `route_places.route_id` → `routes.route_id`, never a nonexistent `routes.place_ids` field.
+
+The `PLACE_PUBLIC_CACHE_EPOCH` affects Places, Place Detail, Map Places, Home, Search, Route Detail, Trip Templates, Product Detail, Event Detail, and Reviews; it excludes Route/Product/Event lists, Gallery, Settings, and Categories. Save Draft and media-option reads do not bump it. Publish, Unpublish, and Archive of a published Place do; Archive of a draft and Restore do not. A failed epoch-changing transaction restores the prior epoch.
+
+### 21.4 Safe errors and return handling
+
+Server safe codes are `VALIDATION_ERROR`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, and `SERVER_ERROR`. `NOT_FOUND` was already part of the documented global API vocabulary; M7 extends the strict Admin browser/API allowlist to preserve it for Place outcomes. `CONFLICT` is the new M7 concurrency outcome. Neither change broadens the safe envelope. The client also uses local `NETWORK_ERROR`, `TIMEOUT`, `HTTP_ERROR`, and `MALFORMED_RESPONSE`; unknown server codes normalize to `SERVER_ERROR`. Raw backend messages, rows, stack traces, and token data are not user-facing.
+
+The protected Place Edit return grammar accepts only `place-edit.html` or `place-edit.html?place_id=<canonical ID>`. Historical `?edit=`, empty/duplicate/extra parameters, fragments, arbitrary query preservation, traversal, credentials, and authentication material are rejected. Invalid Place Edit intent falls back to `places.html`.
+
+### 21.5 Deployment state
+
+The M7 actions are implemented and locally tested, but remote operations remain human-only and pending: `clasp push`, Apps Script deployment, Script Property setup/change, Sheet backup/schema setup, migration dry-run/execution/verification/rollback exercise, staging/production QA and release, branch push, PR, and merge. This document does not authorize or claim any of them complete.
+
+## 22. Final API Direction
 
 API ของ **Takhun Trip** ต้องเรียบง่าย ใช้งานจริง และดูแลต่อได้
 

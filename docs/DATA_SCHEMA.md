@@ -92,6 +92,8 @@ Google Sheets ควรมีชีตดังนี้
 
 ## 5. Sheet: `places`
 
+**M7 note:** section 25 is the authoritative current Place schema/lifecycle contract. This older baseline table is retained for legacy columns and general context; it does not authorize legacy Place statuses or URL-era Gallery data for M7.
+
 ใช้เก็บข้อมูลสถานที่ท่องเที่ยวทั้งหมด ทั้งอำเภอบ้านตาขุนและอำเภอใกล้เคียง
 
 ### 5.1 Fields
@@ -983,7 +985,33 @@ Admin authentication ใช้ `sessionStorage only` ภายใต้ key `TAK
 
 ---
 
-## 25. Final Data Direction
+## 25. M7 Admin Places authoritative schema override
+
+This section is authoritative for M7 Places and supersedes older general Place wording in this document. It does not redefine status values for Routes, Reviews, Gallery, Admin accounts, or other entities.
+
+### 25.1 Physical sheets and append-only setup
+
+`setupAdminPlaceSchema()` is idempotent: it verifies existing headers, appends only missing headers, creates `place_drafts` only when absent, and never reorders, removes, or rewrites existing rows as part of setup.
+
+`places` retains immutable `place_id`, Place lifecycle/server metadata, and the last promoted Published content. Its M7 appended headers are `address_th`, `address_en`, `facilities_th`, `facilities_en`, `gallery_media_ids`, `entity_version`, `published_version`, `created_by`, `updated_by`, `published_at`, `published_by`, `archived_at`, and `archived_by`.
+
+`place_drafts` holds at most one active mutable Draft Revision per `place_id`. It contains the Place content columns (including address/facilities and `gallery_media_ids`) plus `draft_version`, `base_published_version`, `created_at`, `updated_at`, `created_by`, and `updated_by`. A draft is isolated from Public projections; saving it never changes the published snapshot.
+
+`activity_logs` retains legacy columns and appends `audit_id`, `actor_admin_id`, and `occurred_at`. Every M7 audit also writes compatibility aliases: `log_id = audit_id`, `admin_id = actor_admin_id`, and `created_at = occurred_at`. M7 actions are `CREATE`, `UPDATE_DRAFT`, `PUBLISH`, `UNPUBLISH`, `ARCHIVE`, and `RESTORE` with `entity_type = place`.
+
+### 25.2 Place lifecycle, revisions, and media
+
+M7 Place status is exactly `draft`, `published`, or `archived`. Create produces `draft`; Publish promotes the active draft and produces `published`; Unpublish produces `draft`; Archive accepts draft or published and produces `archived`; Restore produces `draft` and never publishes directly. `published_with_draft` is an Admin-only derived display state, not a stored status.
+
+`entity_version` is the authoritative positive version for a Place identity. The Admin response exposes it as `working_version`; an active draft has `draft_version` equal to that version. `published_version` identifies the last promoted snapshot and is absent/null for a new unpromoted Place. A draft has `base_published_version` identifying the published snapshot it began from (or `0` for a new draft). The server checks `expected_version`; stale writes return `CONFLICT` and make no write or success audit.
+
+`gallery_media_ids` is the authoritative ordered Gallery selection: browser payloads use `""` for empty or an ordered array; Sheets use `""` or pipe serialization. It permits 0–50 unique approved manifest IDs belonging to the same Place and `role = gallery`. `cover_image_url` remains legacy/inert for this contract; the Hero is derived only from the same-Place approved `cover` manifest item and cannot be selected. `gallery_image_urls` is likewise inert. Cross-Place, cover-as-Gallery, duplicate, over-limit, arbitrary URL, source path, or filesystem reference is rejected. Public Detail projects only the stored, ordered published Gallery; draft media never leaks and invalid published serialization yields `[]`.
+
+### 25.3 Migration and operator gate
+
+`inspectAdminPlaceStatusMigration()`, `migrateAdminPlaceLegacyStatuses()`, and `verifyAdminPlaceStatusMigration()` are explicit, non-routed operator functions. They never run during a request. Before migration, a human operator must take and verify a recoverable backup, dry-run and verify row count/ID digest and source statuses, then set the required migration controls. Mapping is non-destructive: legacy `hidden` becomes retained draft content with status `draft`; legacy `deleted` becomes retained content with status `archived`. Unknown statuses, duplicate/blank IDs, missing backup, failed verification, or any mutation failure stops activation and requires restoring/verifying the complete backup. No production migration has been executed by this repository.
+
+## 26. Final Data Direction
 
 โครงสร้างข้อมูลของ **Takhun Trip** ต้องเรียบง่ายแต่รองรับการขยายในอนาคต
 

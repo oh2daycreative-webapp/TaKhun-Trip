@@ -1127,32 +1127,50 @@ adminGetDashboard
 
 ## 6.3 Admin Places Page
 
-### File
+### Files and page ownership
 
 ```text
 public/admin/places.html
+public/admin/place-edit.html
 ```
+
+`places.html` owns only the list, search, category/status filters, pagination, and navigation to Create/Edit/read-only detail. It does not contain the Place form, map, media selector, or lifecycle/conflict dialogs.
+
+`place-edit.html` owns Create, Edit, reviewer/viewer read-only detail, the map picker, manifest-backed Hero/Gallery presentation and selection, and the lifecycle, dependency, unsaved-change, and conflict UX.
 
 ### URL
 
 ```text
 admin/places.html
-admin/places.html?edit={place_id}
+admin/place-edit.html
+admin/place-edit.html?place_id={canonical_place_id}
 ```
+
+The bare editor URL is Create. The single bounded `place_id` query is Edit/read-only detail. `?edit=`, alternate `?id=`, duplicate or extra parameters, fragments, arbitrary query preservation, traversal, credentials, and authentication material are not compatibility aliases. Invalid Place Edit intent falls back safely to `admin/places.html`; authentication return preserves only the two canonical editor forms.
 
 ### Purpose
 
-จัดการข้อมูลสถานที่ท่องเที่ยว
+จัดการข้อมูลสถานที่ท่องเที่ยวด้วย lifecycle `draft` / `published` / `archived` โดยแยก working Draft Revision ออกจาก Published snapshot
 
 ### Required Sections
 
-1. Page Header
-2. Add Place Button
-3. Search / Filter
+`places.html`:
+
+1. Page Header and Add Place navigation
+2. Search / category / status filters
+3. Pagination
 4. Places Table / Mobile Cards
-5. Place Form Modal หรือ Form Section
-6. Confirm Dialog
-7. Toast
+5. Loading / empty / safe error states
+
+`place-edit.html`:
+
+1. Create/Edit identity and semantic editable form for authorized writers
+2. Semantic read-only detail for `reviewer` and `viewer`
+3. Map picker with manual coordinate alternative and no geolocation
+4. Derived same-Place Hero and ordered same-Place Gallery selector
+5. Save/Publish and capability-authorized lifecycle controls
+6. Advisory dependency preview and locked Archive-result reconciliation
+7. Unsaved-change, conflict, confirmation, validation, and safe error dialogs/status
 
 ### Required JS
 
@@ -1161,16 +1179,27 @@ public/js/config.js
 public/admin/js/admin-api.js
 public/admin/js/admin-auth.js
 public/admin/js/admin-places.js
+public/admin/js/admin-place-edit.js
+public/admin/js/admin-place-map.js
+public/admin/js/admin-place-media.js
 ```
 
-### Main API
+### M7 Place-specific routed actions
 
 ```text
 adminGetPlaces
-createPlace
-updatePlace
-deletePlace
+adminGetPlaceDetail
+adminCreatePlace
+adminSavePlaceDraft
+adminPublishPlace
+adminInspectPlaceDependencies
+adminUnpublishPlace
+adminArchivePlace
+adminRestorePlace
+adminGetPlaceMediaOptions
 ```
+
+These are exactly the ten M7 Place-specific POST actions, not the entire global Router action set. Legacy Place action names are not M7 aliases. Browser presentation never grants authority: `super_admin` and `editor` receive write controls only as allowed by the server-projected capabilities and lifecycle; `reviewer` and `viewer` receive read-only UX; the server validates the session, role, lifecycle, and version on every operation.
 
 ### Public Preview
 
@@ -1830,11 +1859,13 @@ place-detail.html
 
 ### 13.3 Admin Edit ID Not Found
 
-ถ้าเปิด `admin/places.html?edit=BTK-999` แล้วไม่พบข้อมูล:
+ถ้าเปิด `admin/place-edit.html?place_id=BTK-999` ด้วย canonical Place ID แล้ว API ส่ง `NOT_FOUND`:
 
 ```text
 ไม่พบข้อมูลที่ต้องการแก้ไข
 ```
+
+หน้าต้องคง safe error state และให้กลับ `admin/places.html` ได้ โดยไม่เปิด form Create โดยบังเอิญ หาก URL ไม่ตรง canonical grammar ตั้งแต่แรก ให้ใช้ bounded fallback ไป `admin/places.html` และห้ามส่ง query ที่ไม่อนุญาตต่อไปยัง login/return flow
 
 ---
 
@@ -1884,6 +1915,9 @@ place-detail.html
 | `admin/dashboard.html` | จัดการรีวิว | `admin/reviews.html` |
 | `admin/dashboard.html` | จัดการแกลเลอรี | `admin/gallery.html` |
 | `admin/dashboard.html` | ตั้งค่า | `admin/settings.html` |
+| `admin/places.html` | เพิ่มสถานที่ | `admin/place-edit.html` |
+| `admin/places.html` | แก้ไข/ดูรายละเอียด | `admin/place-edit.html?place_id={canonical_place_id}` |
+| `admin/place-edit.html` | กลับรายการ | `admin/places.html` |
 | `admin/places.html` | Preview | `../place-detail.html?id={place_id}` |
 | `admin/routes.html` | Preview | `../route-detail.html?id={route_id}` |
 | `admin/products.html` | Preview | `../product-detail.html?id={product_id}` |
@@ -1925,20 +1959,21 @@ place-detail.html
 15. `admin/login.html`
 16. `admin/dashboard.html`
 17. `admin/places.html`
-18. `admin/routes.html`
-19. `admin/products.html`
-20. `admin/events.html`
-21. `admin/reviews.html`
-22. `admin/gallery.html`
-23. `admin/settings.html`
+18. `admin/place-edit.html`
+19. `admin/routes.html`
+20. `admin/products.html`
+21. `admin/events.html`
+22. `admin/reviews.html`
+23. `admin/gallery.html`
+24. `admin/settings.html`
 
 ### 16.4 Phase 4 — Optional
 
 ทำภายหลังได้:
 
-24. `search.html`
-25. `404.html`
-26. `admin/404.html`
+25. `search.html`
+26. `404.html`
+27. `admin/404.html`
 
 ---
 
