@@ -19,6 +19,13 @@
       <section class="admin-place-edit" data-admin-content hidden aria-hidden="true" aria-busy="true">
         <p class="admin-place-edit__notice" data-admin-place-edit-status role="status" aria-live="polite" aria-atomic="true">กำลังเตรียมแบบฟอร์ม</p>
         <div class="admin-place-edit__state" data-admin-place-edit-state></div><a class="button" href="places.html" data-admin-place-edit-fatal hidden>กลับไปรายการสถานที่</a>
+        <section class="admin-place-readonly" data-admin-place-readonly hidden aria-labelledby="admin-place-readonly-title">
+          <div class="admin-place-edit__actions"><a class="button" href="places.html">กลับไปรายการสถานที่</a><p class="admin-place-readonly__notice"><strong>โหมดอ่านอย่างเดียว</strong> ไม่มีส่วนควบคุมสำหรับแก้ไขหรือเปลี่ยนสถานะ</p></div>
+          <h2 id="admin-place-readonly-title">รายละเอียดสถานที่</h2>
+          <p class="admin-place-readonly__mode" data-admin-place-readonly-mode role="status" aria-live="polite" aria-atomic="true"></p>
+          <div class="admin-place-readonly__switch" data-admin-place-readonly-switch role="group" aria-label="เลือกเวอร์ชันสำหรับตรวจสอบ" hidden><button class="button" type="button" data-admin-place-readonly-working aria-pressed="true">ข้อมูลที่กำลังทำงาน</button><button class="button" type="button" data-admin-place-readonly-published aria-pressed="false">ฉบับเผยแพร่</button></div>
+          <div class="admin-place-readonly__detail" data-admin-place-readonly-detail></div>
+        </section>
         <form data-admin-place-edit-form novalidate hidden>
           <div class="admin-place-edit__actions"><a class="button" href="places.html" data-admin-place-edit-back>กลับไปรายการสถานที่</a><p data-admin-place-edit-identity hidden><strong>รหัสสถานที่:</strong> <span data-admin-place-edit-id></span> <span data-admin-place-edit-lifecycle></span></p></div>
           <section class="admin-place-edit__section"><h2>เนื้อหาสถานที่</h2><div class="admin-place-edit__tabs" role="tablist" aria-label="ภาษาเนื้อหา"><button type="button" role="tab" id="place-tab-th" aria-selected="true" aria-controls="place-panel-th" tabindex="0" data-admin-place-tab="th">ภาษาไทย</button><button type="button" role="tab" id="place-tab-en" aria-selected="false" aria-controls="place-panel-en" tabindex="-1" data-admin-place-tab="en">English</button></div>
