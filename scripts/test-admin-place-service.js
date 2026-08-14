@@ -7,6 +7,8 @@ const vm = require("node:vm");
 
 const root = path.join(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
+const normalizeSource = (source) => source.replace(/\r\n?/g, "\n");
+const adminPlaceServiceSource = normalizeSource(read("apps-script/AdminPlaceService.gs"));
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 const PLACE_HEADERS = [
@@ -967,7 +969,7 @@ test("Create forbids nonempty Gallery before identity and Publish revalidates Ga
 });
 
 test("Gallery authority mutation proofs reject same-Place role and serialization bypasses", () => {
-  const source = read("apps-script/AdminPlaceService.gs");
+  const source = adminPlaceServiceSource;
   const authorityCases = [
     {
       label: "same Place",
@@ -1356,7 +1358,7 @@ test("Create permits a structurally complete empty draft and rejects generated I
     assert.equal(wrongVersion.calls.events.filter((event) => event.startsWith("uuid:")).length, 1);
   }
 
-  const source = read("apps-script/AdminPlaceService.gs");
+  const source = adminPlaceServiceSource;
   const lockedCollisionBlock =
     "    return AdminPlaceService_withWriteLock_(function () {\n" +
     "      var context = AdminPlaceService_requireContext_(true);\n" +
@@ -1653,7 +1655,7 @@ test("Create and Save verification or audit failure compensates under lock witho
 });
 
 test("Task 5 mutation proofs catch role bypass Published overwrite missing version advance and missing audit", () => {
-  const source = read("apps-script/AdminPlaceService.gs");
+  const source = adminPlaceServiceSource;
 
   const fullRowSaveRestore = source.replace(
     "        SheetService_updateObjectAtRow_(target.sheetName, before.sourceRowNumber, restorePatch);",
@@ -1682,14 +1684,20 @@ test("Task 5 mutation proofs catch role bypass Published overwrite missing versi
     assert.throws(() => assertError(result, "FORBIDDEN"));
   }
 
-  const publishedOverwrite = source.replace(
+  const publishedOverwritePatch = source.replace(
     "        var placePatch = {\n          entity_version: nextVersion,",
     "        var placePatch = {\n          name_th: parameters.content.name_th,\n          entity_version: nextVersion,"
-  ).replace(
+  );
+  assert.notEqual(publishedOverwritePatch, source, "Published overwrite placePatch mutation target must match");
+  const publishedOverwrite = publishedOverwritePatch.replace(
     '["entity_version", "updated_at", "updated_by"], placePatch',
     '["name_th", "entity_version", "updated_at", "updated_by"], placePatch'
   );
-  assert.notEqual(publishedOverwrite, source, "Published overwrite mutation target must match");
+  assert.notEqual(
+    publishedOverwrite,
+    publishedOverwritePatch,
+    "Published overwrite selective-update allowlist mutation target must match"
+  );
   {
     const runtime = loadTransactionBackend("UPDATE_DRAFT", { serviceSource: publishedOverwrite });
     const before = publicPlaceDetail(runtime);
@@ -1933,7 +1941,7 @@ test("Every post-mutation Publish failure restores Place draft epoch and removes
 });
 
 test("Publish mutation proofs catch skipped validation epoch audit and draft consumption", () => {
-  const source = read("apps-script/AdminPlaceService.gs");
+  const source = adminPlaceServiceSource;
   const mutations = [
     {
       label: "validation",
@@ -2186,7 +2194,7 @@ test("Lifecycle conflicts invalid transitions and post-mutation failures never r
 });
 
 test("Task 9 mutation proofs reject skipped confirmation reinspection draft synchronization and conditional epoch", () => {
-  const source = read("apps-script/AdminPlaceService.gs");
+  const source = adminPlaceServiceSource;
   const mutations = [
     {
       label: "confirmation",
@@ -2460,7 +2468,7 @@ test("transaction intended-state reread rejects no-op existing-row writes before
 });
 
 test("transaction mutation proofs catch removed state version audit reverse clear and verification invariants", () => {
-  const source = read("apps-script/AdminPlaceService.gs");
+  const source = adminPlaceServiceSource;
 
   const noPreState = source.replace("      place: placeRow,", "      place: null,");
   assert.notEqual(noPreState, source, "pre-state capture mutation target must match");
@@ -2537,7 +2545,7 @@ test("all four authoritative Admin roles may list and inspect Places", () => {
 });
 
 test("mutation proofs reject bypassed authoritative auth and raw-row responses", () => {
-  const source = read("apps-script/AdminPlaceService.gs");
+  const source = adminPlaceServiceSource;
   const authBypass = source.replace(
     "var admin = AuthService_requireAdmin_(token);",
     'var admin = { role: "viewer" };'

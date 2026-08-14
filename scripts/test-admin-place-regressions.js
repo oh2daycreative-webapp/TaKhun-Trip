@@ -12,6 +12,8 @@ const vm = require("node:vm");
 
 const root = path.join(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
+const normalizeSource = (source) => source.replace(/\r\n?/g, "\n");
+const adminPlaceServiceSource = normalizeSource(read("apps-script/AdminPlaceService.gs"));
 const plain = (value) => JSON.parse(JSON.stringify(value));
 const runner = read("scripts/test.ps1");
 const router = read("apps-script/Router.gs");
@@ -125,9 +127,12 @@ test("real Admin Place lifecycle shares Sheets Properties and Public projection"
   const draftArchive = harness.loadTransactionBackend("ARCHIVE", { archiveDraftSource: true }); assert.equal(plain(draftArchive.context.adminArchivePlace_("TOKEN", { place_id: "TX-PLACE", expected_version: 4, confirmed: true })).ok, true); assert.equal(draftArchive.properties.get("PLACE_PUBLIC_CACHE_EPOCH"), "41");
   const restore = harness.loadTransactionBackend("RESTORE"); assert.equal(plain(restore.context.adminRestorePlace_("TOKEN", { place_id: "TX-PLACE", expected_version: 4 })).ok, true); assert.equal(restore.properties.get("PLACE_PUBLIC_CACHE_EPOCH"), "41"); assert.equal(restore.sheets.place_drafts.rows.some((row) => row[0] === "TX-PLACE"), true);
 
-  const service = read("apps-script/AdminPlaceService.gs");
-  const leak = service.replace('var placePatch = {\n          entity_version: nextVersion,', 'var placePatch = {\n          name_th: parameters.content.name_th,\n          entity_version: nextVersion,').replace('["entity_version", "updated_at", "updated_by"]', '["name_th", "entity_version", "updated_at", "updated_by"]');
-  assert.notEqual(leak, service); assert.throws(() => { const mutant = realLifecycleSnapshot(harness, leak); assert.equal(mutant.write(content, 3).ok, true); assert.equal(mutant.publicName(), "prior published"); });
+  const service = adminPlaceServiceSource;
+  const leakPatch = service.replace('var placePatch = {\n          entity_version: nextVersion,', 'var placePatch = {\n          name_th: parameters.content.name_th,\n          entity_version: nextVersion,');
+  assert.notEqual(leakPatch, service, "Published leak placePatch mutation target must match");
+  const leak = leakPatch.replace('["entity_version", "updated_at", "updated_by"]', '["name_th", "entity_version", "updated_at", "updated_by"]');
+  assert.notEqual(leak, leakPatch, "Published leak selective-update allowlist mutation target must match");
+  assert.throws(() => { const mutant = realLifecycleSnapshot(harness, leak); assert.equal(mutant.write(content, 3).ok, true); assert.equal(mutant.publicName(), "prior published"); });
   const noPublishBump = service.replace('var nextEpoch = PlaceService_bumpCacheEpoch_();', 'var nextEpoch = PlaceService_cacheEpoch_();');
   assert.throws(() => { const mutant = realLifecycleSnapshot(harness, noPublishBump); assert.equal(mutant.write(content, 3).ok, true); assert.equal(mutant.publish(4).ok, true); assert.equal(mutant.epoch(), "42"); });
   const staleAccepted = service.replace('if (expectedVersion !== authoritativeVersion) throw new Error("CONFLICT");', 'if (false) throw new Error("CONFLICT");');
