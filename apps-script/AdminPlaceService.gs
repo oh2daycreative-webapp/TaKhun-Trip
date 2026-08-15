@@ -179,6 +179,7 @@ function adminSavePlaceDraft_(token, payload) {
       var state = AdminPlaceService_captureState_(parameters.place_id, false);
       AdminPlaceService_setSelectiveRestore_(state, "place", []);
       AdminPlaceService_setSelectiveRestore_(state, "draft", []);
+      var responseCreatedAt = AdminPlaceService_safeTimestamp_(state.rows.place.values.created_at);
       try {
         var occurredAt = new Date().toISOString();
         var nextVersion = place.entityVersion + 1;
@@ -227,7 +228,7 @@ function adminSavePlaceDraft_(token, payload) {
         AdminPlaceService_appendVerifiedAudit_(admin, "UPDATE_DRAFT", parameters.place_id);
         return AdminPlaceService_success_(AdminPlaceService_writeSuccess_(
           parameters.place_id, place.row.status, nextVersion, place.publishedVersion, true,
-          AdminPlaceService_safeText_(state.rows.place.values.created_at), occurredAt
+          responseCreatedAt, occurredAt
         ));
       } catch (error) {
         return AdminPlaceService_failClosed_(state);
@@ -263,6 +264,7 @@ function adminPublishPlace_(token, payload) {
         throw new Error("ADMIN_PLACE_VERSION");
       }
       var promotedContent = AdminPlaceService_publishContent_(capturedDraft, parameters.place_id);
+      var responseCreatedAt = AdminPlaceService_safeTimestamp_(state.rows.place.values.created_at);
       try {
         var occurredAt = new Date().toISOString();
         var nextEntityVersion = entityVersion + 1;
@@ -296,7 +298,7 @@ function adminPublishPlace_(token, payload) {
         AdminPlaceService_verifyCacheEpoch_(nextEpoch);
         var response = AdminPlaceService_success_(AdminPlaceService_writeSuccess_(
           parameters.place_id, "published", nextEntityVersion, nextPublishedVersion, false,
-          AdminPlaceService_safeText_(state.rows.place.values.created_at), occurredAt
+          responseCreatedAt, occurredAt
         ));
         state.audit = null;
         return response;
@@ -395,6 +397,7 @@ function AdminPlaceService_requireLifecycleState_(state, expectedVersion, allowe
 }
 
 function AdminPlaceService_applyLifecycleWrite_(admin, state, lifecycle, action, targetStatus, ensureDraft, bumpEpoch, clearArchive) {
+  var responseCreatedAt = AdminPlaceService_safeTimestamp_(state.rows.place.values.created_at);
   AdminPlaceService_setSelectiveRestore_(state, "place", []);
   AdminPlaceService_setSelectiveRestore_(state, "draft", []);
   try {
@@ -462,7 +465,7 @@ function AdminPlaceService_applyLifecycleWrite_(admin, state, lifecycle, action,
     if (bumpEpoch) AdminPlaceService_verifyCacheEpoch_(nextEpoch);
     var response = AdminPlaceService_success_(AdminPlaceService_writeSuccess_(
       state.place_id, targetStatus, nextVersion, lifecycle.publishedVersion, Boolean(state.rows.draft || ensureDraft),
-      AdminPlaceService_safeText_(state.rows.place.values.created_at), occurredAt
+      responseCreatedAt, occurredAt
     ));
     state.audit = null;
     return response;
@@ -1074,8 +1077,8 @@ function AdminPlaceService_writeSuccess_(placeId, status, entityVersion, publish
     working_version: entityVersion,
     published_version: publishedVersion || null,
     has_active_draft: hasDraft,
-    created_at: createdAt,
-    updated_at: updatedAt
+    created_at: AdminPlaceService_safeTimestamp_(createdAt),
+    updated_at: AdminPlaceService_safeTimestamp_(updatedAt)
   };
 }
 
@@ -1580,8 +1583,8 @@ function AdminPlaceService_buildList_(context, parameters) {
       has_active_draft: Boolean(draft),
       display_state: AdminPlaceService_displayState_(place.row.status, Boolean(draft)),
       cover: AdminPlaceService_mediaForPlace_(mediaManifest, id, []).cover,
-      created_at: AdminPlaceService_safeText_(place.row.created_at),
-      updated_at: AdminPlaceService_safeText_(place.row.updated_at)
+      created_at: AdminPlaceService_safeTimestamp_(place.row.created_at),
+      updated_at: AdminPlaceService_safeTimestamp_(place.row.updated_at)
     };
   }).filter(function (item) {
     if (!parameters.status && item.status === "archived") return false;
@@ -1647,8 +1650,8 @@ function AdminPlaceService_buildDetail_(context, parameters, admin) {
       can_view_working: true,
       can_view_published: place.publishedVersion > 0
     },
-    created_at: AdminPlaceService_safeText_(place.row.created_at),
-    updated_at: AdminPlaceService_safeText_(place.row.updated_at)
+    created_at: AdminPlaceService_safeTimestamp_(place.row.created_at),
+    updated_at: AdminPlaceService_safeTimestamp_(place.row.updated_at)
   };
 }
 
@@ -1818,6 +1821,35 @@ function AdminPlaceService_storedInteger_(value, positive) {
   else throw new Error("ADMIN_PLACE_VERSION");
   if (!Number.isSafeInteger(parsed) || parsed < (positive ? 1 : 0)) throw new Error("ADMIN_PLACE_VERSION");
   return parsed;
+}
+
+function AdminPlaceService_safeTimestamp_(value) {
+  if (typeof value !== "string") throw new Error("ADMIN_PLACE_TIMESTAMP");
+  var canonicalMatch = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{3})Z$/.exec(value);
+  var legacyMatch = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(value);
+  var match = canonicalMatch || legacyMatch;
+  if (!match) throw new Error("ADMIN_PLACE_TIMESTAMP");
+
+  var year = Number(match[1]);
+  var month = Number(match[2]);
+  var day = Number(match[3]);
+  var hour = Number(match[4]);
+  var minute = Number(match[5]);
+  var second = Number(match[6]);
+  var millisecond = canonicalMatch ? Number(match[7]) : 0;
+  var timestamp = new Date(0);
+  timestamp.setUTCFullYear(year, month - 1, day);
+  timestamp.setUTCHours(hour, minute, second, millisecond);
+  if (timestamp.getUTCFullYear() !== year || timestamp.getUTCMonth() !== month - 1 ||
+      timestamp.getUTCDate() !== day || timestamp.getUTCHours() !== hour ||
+      timestamp.getUTCMinutes() !== minute || timestamp.getUTCSeconds() !== second ||
+      timestamp.getUTCMilliseconds() !== millisecond) {
+    throw new Error("ADMIN_PLACE_TIMESTAMP");
+  }
+
+  var normalized = timestamp.toISOString();
+  if (canonicalMatch && normalized !== value) throw new Error("ADMIN_PLACE_TIMESTAMP");
+  return canonicalMatch ? value : normalized;
 }
 
 function AdminPlaceService_validId_(value) {
