@@ -2596,6 +2596,103 @@ test("list defaults exclude archived and expose only the exact safe projection",
   assert.equal(calls.writes.length, 0);
 });
 
+test("legacy timestamps normalize across Admin Place list detail and write safe projections without source mutation", () => {
+  const data = {
+    places: [place("BTK-001", {
+      created_at: "2026-07-14 21:30:00",
+      updated_at: "2026-08-14T19:57:57.370Z"
+    })],
+    drafts: []
+  };
+  const before = JSON.stringify(data);
+  const { context, calls } = loadBackend({ data });
+
+  const listItem = plain(context.adminGetPlaces_("TOKEN", {})).data.items[0];
+  const detail = plain(context.adminGetPlaceDetail_("TOKEN", { place_id: "BTK-001", view: "working" })).data;
+  const write = plain(context.AdminPlaceService_writeSuccess_(
+    "BTK-001", "published", 1, 1, false, "2026-07-14 21:30:00", "2026-08-14T19:57:57.370Z"
+  ));
+
+  for (const projection of [listItem, detail, write]) {
+    assert.equal(projection.created_at, "2026-07-14T21:30:00.000Z");
+    assert.equal(projection.updated_at, "2026-08-14T19:57:57.370Z");
+  }
+  assert.equal(JSON.stringify(data), before);
+  assert.equal(calls.writes.length, 0);
+});
+
+test("canonical Admin Place timestamps remain byte-for-byte unchanged in every safe projection", () => {
+  const createdAt = "2024-02-29T23:59:59.007Z";
+  const updatedAt = "2026-08-14T19:57:57.370Z";
+  const data = { places: [place("BTK-001", { created_at: createdAt, updated_at: updatedAt })], drafts: [] };
+  const { context } = loadBackend({ data });
+  const listItem = plain(context.adminGetPlaces_("TOKEN", {})).data.items[0];
+  const detail = plain(context.adminGetPlaceDetail_("TOKEN", { place_id: "BTK-001", view: "working" })).data;
+  const write = plain(context.AdminPlaceService_writeSuccess_("BTK-001", "published", 1, 1, false, createdAt, updatedAt));
+
+  for (const projection of [listItem, detail, write]) {
+    assert.equal(projection.created_at, createdAt);
+    assert.equal(projection.updated_at, updatedAt);
+  }
+});
+
+test("malformed impossible ambiguous and unsupported Admin Place timestamps fail closed", () => {
+  const invalidValues = [
+    "2026-02-30 10:00:00",
+    "2026/07/14 21:30:00",
+    "14/07/2026 21:30:00",
+    " 2026-07-14 21:30:00",
+    "2026-07-14 21:30:00 ",
+    "2026-07-14 21:30",
+    "Tue Jul 14 2026 21:30:00 GMT+0000 (Coordinated Universal Time)",
+    "2026-07-14T21:30:00+07:00",
+    "2026-02-30T10:00:00.000Z",
+    46217,
+    new Date("2026-07-14T21:30:00.000Z")
+  ];
+
+  for (const invalid of invalidValues) {
+    const data = { places: [place("BTK-001", { created_at: invalid })], drafts: [] };
+    const { context, calls } = loadBackend({ data });
+    assertError(plain(context.adminGetPlaces_("TOKEN", {})), "SERVER_ERROR");
+    assertError(plain(context.adminGetPlaceDetail_("TOKEN", { place_id: "BTK-001", view: "working" })), "SERVER_ERROR");
+    assert.throws(() => context.AdminPlaceService_writeSuccess_(
+      "BTK-001", "published", 1, 1, false, invalid, "2026-08-14T19:57:57.370Z"
+    ));
+    assert.equal(calls.writes.length, 0);
+  }
+});
+
+test("write endpoints normalize exact legacy stored timestamps without rewriting the stored value", () => {
+  const legacy = "2026-07-14 21:30:00";
+  for (const action of ["SAVE", "PUBLISH", "UNPUBLISH", "ARCHIVE", "RESTORE"]) {
+    const runtime = loadTransactionBackend(action === "SAVE" ? "UPDATE_DRAFT" : action);
+    const createdAtColumn = runtime.sheets.places.headers.indexOf("created_at");
+    runtime.sheets.places.rows[0][createdAtColumn] = legacy;
+    const result = action === "SAVE" ? callSave(runtime) :
+      action === "PUBLISH" ? callPublish(runtime) : callLifecycle(runtime, action);
+
+    assert.equal(result.ok, true, action);
+    assert.equal(result.data.created_at, "2026-07-14T21:30:00.000Z", action);
+    assert.equal(runtime.sheets.places.rows[0][createdAtColumn], legacy, action);
+  }
+});
+
+test("write endpoints reject padded stored timestamps and restore their complete state", () => {
+  for (const action of ["SAVE", "PUBLISH", "UNPUBLISH", "ARCHIVE", "RESTORE"]) {
+    const runtime = loadTransactionBackend(action === "SAVE" ? "UPDATE_DRAFT" : action);
+    const createdAtColumn = runtime.sheets.places.headers.indexOf("created_at");
+    runtime.sheets.places.rows[0][createdAtColumn] = " 2026-07-14 21:30:00";
+    const before = transactionBefore(runtime);
+    const result = action === "SAVE" ? callSave(runtime) :
+      action === "PUBLISH" ? callPublish(runtime) : callLifecycle(runtime, action);
+
+    assertError(result, "SERVER_ERROR");
+    assertRestored(runtime, before);
+    assert.equal(runtime.calls.writes.length, 0, action);
+  }
+});
+
 test("list filters keyword category and lifecycle exactly and paginates deterministically", () => {
   const { context } = loadBackend();
   assert.deepEqual(plain(context.adminGetPlaces_("TOKEN", { status: "archived" })).data.items.map((item) => item.place_id), ["PLC-ARCHIVED"]);
