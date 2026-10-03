@@ -972,6 +972,13 @@ test("secret-leak mutation F including raw response text in an error is rejected
   });
 });
 
+test("Create non-OK HTTP response is indeterminate even with an application-shaped body", async () => {
+  let bodyReads=0;
+  const harness=loadAdminApi({fetchImpl:async()=>({ok:false,status:503,text:async()=>{bodyReads++;return JSON.stringify({ok:false,error:{code:"SERVER_ERROR",message:"private"}});}})});
+  assertSafeError(await captureError(validInvocation(harness.api,"createPlace")),"HTTP_ERROR");
+  assert.equal(bodyReads,0);
+});
+
 (async () => {
   for (const { name, run } of tests) {
     await run();

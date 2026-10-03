@@ -45,6 +45,50 @@ var AdminPlaceSchema_MIGRATION_PROPERTIES_ = {
   actor: "ADMIN_PLACE_MIGRATION_ACTOR_ADMIN_ID"
 };
 
+// User-confirmed disposable Sheets probe (2026-10-03): both codes preserve Boolean
+// true/false. "@" produced Strings; an initial empty-cell Plain text probe returned
+// "" instead. Neither text representation is approved for Boolean destinations.
+var AdminPlaceSchema_CREATE_BOOLEAN_FORMATS_ = Object.freeze(["0.###############", "0"]);
+
+// Pure policy invoked by Create preflight. Numeric/version formats are deliberately not guarded:
+// the tested Automatic, "@", and "0" formats all preserved Number values.
+function AdminPlaceSchema_assertCreateDestinationFormats_(sheetCode, headers, record, numberFormats) {
+  if (sheetCode !== "PLACES" && sheetCode !== "DRAFTS") throw new Error("ADMIN_PLACE_FORMAT_INPUT");
+  if (!Array.isArray(headers) || !headers.length || !record || typeof record !== "object" || Array.isArray(record) ||
+      !Array.isArray(numberFormats) || numberFormats.length !== 1 || !Array.isArray(numberFormats[0]) ||
+      numberFormats[0].length !== headers.length) throw new Error("ADMIN_PLACE_FORMAT_INPUT");
+  var positions = Object.create(null);
+  var folded = Object.create(null);
+  for (var column = 0; column < headers.length; column += 1) {
+    var header = headers[column];
+    if (typeof header !== "string" || !header || header !== header.trim() ||
+        Object.prototype.hasOwnProperty.call(folded, header.toLowerCase()) ||
+        typeof numberFormats[0][column] !== "string") {
+      throw new Error("ADMIN_PLACE_FORMAT_INPUT");
+    }
+    positions[header] = column;
+    folded[header.toLowerCase()] = true;
+  }
+  function check(field) {
+    if (!Object.prototype.hasOwnProperty.call(positions, field) ||
+        !Object.prototype.hasOwnProperty.call(record, field) || typeof record[field] !== "boolean") {
+      throw new Error("ADMIN_PLACE_FORMAT_INPUT");
+    }
+    if (!AdminPlaceSchema_isCreateBooleanFormatSupported_(numberFormats[0][positions[field]])) {
+      throw new Error("ADMIN_PLACE_FORMAT_UNSUPPORTED");
+    }
+  }
+  ["is_featured", "is_main_route_point"].forEach(check);
+  // Content validity and strict post-write verification remain the callers' responsibility.
+  // String fields, including canonical ISO timestamps, impose no format-code restriction here.
+  return true;
+}
+
+// Shared pure query; the assertion remains responsible for structural validation.
+function AdminPlaceSchema_isCreateBooleanFormatSupported_(format) {
+  return AdminPlaceSchema_CREATE_BOOLEAN_FORMATS_.indexOf(format) !== -1;
+}
+
 function setupAdminPlaceSchema() {
   return AdminPlaceSchema_withLock_(function () {
     var spreadsheet = AdminPlaceSchema_getSpreadsheet_();

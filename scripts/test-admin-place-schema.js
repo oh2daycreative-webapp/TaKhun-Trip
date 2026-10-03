@@ -161,6 +161,100 @@ function test(name, fn) {
   }
 }
 
+// User-confirmed disposable Sheets probe: these two formats preserve true and false.
+function formatFixture(sheetCode) {
+  const versions = sheetCode === "PLACES" ? ["entity_version", "published_version"] : ["draft_version", "base_published_version"];
+  const headers = ["is_featured", "is_main_route_point", ...versions, "latitude", "longitude", "sort_order", "name_th", "created_at", "updated_at"];
+  const record = { is_featured: false, is_main_route_point: true, [versions[0]]: 1, [versions[1]]: 0,
+    latitude: "", longitude: "", sort_order: "", name_th: "private content", created_at: "2026-10-03T13:40:46.986Z", updated_at: "2026-10-03T13:40:46.986Z" };
+  return { headers, record, formats: [headers.map((_, index) => index < 2 ? "0.###############" : "@")] };
+}
+function formatValidator() {
+  const context = vm.createContext({});
+  // No Spreadsheet, Range, Properties or Lock services: policy must be pure.
+  vm.runInContext(schemaSource, context);
+  assert.equal(Array.isArray(context.AdminPlaceSchema_CREATE_BOOLEAN_FORMATS_), true, "verified Boolean format policy must exist");
+  assert.deepEqual(plain(context.AdminPlaceSchema_CREATE_BOOLEAN_FORMATS_), ["0.###############", "0"]);
+  assert.equal(Object.isFrozen(context.AdminPlaceSchema_CREATE_BOOLEAN_FORMATS_), true);
+  return required(context, "AdminPlaceSchema_assertCreateDestinationFormats_");
+}
+
+test("Create format policy accepts only probe-verified Boolean formats without mutation", () => {
+  const validate = formatValidator();
+  for (const sheetCode of ["PLACES", "DRAFTS"]) {
+    for (const value of [false, true]) {
+      for (const format of ["0.###############", "0"]) {
+        const { headers, record, formats } = formatFixture(sheetCode);
+        record.is_featured = value; record.is_main_route_point = value;
+        formats[0][0] = format; formats[0][1] = format;
+        headers.reverse(); formats[0].reverse();
+        const before = JSON.stringify({ headers, record, formats });
+        Object.freeze(headers); Object.freeze(record); Object.freeze(formats[0]); Object.freeze(formats);
+        assert.equal(validate(sheetCode, headers, record, formats), true);
+        assert.equal(JSON.stringify({ headers, record, formats }), before);
+      }
+      for (const field of ["is_featured", "is_main_route_point"]) {
+        for (const unsupported of ["@", "", "General", "yyyy-mm-dd", "private arbitrary format"]) {
+          const f = formatFixture(sheetCode); f.record[field] = value;
+          f.formats[0][f.headers.indexOf(field)] = unsupported;
+          const before = JSON.stringify(f);
+          assert.throws(() => validate(sheetCode, f.headers, f.record, f.formats), { message: "ADMIN_PLACE_FORMAT_UNSUPPORTED" });
+          assert.equal(JSON.stringify(f), before);
+        }
+      }
+    }
+  }
+});
+
+test("Create format policy imposes no version or optional numeric format restrictions", () => {
+  const validate = formatValidator();
+  for (const sheetCode of ["PLACES", "DRAFTS"]) {
+    for (const format of ["@", "", "0", "0.###############", "yyyy-mm-dd"]) {
+      for (const value of [0, 1, 1.25, "", null, undefined, "12", false]) {
+        const f = formatFixture(sheetCode);
+        for (let index = 2; index < 7; index += 1) {
+          f.formats[0][index] = format;
+          if (index >= 4) f.record[f.headers[index]] = value;
+        }
+        assert.equal(validate(sheetCode, f.headers, f.record, f.formats), true);
+      }
+    }
+  }
+});
+
+test("Create format policy leaves Strings and timestamps unchanged with unrestricted formats", () => {
+  const validate = formatValidator();
+  const f = formatFixture("DRAFTS");
+  for (const field of ["place_id", "description_th", "tags", "nearby_place_ids"]) {
+    f.headers.push(field); f.record[field] = "private String"; f.formats[0].push("");
+  }
+  f.formats[0][f.headers.indexOf("created_at")] = "yyyy-mm-dd";
+  const before = JSON.stringify(f);
+  assert.equal(validate("DRAFTS", f.headers, f.record, f.formats), true);
+  assert.equal(JSON.stringify(f), before);
+});
+
+test("Create format policy rejects malformed relevant inputs with controlled errors", () => {
+  const validate = formatValidator();
+  for (const matrix of [undefined, null, [], [[]], [["0"]], [[], []], "private", [new Array(10)], [Array(10).fill(null)]]) {
+    const { headers, record } = formatFixture("PLACES");
+    assert.throws(() => validate("PLACES", headers, record, matrix), { message: "ADMIN_PLACE_FORMAT_INPUT" });
+  }
+  for (const code of ["places", "PLACE_DRAFTS", "private", null]) {
+    const f = formatFixture("PLACES");
+    assert.throws(() => validate(code, f.headers, f.record, f.formats), { message: "ADMIN_PLACE_FORMAT_INPUT" });
+  }
+  for (const mutate of [
+    (f) => { f.headers[0] = "unknown"; }, (f) => { f.headers[1] = f.headers[0]; },
+    (f) => { f.headers[1] = "IS_FEATURED"; }, (f) => { f.headers[0] = " is_featured "; },
+    (f) => { delete f.record.is_featured; }, (f) => { f.record.is_featured = "false"; },
+    (f) => { f.record = null; }, (f) => { f.headers = null; }
+  ]) {
+    const f = formatFixture("PLACES"); mutate(f);
+    assert.throws(() => validate("PLACES", f.headers, f.record, f.formats), { message: "ADMIN_PLACE_FORMAT_INPUT" });
+  }
+});
+
 function row(headers, values) {
   return headers.map((header) => Object.prototype.hasOwnProperty.call(values, header) ? values[header] : "");
 }

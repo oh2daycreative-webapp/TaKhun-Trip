@@ -7,9 +7,29 @@ const root = path.resolve(__dirname, "..");
 const source = fs.readFileSync(path.join(root, "apps-script/SheetService.gs"), "utf8");
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
-function makeSheet(initialValues) {
+function makeSheet(initialValues, options = {}) {
   const cells = initialValues.map((row) => row.slice());
   const writes = [];
+  const reads = [];
+  // Formula coordinates count as content even when the evaluated value is empty.
+  const formulas = new Set((options.formulas || []).map(([row, column]) => `${row}:${column}`));
+  const populated = (value) => value !== "" && value !== null && value !== undefined;
+  function lastRow() {
+    let last = 0;
+    cells.forEach((row, r) => row.forEach((value, c) => {
+      if (populated(value) || formulas.has(`${r + 1}:${c + 1}`)) last = Math.max(last, r + 1);
+    }));
+    for (const key of formulas) last = Math.max(last, Number(key.split(":")[0]));
+    return last;
+  }
+  function lastColumn() {
+    let last = 0;
+    cells.forEach((row, r) => row.forEach((value, c) => {
+      if (populated(value) || formulas.has(`${r + 1}:${c + 1}`)) last = Math.max(last, c + 1);
+    }));
+    for (const key of formulas) last = Math.max(last, Number(key.split(":")[1]));
+    return last;
+  }
 
   function ensureCell(row, column) {
     while (cells.length < row) cells.push([]);
@@ -19,18 +39,20 @@ function makeSheet(initialValues) {
   return {
     cells,
     writes,
+    reads,
     getDataRange() {
-      return { getValues: () => cells.map((row) => row.slice()) };
+      return { getValues() {
+        reads.push({ method: "dataValues" });
+        return Array.from({ length: Math.max(1, lastRow()) }, (_, r) =>
+          Array.from({ length: Math.max(1, lastColumn()) }, (_, c) => cells[r]?.[c] ?? ""));
+      } };
     },
-    getLastRow() {
-      for (let row = cells.length - 1; row >= 0; row -= 1) {
-        if (cells[row].some((value) => value !== "" && value !== null && value !== undefined)) return row + 1;
-      }
-      return 0;
-    },
+    getLastRow: lastRow,
+    getLastColumn: lastColumn,
     getRange(row, column, height = 1, width = 1) {
       return {
         getValues() {
+          reads.push({ method: "rangeValues", row, column, height, width });
           return Array.from({ length: height }, (_, rowOffset) =>
             Array.from({ length: width }, (_, columnOffset) =>
               cells[row + rowOffset - 1]?.[column + columnOffset - 1] ?? ""));
@@ -39,6 +61,7 @@ function makeSheet(initialValues) {
           assert.equal(height, 1);
           assert.equal(width, 1);
           ensureCell(row, column);
+          formulas.delete(`${row}:${column}`);
           cells[row - 1][column - 1] = value;
           writes.push({ method: "setValue", row, column, height, width, value });
         },
@@ -48,6 +71,7 @@ function makeSheet(initialValues) {
           for (let rowOffset = 0; rowOffset < height; rowOffset += 1) {
             for (let columnOffset = 0; columnOffset < width; columnOffset += 1) {
               ensureCell(row + rowOffset, column + columnOffset);
+              formulas.delete(`${row + rowOffset}:${column + columnOffset}`);
               cells[row + rowOffset - 1][column + columnOffset - 1] = values[rowOffset][columnOffset];
             }
           }
@@ -57,6 +81,7 @@ function makeSheet(initialValues) {
           for (let rowOffset = 0; rowOffset < height; rowOffset += 1) {
             for (let columnOffset = 0; columnOffset < width; columnOffset += 1) {
               ensureCell(row + rowOffset, column + columnOffset);
+              formulas.delete(`${row + rowOffset}:${column + columnOffset}`);
               cells[row + rowOffset - 1][column + columnOffset - 1] = "";
             }
           }
@@ -111,6 +136,42 @@ const SALT = `${"C".repeat(21)}Q`;
 const ADMIN_ID = "ADM-123e4567-e89b-12d3-a456-426614174000";
 const SESSION_ID = "SES-123e4567-e89b-12d3-a456-426614174000";
 const TIMESTAMP = "2026-08-08T04:30:00.000Z";
+
+test("fake Sheet clearing a formula shrinks populated row and column boundaries", () => {
+  const sheet = makeSheet([["header"]], { formulas: [[4, 3], [2, 2]] });
+  assert.equal(sheet.getLastRow(), 4);
+  assert.equal(sheet.getLastColumn(), 3);
+  sheet.getRange(4, 3).clearContent();
+  assert.equal(sheet.getLastRow(), 2);
+  assert.equal(sheet.getLastColumn(), 2);
+  sheet.getRange(2, 2).clearContent();
+  assert.equal(sheet.getLastRow(), 1);
+  assert.equal(sheet.getLastColumn(), 1);
+});
+
+test("fake Sheet setValue replaces formula metadata while ordinary values retain boundaries", () => {
+  const sheet = makeSheet([["header"]], { formulas: [[4, 3]] });
+  assert.equal(sheet.getLastRow(), 4);
+  assert.equal(sheet.getLastColumn(), 3);
+  sheet.getRange(4, 3).setValue("ordinary value");
+  assert.equal(sheet.getLastRow(), 4);
+  assert.equal(sheet.getLastColumn(), 3);
+  sheet.getRange(4, 3).setValue("");
+  assert.equal(sheet.getLastRow(), 1);
+  assert.equal(sheet.getLastColumn(), 1);
+});
+
+test("fake Sheet setValues removes formula markers throughout its rectangle", () => {
+  const sheet = makeSheet([["header"]], { formulas: [[3, 2], [3, 3], [4, 2], [4, 3], [2, 1]] });
+  assert.equal(sheet.getLastRow(), 4);
+  assert.equal(sheet.getLastColumn(), 3);
+  sheet.getRange(3, 2, 2, 2).setValues([["", ""], ["", "ordinary value"]]);
+  assert.equal(sheet.getLastRow(), 4);
+  assert.equal(sheet.getLastColumn(), 3);
+  sheet.getRange(3, 2, 2, 2).setValues([["", ""], ["", ""]]);
+  assert.equal(sheet.getLastRow(), 2); // Untouched formula remains populated.
+  assert.equal(sheet.getLastColumn(), 1);
+});
 
 test("approved SheetService interfaces exist", () => {
   const context = load({ auth: makeSheet([["admin_id"]]) });
@@ -204,12 +265,13 @@ test("ensureHeaders refuses duplicate, conflicting, or malformed headers before 
     ["admin_id", ""],
     ["Admin_id"]
   ]) {
-    const sheet = makeSheet([headers, ["preserve"]]);
+    const preservedRow = headers.map(() => "preserve");
+    const sheet = makeSheet([headers, preservedRow]);
     const context = load({ admins: sheet });
     const ensureHeaders = required(context, "SheetService_ensureHeaders_");
     assert.throws(() => ensureHeaders("admins", ["admin_id"]), /header/i);
     assert.equal(sheet.writes.length, 0);
-    assert.deepEqual(sheet.cells, [headers, ["preserve"]]);
+    assert.deepEqual(sheet.cells, [headers, preservedRow]);
   }
 });
 
@@ -287,6 +349,60 @@ test("appendObjectWithRow writes one full row and returns its physical source ro
     method: "setValues", row: 3, column: 1, height: 1, width: 3,
     values: [["P-2", "draft", ""]]
   }]);
+});
+
+test("append preserves normalized reordered extra columns and physical destinations", () => {
+  const cases = [
+    { cells: [[" status ", "place_id", "extra"]], row: 2 },
+    { cells: [[" status ", "place_id", "extra"], ["draft", "P-1", ""]], row: 3 },
+    { cells: [[" status ", "place_id", "extra"], [], ["draft", "P-1", ""]], row: 4 },
+    // Empty allocated cells/formatting do not extend the populated range.
+    { cells: [[" status ", "place_id", "extra"], ["draft", "P-1", ""], [], ["", "", ""]], row: 3 },
+    { cells: [[" status ", "place_id", "extra"], [], ["", "", ""]], formulas: [[3, 3]], row: 4 }
+  ];
+  for (const item of cases) {
+    const sheet = makeSheet(item.cells, { formulas: item.formulas });
+    const context = load({ places: sheet });
+    const result = plain(context.SheetService_appendObjectWithRow_("places", ["place_id", "status"], { place_id: "P-NEW", status: "draft" }));
+    assert.deepEqual(result, { sourceRowNumber: item.row, values: { status: "draft", place_id: "P-NEW", extra: "" } });
+    assert.deepEqual(plain(sheet.writes), [{ method: "setValues", row: item.row, column: 1, height: 1, width: 3, values: [["draft", "P-NEW", ""]] }]);
+  }
+});
+
+test("append rejects existing invalid header shapes including populated trailing columns", () => {
+  const cases = [
+    [], [["status"]], [["place_id", "place_id"]], [["place_id", "Place_id"]],
+    [["place_id", 42]], [["place_id", "", "status"]],
+    [["place_id"], ["P-1", "trailing data"]],
+    [["place_id"], ["P-1", ""]]
+  ];
+  for (let index = 0; index < cases.length; index += 1) {
+    const sheet = makeSheet(cases[index], index === cases.length - 1 ? { formulas: [[2, 2]] } : {});
+    const context = load({ places: sheet });
+    assert.throws(() => context.SheetService_appendObjectWithRow_("places", ["place_id"], { place_id: "P-NEW" }), /headers/i);
+    assert.deepEqual(sheet.writes, []);
+  }
+});
+
+test("append calculates destination from a fresh last-row lookup", () => {
+  const sheet = makeSheet([["place_id"]]);
+  const lastRow = sheet.getLastRow;
+  let calls = 0;
+  sheet.getLastRow = () => {
+    const result = lastRow();
+    if (++calls === 1) sheet.cells.push(["P-EXISTING"]);
+    return result;
+  };
+  const context = load({ places: sheet });
+  assert.equal(context.SheetService_appendObjectWithRow_("places", ["place_id"], { place_id: "P-NEW" }).sourceRowNumber, 3);
+  assert.deepEqual(sheet.cells, [["place_id"], ["P-EXISTING"], ["P-NEW"]]);
+});
+
+test("append discovers headers with only one header-row value read", () => {
+  const sheet = makeSheet([["place_id", "extra"], ["P-1", "existing"]]);
+  const context = load({ places: sheet });
+  context.SheetService_appendObjectWithRow_("places", ["place_id"], { place_id: "P-2" });
+  assert.deepEqual(sheet.reads, [{ method: "rangeValues", row: 1, column: 1, height: 1, width: 2 }]);
 });
 
 test("replaceObjectAtRow preserves unknown columns and uses one rectangular write", () => {
@@ -411,6 +527,49 @@ test("dash-prefixed base64url security value writes and reads back unchanged", (
   assert.equal(sheet.cells[1][1], HASH_STARTING_DASH);
   assert.equal(table.rows[0].values.token_hash, HASH_STARTING_DASH);
   assert.equal(table.rows[0].values.token_hash.startsWith("'"), false);
+});
+
+test("prepared append preserves normalized physical mapping without writes or lookups", () => {
+  const sheet = makeSheet([[" extra ", "value", "id"], ["", "old", "old-id"]]);
+  sheet.getName = () => "items";
+  const context = load({ items: sheet });
+  const prepare = required(context, "SheetService_prepareAppendDestination_");
+  const prepared = prepare(sheet, ["id", "value"], ["extra", "value", "id"]);
+  assert.deepEqual(plain(prepared.headers), ["extra", "value", "id"]);
+  assert.equal(prepared.sourceRowNumber, 3);
+  assert.equal(prepared.sheet, sheet);
+  assert.equal(sheet.writes.length, 0);
+  assert.equal(sheet.reads.some((r) => r.method === "dataValues"), false);
+  assert.notEqual(prepare(sheet, ["id"]), prepared);
+  context.SheetService_getSheet_ = () => { throw new Error("must reuse handle"); };
+  const result = context.SheetService_appendObjectWithRow_("items", ["id", "value"], { id: "new", value: false }, prepared);
+  assert.deepEqual(plain(result), { sourceRowNumber: 3, values: { extra: "", value: false, id: "new" } });
+  assert.deepEqual(sheet.cells[2], ["", false, "new"]);
+});
+
+test("prepared append rejects captured layout changes and destination movement before writing", () => {
+  for (const change of [
+    (s) => s.cells[0].push("extra"),
+    (s) => s.cells[0].pop(),
+    (s) => s.cells[0].reverse(),
+    (s) => s.cells.push(["other", "value"])
+  ]) {
+    const sheet = makeSheet([["id", "value"]]);
+    sheet.getName = () => "items";
+    const context = load({ items: sheet });
+    const prepared = required(context, "SheetService_prepareAppendDestination_")(sheet, ["id"]);
+    change(sheet);
+    assert.throws(() => context.SheetService_appendObjectWithRow_("items", ["id"], { id: "new" }, prepared));
+    assert.equal(sheet.writes.length, 0);
+  }
+  const sheet = makeSheet([["id", "value"]]);
+  sheet.getName = () => "items";
+  const context = load({ items: sheet });
+  const prepare = required(context, "SheetService_prepareAppendDestination_");
+  assert.throws(() => prepare(sheet, ["id"], ["value", "id"]), /Data append destination changed/);
+  const prepared = prepare(sheet, ["id"]);
+  assert.throws(() => context.SheetService_appendObjectWithRow_("other", ["id"], { id: "new" }, prepared));
+  assert.equal(sheet.writes.length, 0);
 });
 
 if (process.exitCode) process.exit(process.exitCode);

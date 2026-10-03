@@ -110,29 +110,52 @@ function adminGetPlaceMediaOptions_(token, payload) {
 }
 
 function adminCreatePlace_(token, payload) {
-  return AdminPlaceService_execute_(token, function (admin) {
+  var diagnostic = { stage: "AUTHORIZATION", failure: null };
+  var operation = function (admin) {
+    diagnostic.stage = "WRITE_ROLE";
     AdminPlaceService_requireWriteRole_(admin);
+    diagnostic.stage = "PARAMETERS";
     var parameters = AdminPlaceService_createParameters_(payload);
-    return AdminPlaceService_withWriteLock_(function () {
+    function createUnderLock() {
+      diagnostic.stage = "CONTEXT";
       var context = AdminPlaceService_requireContext_(true);
+      diagnostic.stage = "ID_GENERATION";
       var placeId = AdminPlaceService_generatePlaceId_();
+      diagnostic.stage = "ID_COLLISION";
       if (Object.prototype.hasOwnProperty.call(context.placesById, placeId) ||
           Object.prototype.hasOwnProperty.call(context.draftsById, placeId)) {
         throw new Error("ADMIN_PLACE_ID_COLLISION");
       }
+      diagnostic.stage = "STATE_CAPTURE";
       var state = AdminPlaceService_captureState_(placeId, false);
       try {
+        diagnostic.stage = "PLACE_CONSTRUCTION";
         var occurredAt = new Date().toISOString();
         var placeRecord = AdminPlaceService_neutralIdentity_(placeId, occurredAt, admin.admin_id);
+        diagnostic.stage = "DRAFT_CONSTRUCTION";
         var draftRecord = AdminPlaceService_newDraft_(placeId, parameters.content, 1, 0, occurredAt, admin.admin_id, null);
+        diagnostic.stage = "DESTINATION_PREFLIGHT";
+        var placeDestination = SheetService_prepareAppendDestination_(
+          SheetService_getSheet_(AdminPlaceSchema_PLACES_SHEET_NAME_), state.place_headers, state.place_headers
+        );
+        var draftDestination = SheetService_prepareAppendDestination_(
+          SheetService_getSheet_(AdminPlaceSchema_DRAFTS_SHEET_NAME_), state.draft_headers, state.draft_headers
+        );
+        AdminPlaceSchema_assertCreateDestinationFormats_("PLACES", placeDestination.headers, placeRecord,
+          placeDestination.sheet.getRange(placeDestination.sourceRowNumber, 1, 1, placeDestination.headers.length).getNumberFormats());
+        AdminPlaceSchema_assertCreateDestinationFormats_("DRAFTS", draftDestination.headers, draftRecord,
+          draftDestination.sheet.getRange(draftDestination.sourceRowNumber, 1, 1, draftDestination.headers.length).getNumberFormats());
+        diagnostic.stage = "PLACE_APPEND";
         var appendedPlace = SheetService_appendObjectWithRow_(
-          AdminPlaceSchema_PLACES_SHEET_NAME_, state.place_headers, placeRecord
+          AdminPlaceSchema_PLACES_SHEET_NAME_, state.place_headers, placeRecord, placeDestination
         );
         state.allocated_rows.place = AdminPlaceService_appendedRowNumber_(appendedPlace);
+        diagnostic.stage = "DRAFT_APPEND";
         var appendedDraft = SheetService_appendObjectWithRow_(
-          AdminPlaceSchema_DRAFTS_SHEET_NAME_, state.draft_headers, draftRecord
+          AdminPlaceSchema_DRAFTS_SHEET_NAME_, state.draft_headers, draftRecord, draftDestination
         );
         state.allocated_rows.draft = AdminPlaceService_appendedRowNumber_(appendedDraft);
+        diagnostic.stage = "INTENDED_STATE_VERIFY";
         AdminPlaceService_verifyIntendedState_(state, {
           place: {
             sourceRowNumber: state.allocated_rows.place,
@@ -142,16 +165,170 @@ function adminCreatePlace_(token, payload) {
             sourceRowNumber: state.allocated_rows.draft,
             values: AdminPlaceService_completeRow_(state.draft_headers, draftRecord)
           }
+        }, function (metadata) {
+          if (!diagnostic.verification) diagnostic.verification = metadata;
         });
+        diagnostic.stage = "AUDIT";
         AdminPlaceService_appendVerifiedAudit_(admin, "CREATE", placeId);
+        diagnostic.stage = "RESPONSE_CONSTRUCTION";
         return AdminPlaceService_success_(AdminPlaceService_writeSuccess_(
           placeId, "draft", 1, 0, true, occurredAt, occurredAt
         ));
       } catch (error) {
+        AdminPlaceService_recordCreateDiagnostic_(diagnostic, error);
         return AdminPlaceService_failClosed_(state);
       }
+    }
+    diagnostic.stage = "WRITE_LOCK_ACQUIRE";
+    return AdminPlaceService_withWriteLock_(function () {
+      try {
+        return createUnderLock();
+      } catch (error) {
+        // Keep the original pre-write failure even if the shared lock's finally later throws.
+        AdminPlaceService_recordCreateDiagnostic_(diagnostic, error);
+        throw error;
+      } finally {
+        // Observe the boundary only; the shared helper owns release and exception precedence.
+        diagnostic.stage = "WRITE_LOCK_RELEASE";
+      }
     });
-  });
+  };
+  try {
+    return AdminPlaceService_execute_(token, operation, function (error) {
+      AdminPlaceService_recordCreateDiagnostic_(diagnostic, error);
+    });
+  } finally {
+    // Compensation and the shared lock's finally have unwound before diagnostic I/O.
+    if (diagnostic.failure) {
+      try {
+        AdminPlaceService_writeCreateDiagnostic_(diagnostic.failure);
+      } catch (_diagnosticWriteError) {
+        // Preserve the original return value or exception, without retrying.
+      }
+      try {
+        console.error("ADMIN_PLACE_CREATE_FAILURE", diagnostic.failure.split("|")[2]);
+      } catch (_loggingError) {
+        // Console logging is independently best-effort.
+      }
+    }
+  }
+}
+
+// TEMPORARY V2: remove these helpers and Create-only observation after the one-attempt investigation.
+// No exception text is accepted unless it exactly matches the originating stage's controlled errors.
+var AdminPlaceService_CREATE_DIAGNOSTIC_SHEET_ERRORS_ = [
+  "Data source is not configured.", "Requested data is not available.",
+  "Data headers are not available.", "Required data headers are not available.",
+  "Data headers are invalid.", "Data headers must be unique.", "Data headers conflict.",
+  "Required data headers are invalid.", "Required data headers must be unique."
+];
+var AdminPlaceService_CREATE_DIAGNOSTIC_ERRORS_ = {
+  AUTHORIZATION: ["UNAUTHORIZED", "ADMIN_PLACE_CONTEXT"].concat(AdminPlaceService_CREATE_DIAGNOSTIC_SHEET_ERRORS_),
+  WRITE_ROLE: ["FORBIDDEN"],
+  PARAMETERS: ["VALIDATION_ERROR", "Human text value is invalid."],
+  WRITE_LOCK_ACQUIRE: ["ADMIN_PLACE_WRITE_OPERATION", "ADMIN_PLACE_WRITE_LOCK"],
+  CONTEXT: [
+    "ADMIN_PLACE_CONTEXT_TARGET", "ADMIN_PLACE_DATA", "ADMIN_PLACE_IDENTITY", "ADMIN_PLACE_STATUS",
+    "ADMIN_PLACE_VERSION", "ADMIN_PLACE_DRAFT_IDENTITY", "ADMIN_PLACE_DRAFT_OWNER", "ADMIN_PLACE_DRAFT_VERSION",
+    "ADMIN_PLACE_DRAFT_REQUIRED", "ADMIN_PLACE_CONTENT_REQUIRED", "ADMIN_PLACE_CONTENT", "ADMIN_PLACE_TEXT",
+    "ADMIN_PLACE_LIST", "ADMIN_PLACE_BOOLEAN", "ADMIN_PLACE_NUMBER", "ADMIN_PLACE_COORDINATES", "ADMIN_PLACE_CATEGORY"
+  ].concat(AdminPlaceService_CREATE_DIAGNOSTIC_SHEET_ERRORS_),
+  ID_GENERATION: ["ADMIN_PLACE_ID_GENERATION"],
+  ID_COLLISION: ["ADMIN_PLACE_ID_COLLISION"],
+  STATE_CAPTURE: [
+    "ADMIN_PLACE_STATE_INPUT", "ADMIN_PLACE_STATE_READ", "ADMIN_PLACE_STATE_CARDINALITY", "ADMIN_PLACE_STATE_VERIFY"
+  ].concat(AdminPlaceService_CREATE_DIAGNOSTIC_SHEET_ERRORS_),
+  PLACE_CONSTRUCTION: [],
+  DRAFT_CONSTRUCTION: [], // Create parameters have already normalized Gallery to the empty string.
+  DESTINATION_PREFLIGHT: ["ADMIN_PLACE_FORMAT_INPUT", "ADMIN_PLACE_FORMAT_UNSUPPORTED", "Data append destination changed."].concat(AdminPlaceService_CREATE_DIAGNOSTIC_SHEET_ERRORS_),
+  PLACE_APPEND: ["ADMIN_PLACE_APPEND", "Data append is invalid.", "Data append destination changed."].concat(AdminPlaceService_CREATE_DIAGNOSTIC_SHEET_ERRORS_),
+  DRAFT_APPEND: ["ADMIN_PLACE_APPEND", "Data append is invalid.", "Data append destination changed."].concat(AdminPlaceService_CREATE_DIAGNOSTIC_SHEET_ERRORS_),
+  INTENDED_STATE_VERIFY: ["ADMIN_PLACE_WRITE_VERIFY"].concat(AdminPlaceService_CREATE_DIAGNOSTIC_SHEET_ERRORS_),
+  AUDIT: [
+    "ADMIN_PLACE_AUDIT_ACTOR", "ADMIN_PLACE_AUDIT_INPUT", "ADMIN_PLACE_TEXT", "ADMIN_PLACE_AUDIT_ID",
+    "ADMIN_PLACE_AUDIT_ID_COLLISION", "ADMIN_PLACE_AUDIT_APPEND", "ADMIN_PLACE_AUDIT_CARDINALITY",
+    "ADMIN_PLACE_AUDIT_VERIFY", "Data append is invalid."
+  ].concat(AdminPlaceService_CREATE_DIAGNOSTIC_SHEET_ERRORS_),
+  RESPONSE_CONSTRUCTION: ["ADMIN_PLACE_TIMESTAMP"],
+  WRITE_LOCK_RELEASE: []
+};
+
+function AdminPlaceService_recordCreateDiagnostic_(diagnostic, error) {
+  try {
+    if (diagnostic.failure) return; // One primary failure, never secondary cleanup/release errors.
+    var identifier = "UNKNOWN_ERROR";
+    var allowed = AdminPlaceService_CREATE_DIAGNOSTIC_ERRORS_[diagnostic.stage];
+    try {
+      var descriptor = error instanceof Error && Object.getPrototypeOf(error) === Error.prototype ?
+        Object.getOwnPropertyDescriptor(error, "message") : null;
+      var message = descriptor && Object.prototype.hasOwnProperty.call(descriptor, "value") ? descriptor.value : null;
+      if (typeof message === "string" && allowed.indexOf(message) !== -1) identifier = message;
+    } catch (_unsafeException) {
+      // Unreadable, native, non-Error and unexpected exceptions retain the fixed fallback.
+    }
+    diagnostic.failure = "ADMIN_PLACE_CREATE_FAILURE|" + diagnostic.stage + "|" + identifier;
+    if (diagnostic.stage === "INTENDED_STATE_VERIFY" && identifier === "ADMIN_PLACE_WRITE_VERIFY" && diagnostic.verification) {
+      diagnostic.failure += "|" + diagnostic.verification;
+    }
+  } catch (_diagnosticError) {
+    // Even in-memory diagnostics must not change the business outcome.
+  }
+}
+
+// TEMPORARY V3: types never stringify values or inspect their properties/getters.
+// EMPTY is exclusively the empty string returned for a blank Sheets cell.
+function AdminPlaceService_createDiagnosticType_(value) {
+  if (value === "") return "EMPTY";
+  if (typeof value === "string") return "STRING";
+  if (typeof value === "number") return "NUMBER";
+  if (typeof value === "boolean") return "BOOLEAN";
+  try {
+    Date.prototype.getTime.call(value); // Intrinsic brand check, including invalid Dates; no value getters.
+    return "DATE";
+  } catch (_notDate) {
+    return "OTHER";
+  }
+}
+
+function AdminPlaceService_createDiagnosticHeaders_(sheetCode) {
+  if (sheetCode === "PLACES") return AdminPlaceSchema_PLACE_BASE_HEADERS_.concat(AdminPlaceSchema_PLACES_APPEND_HEADERS_);
+  if (sheetCode === "DRAFTS") return AdminPlaceSchema_DRAFT_HEADERS_;
+  return [];
+}
+
+function AdminPlaceService_writeCreateDiagnostic_(value) {
+  try {
+    if (typeof value !== "string") return false;
+    if (value !== "DIAGNOSTIC_PREFLIGHT_OK") {
+      var parts = value.split("|");
+      if ((parts.length !== 3 && parts.length !== 8) || parts[0] !== "ADMIN_PLACE_CREATE_FAILURE" ||
+          !Object.prototype.hasOwnProperty.call(AdminPlaceService_CREATE_DIAGNOSTIC_ERRORS_, parts[1])) return false;
+      if (parts[2] !== "UNKNOWN_ERROR" && AdminPlaceService_CREATE_DIAGNOSTIC_ERRORS_[parts[1]].indexOf(parts[2]) === -1) return false;
+      if (parts.length === 8) {
+        if (parts[1] !== "INTENDED_STATE_VERIFY" || parts[2] !== "ADMIN_PLACE_WRITE_VERIFY" ||
+            ["PLACES", "DRAFTS", "NOT_APPLICABLE"].indexOf(parts[3]) === -1) return false;
+        if (["EXTRA_COLUMN", "NOT_APPLICABLE"].concat(AdminPlaceService_createDiagnosticHeaders_(parts[3])).indexOf(parts[4]) === -1) return false;
+        var types = ["STRING", "NUMBER", "BOOLEAN", "DATE", "EMPTY", "OTHER", "NOT_APPLICABLE"];
+        if (types.indexOf(parts[5]) === -1 || types.indexOf(parts[6]) === -1 ||
+            ["TABLE_SHAPE", "HEADER_COUNT", "HEADER_ORDER", "ROW_CARDINALITY", "ROW_LOCATION",
+              "CELL_TYPE_MISMATCH", "CELL_VALUE_MISMATCH"].indexOf(parts[7]) === -1) return false;
+      }
+    }
+    var sheet = SheetService_getSheet_("_TEMP_ADMIN_PLACE_CREATE_DIAGNOSTICS");
+    if (sheet.getLastRow() < 1 || sheet.getLastColumn() !== 2) return false;
+    var headers = sheet.getRange(1, 1, 1, 2).getValues()[0];
+    if (!headers || headers.length !== 2 || headers[0] !== "timestamp_utc" || headers[1] !== "diagnostic") return false;
+    sheet.appendRow([new Date().toISOString(), value]);
+    return true;
+  } catch (_diagnosticWriteError) {
+    // No retries, schema repair, business writes or changes to the original response.
+    return false;
+  }
+}
+
+// Editor-only preflight; deliberately absent from Router. Inspect the temporary sheet for its marker.
+function adminPlaceCreateDiagnosticPreflight() {
+  return AdminPlaceService_writeCreateDiagnostic_("DIAGNOSTIC_PREFLIGHT_OK");
 }
 
 function adminSavePlaceDraft_(token, payload) {
@@ -1023,7 +1200,28 @@ function AdminPlaceService_mergeRow_(before, patch) {
   return values;
 }
 
-function AdminPlaceService_verifyIntendedState_(snapshot, intended) {
+function AdminPlaceService_verifyIntendedState_(snapshot, intended, observer) {
+  var observed = false;
+  function observe(target, category, header, expected, actual) {
+    if (typeof observer !== "function" || observed) return;
+    observed = true;
+    try {
+      var sheetCode = target.sheetName === AdminPlaceSchema_PLACES_SHEET_NAME_ ? "PLACES" :
+        target.sheetName === AdminPlaceSchema_DRAFTS_SHEET_NAME_ ? "DRAFTS" : "NOT_APPLICABLE";
+      var safeHeader = "NOT_APPLICABLE";
+      var expectedType = "NOT_APPLICABLE";
+      var actualType = "NOT_APPLICABLE";
+      if (category === "CELL") {
+        safeHeader = AdminPlaceService_createDiagnosticHeaders_(sheetCode).indexOf(header) !== -1 ? header : "EXTRA_COLUMN";
+        expectedType = AdminPlaceService_createDiagnosticType_(expected);
+        actualType = AdminPlaceService_createDiagnosticType_(actual);
+        category = expectedType === actualType ? "CELL_VALUE_MISMATCH" : "CELL_TYPE_MISMATCH";
+      }
+      observer([sheetCode, safeHeader, expectedType, actualType, category].join("|"));
+    } catch (_observerError) {
+      // Observation cannot replace the verifier's original error or affect compensation.
+    }
+  }
   var targets = [
     {
       sheetName: AdminPlaceSchema_PLACES_SHEET_NAME_, headers: snapshot.place_headers,
@@ -1036,11 +1234,19 @@ function AdminPlaceService_verifyIntendedState_(snapshot, intended) {
   ];
   targets.forEach(function (target) {
     var table = SheetService_readTable_(target.sheetName, target.headers);
-    if (!table || !Array.isArray(table.headers) || table.headers.length !== target.headers.length) {
+    if (!table || !Array.isArray(table.headers)) {
+      observe(target, "TABLE_SHAPE");
+      throw new Error("ADMIN_PLACE_WRITE_VERIFY");
+    }
+    if (table.headers.length !== target.headers.length) {
+      observe(target, "HEADER_COUNT");
       throw new Error("ADMIN_PLACE_WRITE_VERIFY");
     }
     target.headers.forEach(function (header, index) {
-      if (table.headers[index] !== header) throw new Error("ADMIN_PLACE_WRITE_VERIFY");
+      if (table.headers[index] !== header) {
+        observe(target, "HEADER_ORDER");
+        throw new Error("ADMIN_PLACE_WRITE_VERIFY");
+      }
     });
     var matches = table.rows.filter(function (entry) {
       return entry && entry.values && entry.values.place_id === snapshot.place_id;
@@ -1051,11 +1257,13 @@ function AdminPlaceService_verifyIntendedState_(snapshot, intended) {
           matches.length !== 0 || (!retainedAbsence && table.rows.some(function (entry) {
             return entry && entry.sourceRowNumber === target.expected.sourceRowNumber;
           }))) {
+        observe(target, matches.length !== 0 ? "ROW_CARDINALITY" : "ROW_LOCATION");
         throw new Error("ADMIN_PLACE_WRITE_VERIFY");
       }
       return;
     }
     if (!target.expected || matches.length !== 1 || matches[0].sourceRowNumber !== target.expected.sourceRowNumber) {
+      observe(target, !target.expected ? "TABLE_SHAPE" : matches.length !== 1 ? "ROW_CARDINALITY" : "ROW_LOCATION");
       throw new Error("ADMIN_PLACE_WRITE_VERIFY");
     }
     target.headers.forEach(function (header) {
@@ -1063,7 +1271,10 @@ function AdminPlaceService_verifyIntendedState_(snapshot, intended) {
       var expected = target.expected.values[header];
       var same = actual === expected ||
         (actual instanceof Date && expected instanceof Date && actual.getTime() === expected.getTime());
-      if (!same) throw new Error("ADMIN_PLACE_WRITE_VERIFY");
+      if (!same) {
+        observe(target, "CELL", header, expected, actual);
+        throw new Error("ADMIN_PLACE_WRITE_VERIFY");
+      }
     });
   });
   return true;
@@ -1082,7 +1293,7 @@ function AdminPlaceService_writeSuccess_(placeId, status, entityVersion, publish
   };
 }
 
-function AdminPlaceService_execute_(token, operation) {
+function AdminPlaceService_execute_(token, operation, onError) {
   try {
     var admin = AuthService_requireAdmin_(token);
     if (!admin || AdminPlaceService_ALLOWED_ROLES_.indexOf(admin.role) === -1) {
@@ -1090,6 +1301,9 @@ function AdminPlaceService_execute_(token, operation) {
     }
     return operation(admin);
   } catch (error) {
+    if (typeof onError === "function") {
+      try { onError(error); } catch (_observerError) { /* Observation cannot change the existing error mapping. */ }
+    }
     var code = error && typeof error.message === "string" ? error.message : "";
     if (code === "UNAUTHORIZED") return AdminPlaceService_error_("UNAUTHORIZED", "กรุณาเข้าสู่ระบบ");
     if (code === "FORBIDDEN") return AdminPlaceService_error_("FORBIDDEN", "คุณไม่มีสิทธิ์ดำเนินการนี้");
@@ -1380,6 +1594,17 @@ function AdminPlaceService_restoreState_(snapshot) {
       !snapshot.allocated_rows || !snapshot.restore_fields || !snapshot.epoch) {
     throw new Error("ADMIN_PLACE_RESTORE_INPUT");
   }
+  // Retain the first failure without preventing safe recovery of the other table.
+  var restorationFailed = false;
+  var firstRestorationError;
+  function attemptRestore(operation) {
+    try {
+      operation();
+    } catch (error) {
+      if (!restorationFailed) firstRestorationError = error;
+      restorationFailed = true;
+    }
+  }
   var auditCleanupFailed = false;
   if (snapshot.audit) {
     try {
@@ -1398,94 +1623,92 @@ function AdminPlaceService_restoreState_(snapshot) {
     }
   }
 
-  var currentTables = {
-    places: SheetService_readTable_(AdminPlaceSchema_PLACES_SHEET_NAME_, snapshot.place_headers),
-    place_drafts: SheetService_readTable_(AdminPlaceSchema_DRAFTS_SHEET_NAME_, snapshot.draft_headers)
-  };
   var clearedRows = { places: [], place_drafts: [] };
   var restoreTargets = [
     { key: "place", tableKey: "places", sheetName: AdminPlaceSchema_PLACES_SHEET_NAME_, headers: snapshot.place_headers },
     { key: "draft", tableKey: "place_drafts", sheetName: AdminPlaceSchema_DRAFTS_SHEET_NAME_, headers: snapshot.draft_headers }
   ].reverse();
   restoreTargets.forEach(function (target) {
-    var before = snapshot.rows[target.key];
-    var allocatedRow = snapshot.allocated_rows[target.key];
-    var restoreFields = snapshot.restore_fields[target.key];
-    if (allocatedRow !== null && (!Number.isSafeInteger(allocatedRow) || allocatedRow < 2)) {
-      throw new Error("ADMIN_PLACE_RESTORE_ALLOCATION");
-    }
-    if (restoreFields !== null && !Array.isArray(restoreFields)) {
-      throw new Error("ADMIN_PLACE_RESTORE_FIELDS");
-    }
-    var currentMatches = currentTables[target.tableKey].rows.filter(function (entry) {
-      return entry && entry.values && entry.values.place_id === snapshot.place_id;
-    });
-    if (before) {
-      if (allocatedRow !== null) throw new Error("ADMIN_PLACE_RESTORE_ALLOCATION");
-      if (restoreFields === null) {
-        SheetService_replaceObjectAtRow_(target.sheetName, before.sourceRowNumber, before.values);
-      } else if (restoreFields.length) {
-        var restoreSeen = Object.create(null);
-        restoreFields.forEach(function (field) {
-          if (typeof field !== "string" || field === "place_id" || target.headers.indexOf(field) === -1 ||
-              Object.prototype.hasOwnProperty.call(restoreSeen, field)) {
-            throw new Error("ADMIN_PLACE_RESTORE_FIELDS");
-          }
-          restoreSeen[field] = true;
-          var restorePatch = {};
-          restorePatch[field] = before.values[field];
-          SheetService_updateObjectAtRow_(target.sheetName, before.sourceRowNumber, restorePatch);
-        });
+    attemptRestore(function () {
+      var currentTable = SheetService_readTable_(target.sheetName, target.headers);
+      var before = snapshot.rows[target.key];
+      var allocatedRow = snapshot.allocated_rows[target.key];
+      var restoreFields = snapshot.restore_fields[target.key];
+      if (allocatedRow !== null && (!Number.isSafeInteger(allocatedRow) || allocatedRow < 2)) {
+        throw new Error("ADMIN_PLACE_RESTORE_ALLOCATION");
       }
-    } else {
-      if (restoreFields !== null && restoreFields.length) throw new Error("ADMIN_PLACE_RESTORE_FIELDS");
-      if (currentMatches.length > 1) throw new Error("ADMIN_PLACE_RESTORE_ALLOCATION");
-      if (currentMatches.length === 1) {
-        // Verified pre-absence makes the unique target-ID row authoritative; never clear a conflicting unrelated allocation.
-        SheetService_clearRow_(target.sheetName, currentMatches[0].sourceRowNumber);
-        clearedRows[target.tableKey].push(currentMatches[0].sourceRowNumber);
-      } else if (allocatedRow !== null) {
-        if (currentTables[target.tableKey].rows.some(function (entry) { return entry.sourceRowNumber === allocatedRow; })) {
-          throw new Error("ADMIN_PLACE_RESTORE_ALLOCATION");
+      if (restoreFields !== null && !Array.isArray(restoreFields)) {
+        throw new Error("ADMIN_PLACE_RESTORE_FIELDS");
+      }
+      var currentMatches = currentTable.rows.filter(function (entry) {
+        return entry && entry.values && entry.values.place_id === snapshot.place_id;
+      });
+      if (before) {
+        if (allocatedRow !== null) throw new Error("ADMIN_PLACE_RESTORE_ALLOCATION");
+        if (restoreFields === null) {
+          SheetService_replaceObjectAtRow_(target.sheetName, before.sourceRowNumber, before.values);
+        } else if (restoreFields.length) {
+          var restoreSeen = Object.create(null);
+          restoreFields.forEach(function (field) {
+            if (typeof field !== "string" || field === "place_id" || target.headers.indexOf(field) === -1 ||
+                Object.prototype.hasOwnProperty.call(restoreSeen, field)) {
+              throw new Error("ADMIN_PLACE_RESTORE_FIELDS");
+            }
+            restoreSeen[field] = true;
+            var restorePatch = {};
+            restorePatch[field] = before.values[field];
+            SheetService_updateObjectAtRow_(target.sheetName, before.sourceRowNumber, restorePatch);
+          });
         }
-        clearedRows[target.tableKey].push(allocatedRow);
+      } else {
+        if (restoreFields !== null && restoreFields.length) throw new Error("ADMIN_PLACE_RESTORE_FIELDS");
+        if (currentMatches.length > 1) throw new Error("ADMIN_PLACE_RESTORE_ALLOCATION");
+        if (currentMatches.length === 1) {
+          // Verified pre-absence makes the unique target-ID row authoritative; never clear a conflicting unrelated allocation.
+          SheetService_clearRow_(target.sheetName, currentMatches[0].sourceRowNumber);
+          clearedRows[target.tableKey].push(currentMatches[0].sourceRowNumber);
+        } else if (allocatedRow !== null) {
+          if (currentTable.rows.some(function (entry) { return entry.sourceRowNumber === allocatedRow; })) {
+            throw new Error("ADMIN_PLACE_RESTORE_ALLOCATION");
+          }
+          clearedRows[target.tableKey].push(allocatedRow);
+        }
       }
-    }
+    });
   });
 
-  var verificationTables = {
-    places: SheetService_readTable_(AdminPlaceSchema_PLACES_SHEET_NAME_, snapshot.place_headers),
-    place_drafts: SheetService_readTable_(AdminPlaceSchema_DRAFTS_SHEET_NAME_, snapshot.draft_headers)
-  };
+  // Verify each table independently, including after another recovery attempt failed.
   restoreTargets.forEach(function (target) {
-    var before = snapshot.rows[target.key];
-    var table = verificationTables[target.tableKey];
-    if (!table || !Array.isArray(table.headers) || table.headers.length !== target.headers.length) {
-      throw new Error("ADMIN_PLACE_RESTORE_VERIFY");
-    }
-    target.headers.forEach(function (header, index) {
-      if (table.headers[index] !== header) throw new Error("ADMIN_PLACE_RESTORE_VERIFY");
-    });
-    var matches = table.rows.filter(function (entry) {
-      return entry && entry.values && entry.values.place_id === snapshot.place_id;
-    });
-    if (matches.length !== (before ? 1 : 0)) throw new Error("ADMIN_PLACE_RESTORE_VERIFY");
-    if (before) {
-      if (matches[0].sourceRowNumber !== before.sourceRowNumber) throw new Error("ADMIN_PLACE_RESTORE_VERIFY");
-      target.headers.forEach(function (header) {
-        var restoredCell = matches[0].values[header];
-        var capturedCell = before.values[header];
-        var sameCell = restoredCell === capturedCell ||
-          (restoredCell instanceof Date && capturedCell instanceof Date && restoredCell.getTime() === capturedCell.getTime());
-        if (!sameCell) throw new Error("ADMIN_PLACE_RESTORE_VERIFY");
+    attemptRestore(function () {
+      var before = snapshot.rows[target.key];
+      var table = SheetService_readTable_(target.sheetName, target.headers);
+      if (!table || !Array.isArray(table.headers) || table.headers.length !== target.headers.length) {
+        throw new Error("ADMIN_PLACE_RESTORE_VERIFY");
+      }
+      target.headers.forEach(function (header, index) {
+        if (table.headers[index] !== header) throw new Error("ADMIN_PLACE_RESTORE_VERIFY");
       });
-    } else {
-      clearedRows[target.tableKey].forEach(function (sourceRowNumber) {
-        if (table.rows.some(function (entry) { return entry.sourceRowNumber === sourceRowNumber; })) {
-          throw new Error("ADMIN_PLACE_RESTORE_CLEAR_VERIFY");
-        }
+      var matches = table.rows.filter(function (entry) {
+        return entry && entry.values && entry.values.place_id === snapshot.place_id;
       });
-    }
+      if (matches.length !== (before ? 1 : 0)) throw new Error("ADMIN_PLACE_RESTORE_VERIFY");
+      if (before) {
+        if (matches[0].sourceRowNumber !== before.sourceRowNumber) throw new Error("ADMIN_PLACE_RESTORE_VERIFY");
+        target.headers.forEach(function (header) {
+          var restoredCell = matches[0].values[header];
+          var capturedCell = before.values[header];
+          var sameCell = restoredCell === capturedCell ||
+            (restoredCell instanceof Date && capturedCell instanceof Date && restoredCell.getTime() === capturedCell.getTime());
+          if (!sameCell) throw new Error("ADMIN_PLACE_RESTORE_VERIFY");
+        });
+      } else {
+        clearedRows[target.tableKey].forEach(function (sourceRowNumber) {
+          if (table.rows.some(function (entry) { return entry.sourceRowNumber === sourceRowNumber; })) {
+            throw new Error("ADMIN_PLACE_RESTORE_CLEAR_VERIFY");
+          }
+        });
+      }
+    });
   });
   if (snapshot.epoch.captured) {
     var restoredEpoch = PropertiesService.getScriptProperties().getProperty(AdminPlaceService_PUBLIC_CACHE_EPOCH_KEY_);
@@ -1493,6 +1716,7 @@ function AdminPlaceService_restoreState_(snapshot) {
       throw new Error("ADMIN_PLACE_EPOCH_RESTORE_VERIFY");
     }
   }
+  if (restorationFailed) throw firstRestorationError;
   if (auditCleanupFailed) throw new Error("ADMIN_PLACE_AUDIT_CLEANUP");
   return true;
 }
@@ -1881,4 +2105,41 @@ function AdminPlaceService_success_(data) {
 
 function AdminPlaceService_error_(code, message) {
   return { ok: false, error: { code: code, message: message } };
+}
+
+// Observational only: later Create repeats its own authoritative preflight under lock.
+function adminInspectPlaceCreateDestinations_(token, payload) {
+  return AdminPlaceService_execute_(token, function (admin) {
+    AdminPlaceService_requireWriteRole_(admin);
+    var parameters = payload === undefined ? {} : payload;
+    if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) throw new Error("VALIDATION_ERROR");
+    AdminPlaceService_assertExactKeys_(parameters, []);
+    AdminPlaceService_requireContext_(false);
+    return AdminPlaceService_success_({
+      places: AdminPlaceService_inspectCreateDestination_("PLACES", AdminPlaceSchema_PLACES_SHEET_NAME_,
+        AdminPlaceSchema_PLACE_BASE_HEADERS_.concat(AdminPlaceSchema_PLACES_APPEND_HEADERS_)),
+      drafts: AdminPlaceService_inspectCreateDestination_("DRAFTS", AdminPlaceSchema_DRAFTS_SHEET_NAME_,
+        AdminPlaceSchema_DRAFT_HEADERS_)
+    });
+  });
+}
+
+function AdminPlaceService_inspectCreateDestination_(sheetCode, sheetName, requiredHeaders) {
+  var destination = SheetService_prepareAppendDestination_(SheetService_getSheet_(sheetName), requiredHeaders);
+  var formats = destination.sheet.getRange(destination.sourceRowNumber, 1, 1, destination.headers.length).getNumberFormats();
+  try {
+    AdminPlaceSchema_assertCreateDestinationFormats_(sheetCode, destination.headers,
+      { is_featured: false, is_main_route_point: false }, formats);
+  } catch (error) {
+    // Only an otherwise structurally valid unsupported format is an inspection result.
+    if (!(error instanceof Error) || error.message !== "ADMIN_PLACE_FORMAT_UNSUPPORTED") throw error;
+  }
+  var fields = {};
+  var compatible = true;
+  ["is_featured", "is_main_route_point"].forEach(function (field) {
+    var supported = AdminPlaceSchema_isCreateBooleanFormatSupported_(formats[0][destination.headers.indexOf(field)]);
+    fields[field] = supported ? "SUPPORTED" : "UNSUPPORTED";
+    if (!supported) compatible = false;
+  });
+  return { compatible: compatible, guarded_fields: fields };
 }

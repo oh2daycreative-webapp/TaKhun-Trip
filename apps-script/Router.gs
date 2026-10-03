@@ -68,6 +68,7 @@ function routeRequest_(method, event) {
         if (action === "adminArchivePlace") return createJsonResponse_(adminArchivePlace_(body.token, body.payload));
         if (action === "adminRestorePlace") return createJsonResponse_(adminRestorePlace_(body.token, body.payload));
         if (action === "adminGetPlaceMediaOptions") return createJsonResponse_(adminGetPlaceMediaOptions_(body.token, body.payload));
+        if (action === "adminInspectPlaceCreateDestinations") return createJsonResponse_(adminInspectPlaceCreateDestinations_(body.token, body.payload));
       }
     }
 

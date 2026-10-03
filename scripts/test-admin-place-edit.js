@@ -39,9 +39,52 @@ function readOnlyHarness(options={}) {
   async function next(values,fallback){const value=values&&values.length?values.shift():fallback;if(value instanceof Error)throw value;return await value;}
   const window={location:{search:options.search===undefined?`?place_id=${ID}`:options.search,hash:options.hash||"",assign(url){assigned.push(url);}},history:{replaceState(_a,_b,url){calls.push(["url",url]);}},document,URLSearchParams,MutationObserver:function(){this.observe=()=>{};this.disconnect=()=>{};},addEventListener(type,fn){globalListeners.set(type,(globalListeners.get(type)||[]).concat(fn));},removeEventListener(type,fn){globalListeners.set(type,(globalListeners.get(type)||[]).filter((entry)=>entry!==fn));},TakhunAdminShell:{init:async()=>({status:"authenticated",admin:{role}})},TakhunAdminAuth:{readSession:()=>({token:"T",role})},TakhunAdminPlaceMap:{init:(config)=>{mapInits.push(config);return {setValue(latitude,longitude){config.latitudeInput.value=latitude==null?"":String(latitude);config.longitudeInput.value=longitude==null?"":String(longitude);}};}},TakhunAdminPlaceMedia:{init:async(config)=>{mediaInits.push(config);mediaSelected=Array.isArray(config.selectedIds)?config.selectedIds.slice():[];return {getSelected:()=>mediaSelected.slice()};}},TakhunAdminApi:{getPlaceDetail:async(_token,payload)=>{calls.push(["detail",payload]);return next(details,detail());},createPlace:async(_token,payload)=>{calls.push(["create",payload]);return next(options.creates,write());},savePlaceDraft:async(_token,payload)=>{calls.push(["save",payload]);return next(options.saves,write());},publishPlace:async(_token,payload)=>{calls.push(["publish",payload]);return next(options.publishes,write({status:"published",working_version:6,entity_version:6,published_version:6,has_active_draft:false}));},inspectPlaceDependencies:async(_token,payload)=>{calls.push(["inspect",payload]);return next(options.dependencies,{place_id:ID,checked_at:"2026-08-10T00:00:00.000Z",groups:{routes:[],nearby_places:[],products:[],events:[],gallery:[],trip_templates:[],reviews:[]}});},unpublishPlace:async(_token,payload)=>{calls.push(["unpublish",payload]);return next(options.unpublishes,write({status:"draft",working_version:6,entity_version:6,published_version:3,has_active_draft:true}));},archivePlace:async(_token,payload)=>{calls.push(["archive",payload]);return next(options.archives,write({status:"archived",working_version:6,entity_version:6,published_version:3,has_active_draft:true,dependencies:{routes:[],nearby_places:[],products:[],events:[],gallery:[],trip_templates:[],reviews:[]}}));},restorePlace:async(_token,payload)=>{calls.push(["restore",payload]);return next(options.restores,write({status:"draft",working_version:6,entity_version:6,published_version:3,has_active_draft:true}));}}};
   if(options.placeId) window.location.search=`?place_id=${options.placeId}`;
-  window.window=window; vm.runInContext(source,vm.createContext({window,URLSearchParams,MutationObserver:window.MutationObserver}),{filename:"admin-place-edit.js"});
-  return {c:window.TakhunAdminPlaceEdit,v:values,get calls(){return JSON.parse(JSON.stringify(calls));},mapInits,mediaInits,document,assigned,setMediaSelected(ids){mediaSelected=ids.slice();},getMediaSelected(){return mediaSelected.slice();},listenerCount(type){return (globalListeners.get(type)||[]).length;},async fireWindow(type){const event={defaultPrevented:false,returnValue:undefined,preventDefault(){this.defaultPrevented=true;}};for(const fn of globalListeners.get(type)||[])await fn(event);return event;}};
+  const inspectedSource=source.replace("global.TakhunAdminPlaceEdit = Object.freeze({ init });", "global.editorTest = { save, restoreActions, message, state }; global.TakhunAdminPlaceEdit = Object.freeze({ init });");
+  window.window=window; vm.runInContext(inspectedSource,vm.createContext({window,URLSearchParams,MutationObserver:window.MutationObserver}),{filename:"admin-place-edit.js"});
+  return {internals:window.editorTest,c:window.TakhunAdminPlaceEdit,v:values,get calls(){return JSON.parse(JSON.stringify(calls));},mapInits,mediaInits,document,assigned,setMediaSelected(ids){mediaSelected=ids.slice();},getMediaSelected(){return mediaSelected.slice();},listenerCount(type){return (globalListeners.get(type)||[]).length;},async fireWindow(type){const event={defaultPrevented:false,returnValue:undefined,preventDefault(){this.defaultPrevented=true;}};for(const fn of globalListeners.get(type)||[])await fn(event);return event;}};
 }
+const UNKNOWN_CREATE_MESSAGE="ยังยืนยันผลการบันทึกไม่ได้ เซิร์ฟเวอร์อาจบันทึกสำเร็จแล้ว กรุณากลับไปยังรายการสถานที่เพื่อตรวจสอบก่อนสร้างอีกครั้ง";
+const transportCodes=["TIMEOUT","NETWORK_ERROR","HTTP_ERROR","MALFORMED_RESPONSE"];
+for(const code of transportCodes) for(const publish of [false,true]) test(`Create ${code} publish=${publish} permanently blocks duplicate submission but permits list navigation`,async()=>{
+  const pending=deferred(),h=readOnlyHarness({search:"",role:"editor",creates:[pending.promise]});
+  await h.c.init(); assert.equal(h.internals.state.createOutcomeUnknown,false);
+  h.v.controls.name_th.value="changed"; await h.v.form.fire("input");
+  const submission=publish?h.v.publish.fire("click"):h.v.form.fire("submit");
+  await h.v.form.fire("submit"); await h.internals.save(true);
+  assert.equal(h.calls.filter(c=>c[0]==="create").length,1);
+  pending.reject(Object.assign(new Error("private transport detail"),{code})); await submission;
+  const state=h.internals.state;
+  assert.equal(state.createOutcomeUnknown,true); assert.equal(state.mode,"create");
+  assert.equal(state.placeId,""); assert.equal(state.version,0); assert.equal(state.entityVersion,0); assert.equal(state.dirty,true);
+  assert.equal(h.v.status.textContent,UNKNOWN_CREATE_MESSAGE); assert.equal(h.v.save.disabled,true); assert.equal(h.v.publish.disabled,true);
+  h.internals.restoreActions(); h.internals.message("other message"); h.v.controls.name_th.valid=false;
+  await h.v.form.fire("input"); await h.v.tabs[1].fire("click");
+  await h.v.form.fire("submit"); await h.v.publish.fire("click"); await h.internals.save(false); await h.internals.save(true);
+  assert.equal(h.v.save.disabled,true); assert.equal(h.v.publish.disabled,true); assert.equal(h.v.status.textContent,UNKNOWN_CREATE_MESSAGE);
+  assert.deepEqual(h.calls.map(c=>c[0]),["create"]); assert.deepEqual(h.assigned,[]);
+  await h.v.back.fire("click"); assert.equal(h.v.navigationDialog.open,true);
+  await h.v.navigationConfirm.fire("click"); assert.deepEqual(h.assigned,["places.html"]); assert.deepEqual(h.calls.map(c=>c[0]),["create"]);
+});
+for(const code of ["VALIDATION_ERROR","UNAUTHORIZED","FORBIDDEN","SERVER_ERROR"]) test(`confirmed Create ${code} remains retryable`,async()=>{
+  const h=readOnlyHarness({search:"",role:"editor",creates:[Object.assign(new Error("private"),{code})]}); await h.c.init(); await h.v.form.fire("submit");
+  assert.equal(h.internals.state.createOutcomeUnknown,false); assert.equal(h.v.save.disabled,false); assert.equal(h.v.publish.disabled,false); assert.notEqual(h.v.status.textContent,UNKNOWN_CREATE_MESSAGE);
+  await h.v.form.fire("submit"); assert.equal(h.calls.filter(c=>c[0]==="create").length,2);
+});
+for(const code of transportCodes) test(`Edit ${code} retains ordinary retry behavior`,async()=>{
+  const h=readOnlyHarness({role:"editor",saves:[Object.assign(new Error("private"),{code})]}); await h.c.init(); await h.v.form.fire("submit");
+  assert.equal(h.internals.state.createOutcomeUnknown,false); assert.equal(h.v.save.disabled,false); assert.equal(h.v.publish.disabled,false);
+  await h.v.form.fire("submit"); assert.equal(h.calls.filter(c=>c[0]==="save").length,2); assert.equal(h.calls.filter(c=>c[0]==="create").length,0);
+});
+test("successful Create retains confirmed identity and success UX",async()=>{
+  const h=readOnlyHarness({search:"",role:"editor"}); await h.c.init(); await h.v.form.fire("submit");
+  assert.equal(h.internals.state.createOutcomeUnknown,false); assert.equal(h.internals.state.mode,"edit"); assert.equal(h.internals.state.placeId,ID);
+  assert.equal(h.internals.state.version,4); assert.equal(h.internals.state.dirty,false); assert.equal(h.v.status.textContent,"บันทึกแบบร่างแล้ว"); assert.equal(h.v.save.disabled,false);
+  await h.v.form.fire("submit"); assert.equal(h.calls.filter(c=>c[0]==="create").length,1); assert.equal(h.calls.filter(c=>c[0]==="save").length,1);
+});
+test("pre-request snapshot failure cannot latch unknown Create",async()=>{
+  const h=readOnlyHarness({search:"",role:"editor"}); await h.c.init(); h.internals.state.mediaComponent.getSelected=()=>{throw Object.assign(new Error("local"),{code:"TIMEOUT"});};
+  await h.v.form.fire("submit"); assert.equal(h.internals.state.createOutcomeUnknown,false); assert.equal(h.v.save.disabled,false); assert.equal(h.calls.length,0);
+});
 function descendants(node) { return (node.children||[]).flatMap((child)=>[child,...descendants(child)]); }
 function renderedText(node) { return [node.textContent,...descendants(node).map((child)=>child.textContent)].filter(Boolean).join(" "); }
 test("page security and exact controls are present",()=>{ assert.match(page,/data-admin-place-edit-fatal/); assert.match(page,/places\.html/); assert.match(page,/role="tablist"/); assert.doesNotMatch(source,/\bfetch\s*\(|innerHTML|\?edit=/); for(const k of KEYS) assert.match(page,new RegExp(`name="${k}"`)); });
