@@ -1622,6 +1622,90 @@ test("Save Draft stale requests and authoritative invariant corruption write not
   assert.equal(archived.calls.writes.length, 0);
 });
 
+test("Create diagnostic logs a controlled identifier while preserving the exact response and rollback", () => {
+  const runtime = loadTransactionBackend("CREATE", { wrongPlaceAppendRow: true, unrelatedBusinessRows: true });
+  const before = transactionBefore(runtime);
+  const logs = [];
+  runtime.context.console = { error(...args) { logs.push(args); } };
+
+  assert.deepEqual(callCreate(runtime), {
+    ok: false, error: { code: "SERVER_ERROR", message: "เกิดข้อผิดพลาดของระบบ" }
+  });
+  assert.deepEqual(logs, [["ADMIN_PLACE_CREATE_FAILURE", "ADMIN_PLACE_WRITE_VERIFY"]]);
+  assertRestored(runtime, before);
+  assert.equal(runtime.lock.released, 1);
+});
+
+test("Create diagnostic replaces unsafe exceptions with UNKNOWN_ERROR without serializing them", () => {
+  for (const expression of [
+    'new Error("token=TOKEN payload=private credentials=secret")',
+    'new Error("ADMIN_PLACE_SECRET_TOKEN")',
+    'new Error("ADMIN_PLACE_AUDIT_CLEANUP")',
+    'new Error("Human text value is invalid.")',
+    'new Error("Human text field is invalid.")',
+    'new Error("ADMIN_PLACE_WRITE_VERIFY\\nprivate")',
+    'new Error("")',
+    'Object.assign(new Error(), { message: 123 })',
+    'Object.defineProperty(new Error(), "message", { get() { throw new Error("private"); } })',
+    '({ message: "ADMIN_PLACE_WRITE_VERIFY", toString() { throw new Error("must not serialize"); } })',
+    '"ADMIN_PLACE_WRITE_VERIFY"', 'null', 'undefined'
+  ]) {
+    const runtime = loadTransactionBackend("CREATE");
+    const before = transactionBefore(runtime);
+    const logs = [];
+    runtime.context.console = { error(...args) { logs.push(args); } };
+    const thrown = vm.runInContext(expression, runtime.context);
+    const append = runtime.context.SheetService_appendObjectWithRow_;
+    runtime.context.SheetService_appendObjectWithRow_ = (...args) => {
+      const result = append(...args);
+      if (args[0] === "place_drafts") throw thrown;
+      return result;
+    };
+
+    assert.deepEqual(callCreate(runtime), {
+      ok: false, error: { code: "SERVER_ERROR", message: "เกิดข้อผิดพลาดของระบบ" }
+    }, expression);
+    assert.deepEqual(logs, [["ADMIN_PLACE_CREATE_FAILURE", "UNKNOWN_ERROR"]], expression);
+    assertRestored(runtime, before);
+    assert.equal(runtime.lock.released, 1);
+  }
+});
+
+test("Create diagnostic logger failure cannot prevent rollback or change the response", () => {
+  const runtime = loadTransactionBackend("CREATE", { wrongPlaceAppendRow: true, unrelatedBusinessRows: true });
+  const before = transactionBefore(runtime);
+  runtime.context.console = { error() { throw new Error("logger unavailable"); } };
+  assert.deepEqual(callCreate(runtime), {
+    ok: false, error: { code: "SERVER_ERROR", message: "เกิดข้อผิดพลาดของระบบ" }
+  });
+  assertRestored(runtime, before);
+  assert.equal(runtime.lock.released, 1);
+});
+
+test("Create diagnostic preserves the original controlled audit verification failure after cleanup", () => {
+  const runtime = loadTransactionBackend("CREATE", { corruptAuditDescriptionReadback: true });
+  const before = transactionBefore(runtime);
+  const logs = [];
+  runtime.context.console = { error(...args) { logs.push(args); } };
+  assert.deepEqual(callCreate(runtime), {
+    ok: false, error: { code: "SERVER_ERROR", message: "เกิดข้อผิดพลาดของระบบ" }
+  });
+  assert.deepEqual(logs, [["ADMIN_PLACE_CREATE_FAILURE", "ADMIN_PLACE_AUDIT_VERIFY"]]);
+  assertRestored(runtime, before);
+  assert.equal(runtime.lock.released, 1);
+});
+
+test("Create diagnostic excludes Gallery validation rejected before the transaction", () => {
+  for (const gallery_media_ids of ["invalid|list", ["invalid id"], ["place-temp-gallery-a"]]) {
+    const runtime = loadTransactionBackend("CREATE");
+    const logs = [];
+    runtime.context.console = { error(...args) { logs.push(args); } };
+    assertError(callCreate(runtime, writeContent({ gallery_media_ids })), "VALIDATION_ERROR");
+    assert.deepEqual(logs, []);
+    assert.deepEqual(runtime.calls.writes, []);
+  }
+});
+
 test("Create and Save verification or audit failure compensates under lock without epoch or internal leakage", () => {
   for (const [action, invoke, options] of [
     ["CREATE", callCreate, { failPlaceAppendAfterWrite: true }],

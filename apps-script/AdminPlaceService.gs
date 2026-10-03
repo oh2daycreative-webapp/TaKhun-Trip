@@ -148,6 +148,30 @@ function adminCreatePlace_(token, payload) {
           placeId, "draft", 1, 0, true, occurredAt, occurredAt
         ));
       } catch (error) {
+        var diagnostic = "UNKNOWN_ERROR";
+        try {
+          // Only exact, controlled messages are safe; never log arbitrary exception text or stacks.
+          var safeMessages = [
+            "ADMIN_PLACE_APPEND", "ADMIN_PLACE_WRITE_VERIFY", "ADMIN_PLACE_TEXT", "ADMIN_PLACE_TIMESTAMP",
+            "ADMIN_PLACE_AUDIT_ACTOR", "ADMIN_PLACE_AUDIT_INPUT", "ADMIN_PLACE_AUDIT_ID",
+            "ADMIN_PLACE_AUDIT_ID_COLLISION", "ADMIN_PLACE_AUDIT_APPEND", "ADMIN_PLACE_AUDIT_CARDINALITY",
+            "ADMIN_PLACE_AUDIT_VERIFY",
+            "Data source is not configured.", "Requested data is not available.",
+            "Data headers are not available.", "Required data headers are not available.",
+            "Data headers are invalid.", "Data headers must be unique.", "Data headers conflict.",
+            "Required data headers are invalid.", "Required data headers must be unique.",
+            "Data append is invalid."
+          ];
+          var message = error instanceof Error ? error.message : null;
+          if (typeof message === "string" && safeMessages.indexOf(message) !== -1) diagnostic = message;
+        } catch (diagnosticError) {
+          // Unreadable exception values retain the safe fallback.
+        }
+        try {
+          console.error("ADMIN_PLACE_CREATE_FAILURE", diagnostic);
+        } catch (loggingError) {
+          // Diagnostics must never prevent compensation or change the client-safe outcome.
+        }
         return AdminPlaceService_failClosed_(state);
       }
     });
