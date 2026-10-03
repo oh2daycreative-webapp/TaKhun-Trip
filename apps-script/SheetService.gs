@@ -135,27 +135,52 @@ function SheetService_updateObjectAtRow_(sheetName, sourceRowNumber, record) {
   });
 }
 
-function SheetService_appendObjectWithRow_(sheetName, requiredHeaders, record) {
+function SheetService_appendObjectWithRow_(sheetName, requiredHeaders, record, prepared) {
   if (!record || typeof record !== "object" || Array.isArray(record)) {
     throw new Error("Data append is invalid.");
   }
 
   var fields = Object.keys(record);
-  var sheet = SheetService_getSheet_(sheetName);
-  var values = sheet.getDataRange().getValues();
-  if (!values || !values.length || sheet.getLastRow() < 1) {
-    throw new Error("Data headers are not available.");
-  }
-  var headers = SheetService_normalizeHeaders_(values[0]);
-  SheetService_assertUniqueHeaders_(headers, SheetService_validateRequiredHeaders_(requiredHeaders));
-  SheetService_assertUniqueHeaders_(headers, fields);
+  var sheet = prepared ? prepared.sheet : SheetService_getSheet_(sheetName);
+  if (prepared && sheet.getName() !== sheetName) throw new Error("Data append destination changed.");
+  var headers = SheetService_readAppendHeaders_(sheet, requiredHeaders, fields);
 
   var row = headers.map(function (header) {
     return Object.prototype.hasOwnProperty.call(record, header) ? record[header] : "";
   });
   var sourceRowNumber = sheet.getLastRow() + 1;
+  if (prepared && (sourceRowNumber !== prepared.sourceRowNumber ||
+      !SheetService_sameAppendHeaders_(headers, prepared.headers))) {
+    throw new Error("Data append destination changed.");
+  }
   sheet.getRange(sourceRowNumber, 1, 1, headers.length).setValues([row]);
   return SheetService_rowResult_(headers, sourceRowNumber, row);
+}
+
+// Request-local destination only: no table values or record are retained.
+function SheetService_prepareAppendDestination_(sheet, requiredHeaders, expectedHeaders) {
+  var headers = SheetService_readAppendHeaders_(sheet, requiredHeaders, []);
+  if (expectedHeaders !== undefined && !SheetService_sameAppendHeaders_(headers, expectedHeaders)) {
+    throw new Error("Data append destination changed.");
+  }
+  return Object.freeze({ sheet: sheet, headers: Object.freeze(headers), sourceRowNumber: sheet.getLastRow() + 1 });
+}
+
+function SheetService_sameAppendHeaders_(actual, expected) {
+  return Array.isArray(expected) && actual.length === expected.length && actual.every(function (header, index) {
+    return header === expected[index];
+  });
+}
+
+function SheetService_readAppendHeaders_(sheet, requiredHeaders, fields) {
+  if (sheet.getLastRow() < 1) throw new Error("Data headers are not available.");
+  // Include columns populated below row 1 so a blank trailing header still fails validation.
+  var values = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues();
+  if (!values || !values.length) throw new Error("Data headers are not available.");
+  var headers = SheetService_normalizeHeaders_(values[0]);
+  SheetService_assertUniqueHeaders_(headers, SheetService_validateRequiredHeaders_(requiredHeaders));
+  SheetService_assertUniqueHeaders_(headers, fields);
+  return headers;
 }
 
 function SheetService_replaceObjectAtRow_(sheetName, sourceRowNumber, record) {
