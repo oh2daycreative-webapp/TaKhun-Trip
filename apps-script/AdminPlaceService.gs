@@ -154,6 +154,8 @@ function adminCreatePlace_(token, payload) {
             sourceRowNumber: state.allocated_rows.draft,
             values: AdminPlaceService_completeRow_(state.draft_headers, draftRecord)
           }
+        }, function (metadata) {
+          if (!diagnostic.verification) diagnostic.verification = metadata;
         });
         diagnostic.stage = "AUDIT";
         AdminPlaceService_appendVerifiedAudit_(admin, "CREATE", placeId);
@@ -253,9 +255,33 @@ function AdminPlaceService_recordCreateDiagnostic_(diagnostic, error) {
       // Unreadable, native, non-Error and unexpected exceptions retain the fixed fallback.
     }
     diagnostic.failure = "ADMIN_PLACE_CREATE_FAILURE|" + diagnostic.stage + "|" + identifier;
+    if (diagnostic.stage === "INTENDED_STATE_VERIFY" && identifier === "ADMIN_PLACE_WRITE_VERIFY" && diagnostic.verification) {
+      diagnostic.failure += "|" + diagnostic.verification;
+    }
   } catch (_diagnosticError) {
     // Even in-memory diagnostics must not change the business outcome.
   }
+}
+
+// TEMPORARY V3: types never stringify values or inspect their properties/getters.
+// EMPTY is exclusively the empty string returned for a blank Sheets cell.
+function AdminPlaceService_createDiagnosticType_(value) {
+  if (value === "") return "EMPTY";
+  if (typeof value === "string") return "STRING";
+  if (typeof value === "number") return "NUMBER";
+  if (typeof value === "boolean") return "BOOLEAN";
+  try {
+    Date.prototype.getTime.call(value); // Intrinsic brand check, including invalid Dates; no value getters.
+    return "DATE";
+  } catch (_notDate) {
+    return "OTHER";
+  }
+}
+
+function AdminPlaceService_createDiagnosticHeaders_(sheetCode) {
+  if (sheetCode === "PLACES") return AdminPlaceSchema_PLACE_BASE_HEADERS_.concat(AdminPlaceSchema_PLACES_APPEND_HEADERS_);
+  if (sheetCode === "DRAFTS") return AdminPlaceSchema_DRAFT_HEADERS_;
+  return [];
 }
 
 function AdminPlaceService_writeCreateDiagnostic_(value) {
@@ -263,9 +289,18 @@ function AdminPlaceService_writeCreateDiagnostic_(value) {
     if (typeof value !== "string") return false;
     if (value !== "DIAGNOSTIC_PREFLIGHT_OK") {
       var parts = value.split("|");
-      if (parts.length !== 3 || parts[0] !== "ADMIN_PLACE_CREATE_FAILURE" ||
+      if ((parts.length !== 3 && parts.length !== 8) || parts[0] !== "ADMIN_PLACE_CREATE_FAILURE" ||
           !Object.prototype.hasOwnProperty.call(AdminPlaceService_CREATE_DIAGNOSTIC_ERRORS_, parts[1])) return false;
       if (parts[2] !== "UNKNOWN_ERROR" && AdminPlaceService_CREATE_DIAGNOSTIC_ERRORS_[parts[1]].indexOf(parts[2]) === -1) return false;
+      if (parts.length === 8) {
+        if (parts[1] !== "INTENDED_STATE_VERIFY" || parts[2] !== "ADMIN_PLACE_WRITE_VERIFY" ||
+            ["PLACES", "DRAFTS", "NOT_APPLICABLE"].indexOf(parts[3]) === -1) return false;
+        if (["EXTRA_COLUMN", "NOT_APPLICABLE"].concat(AdminPlaceService_createDiagnosticHeaders_(parts[3])).indexOf(parts[4]) === -1) return false;
+        var types = ["STRING", "NUMBER", "BOOLEAN", "DATE", "EMPTY", "OTHER", "NOT_APPLICABLE"];
+        if (types.indexOf(parts[5]) === -1 || types.indexOf(parts[6]) === -1 ||
+            ["TABLE_SHAPE", "HEADER_COUNT", "HEADER_ORDER", "ROW_CARDINALITY", "ROW_LOCATION",
+              "CELL_TYPE_MISMATCH", "CELL_VALUE_MISMATCH"].indexOf(parts[7]) === -1) return false;
+      }
     }
     var sheet = SheetService_getSheet_("_TEMP_ADMIN_PLACE_CREATE_DIAGNOSTICS");
     if (sheet.getLastRow() < 1 || sheet.getLastColumn() !== 2) return false;
@@ -1153,7 +1188,28 @@ function AdminPlaceService_mergeRow_(before, patch) {
   return values;
 }
 
-function AdminPlaceService_verifyIntendedState_(snapshot, intended) {
+function AdminPlaceService_verifyIntendedState_(snapshot, intended, observer) {
+  var observed = false;
+  function observe(target, category, header, expected, actual) {
+    if (typeof observer !== "function" || observed) return;
+    observed = true;
+    try {
+      var sheetCode = target.sheetName === AdminPlaceSchema_PLACES_SHEET_NAME_ ? "PLACES" :
+        target.sheetName === AdminPlaceSchema_DRAFTS_SHEET_NAME_ ? "DRAFTS" : "NOT_APPLICABLE";
+      var safeHeader = "NOT_APPLICABLE";
+      var expectedType = "NOT_APPLICABLE";
+      var actualType = "NOT_APPLICABLE";
+      if (category === "CELL") {
+        safeHeader = AdminPlaceService_createDiagnosticHeaders_(sheetCode).indexOf(header) !== -1 ? header : "EXTRA_COLUMN";
+        expectedType = AdminPlaceService_createDiagnosticType_(expected);
+        actualType = AdminPlaceService_createDiagnosticType_(actual);
+        category = expectedType === actualType ? "CELL_VALUE_MISMATCH" : "CELL_TYPE_MISMATCH";
+      }
+      observer([sheetCode, safeHeader, expectedType, actualType, category].join("|"));
+    } catch (_observerError) {
+      // Observation cannot replace the verifier's original error or affect compensation.
+    }
+  }
   var targets = [
     {
       sheetName: AdminPlaceSchema_PLACES_SHEET_NAME_, headers: snapshot.place_headers,
@@ -1166,11 +1222,19 @@ function AdminPlaceService_verifyIntendedState_(snapshot, intended) {
   ];
   targets.forEach(function (target) {
     var table = SheetService_readTable_(target.sheetName, target.headers);
-    if (!table || !Array.isArray(table.headers) || table.headers.length !== target.headers.length) {
+    if (!table || !Array.isArray(table.headers)) {
+      observe(target, "TABLE_SHAPE");
+      throw new Error("ADMIN_PLACE_WRITE_VERIFY");
+    }
+    if (table.headers.length !== target.headers.length) {
+      observe(target, "HEADER_COUNT");
       throw new Error("ADMIN_PLACE_WRITE_VERIFY");
     }
     target.headers.forEach(function (header, index) {
-      if (table.headers[index] !== header) throw new Error("ADMIN_PLACE_WRITE_VERIFY");
+      if (table.headers[index] !== header) {
+        observe(target, "HEADER_ORDER");
+        throw new Error("ADMIN_PLACE_WRITE_VERIFY");
+      }
     });
     var matches = table.rows.filter(function (entry) {
       return entry && entry.values && entry.values.place_id === snapshot.place_id;
@@ -1181,11 +1245,13 @@ function AdminPlaceService_verifyIntendedState_(snapshot, intended) {
           matches.length !== 0 || (!retainedAbsence && table.rows.some(function (entry) {
             return entry && entry.sourceRowNumber === target.expected.sourceRowNumber;
           }))) {
+        observe(target, matches.length !== 0 ? "ROW_CARDINALITY" : "ROW_LOCATION");
         throw new Error("ADMIN_PLACE_WRITE_VERIFY");
       }
       return;
     }
     if (!target.expected || matches.length !== 1 || matches[0].sourceRowNumber !== target.expected.sourceRowNumber) {
+      observe(target, !target.expected ? "TABLE_SHAPE" : matches.length !== 1 ? "ROW_CARDINALITY" : "ROW_LOCATION");
       throw new Error("ADMIN_PLACE_WRITE_VERIFY");
     }
     target.headers.forEach(function (header) {
@@ -1193,7 +1259,10 @@ function AdminPlaceService_verifyIntendedState_(snapshot, intended) {
       var expected = target.expected.values[header];
       var same = actual === expected ||
         (actual instanceof Date && expected instanceof Date && actual.getTime() === expected.getTime());
-      if (!same) throw new Error("ADMIN_PLACE_WRITE_VERIFY");
+      if (!same) {
+        observe(target, "CELL", header, expected, actual);
+        throw new Error("ADMIN_PLACE_WRITE_VERIFY");
+      }
     });
   });
   return true;

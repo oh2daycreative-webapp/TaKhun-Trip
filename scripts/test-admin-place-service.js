@@ -1723,7 +1723,7 @@ test("Create diagnostic logger failure cannot prevent rollback or change the res
     ok: false, error: { code: "SERVER_ERROR", message: "เกิดข้อผิดพลาดของระบบ" }
   });
   assertRestored(runtime, before);
-  assertCreateDiagnosticRows(destination.rows, ["ADMIN_PLACE_CREATE_FAILURE|INTENDED_STATE_VERIFY|ADMIN_PLACE_WRITE_VERIFY"]);
+  assertCreateDiagnosticRows(destination.rows, ["ADMIN_PLACE_CREATE_FAILURE|INTENDED_STATE_VERIFY|ADMIN_PLACE_WRITE_VERIFY|PLACES|NOT_APPLICABLE|NOT_APPLICABLE|NOT_APPLICABLE|ROW_LOCATION"]);
   assert.equal(runtime.lock.released, 1);
 });
 
@@ -1808,7 +1808,7 @@ test("Create diagnostic V2 persists after compensation and lock release even whe
     assert.ok(events.indexOf("releaseLock") < events.indexOf("diagnostic:open"));
     assert.equal(destination.attempts, destinationOptions.missing ? 0 : 1);
     if (!destinationOptions.failWrite && !destinationOptions.missing) {
-      assertCreateDiagnosticRows(destination.rows, ["ADMIN_PLACE_CREATE_FAILURE|INTENDED_STATE_VERIFY|ADMIN_PLACE_WRITE_VERIFY"]);
+      assertCreateDiagnosticRows(destination.rows, ["ADMIN_PLACE_CREATE_FAILURE|INTENDED_STATE_VERIFY|ADMIN_PLACE_WRITE_VERIFY|PLACES|NOT_APPLICABLE|NOT_APPLICABLE|NOT_APPLICABLE|ROW_LOCATION"]);
     }
   }
 });
@@ -1827,7 +1827,7 @@ test("Create diagnostic V2 retains only the original failure when compensation a
     ok: false, error: { code: "SERVER_ERROR", message: "เกิดข้อผิดพลาดของระบบ" }
   });
   assertCreateDiagnosticRows(destination.rows, [
-    "ADMIN_PLACE_CREATE_FAILURE|INTENDED_STATE_VERIFY|ADMIN_PLACE_WRITE_VERIFY"
+    "ADMIN_PLACE_CREATE_FAILURE|INTENDED_STATE_VERIFY|ADMIN_PLACE_WRITE_VERIFY|PLACES|NOT_APPLICABLE|NOT_APPLICABLE|NOT_APPLICABLE|ROW_LOCATION"
   ]);
   assert.equal(destination.attempts, 1);
   assert.ok(runtime.calls.events.some((event) => event.startsWith("clear:")), "compensation was attempted");
@@ -1982,6 +1982,115 @@ test("Create diagnostic V2 preflight uses only the same controlled writer and ne
     assert.deepEqual(runtime.calls.writes, []);
     assert.deepEqual(runtime.calls.propertyWrites, []);
   }
+});
+
+test("Create diagnostic V3 records only controlled first mismatch metadata after compensation", () => {
+  const cases = [
+    ["places", "created_at", "STRING|DATE|CELL_TYPE_MISMATCH", (table) => { table.rows[0].values.created_at = new Date(); table.rows[0].values.updated_at = "private second mismatch"; }],
+    ["place_drafts", "draft_version", "NUMBER|STRING|CELL_TYPE_MISMATCH", (table) => { table.rows[0].values.draft_version = "private value"; }],
+    ["place_drafts", "name_th", "STRING|STRING|CELL_VALUE_MISMATCH", (table) => { table.rows[0].values.name_th = "private changed payload"; }],
+    ["places", "NOT_APPLICABLE", "NOT_APPLICABLE|NOT_APPLICABLE|TABLE_SHAPE", () => null],
+    ["places", "NOT_APPLICABLE", "NOT_APPLICABLE|NOT_APPLICABLE|TABLE_SHAPE", (table) => { delete table.headers; }],
+    ["places", "NOT_APPLICABLE", "NOT_APPLICABLE|NOT_APPLICABLE|TABLE_SHAPE", (table) => { table.headers = "private invalid headers"; }],
+    ["places", "NOT_APPLICABLE", "NOT_APPLICABLE|NOT_APPLICABLE|HEADER_COUNT", (table) => { table.headers.push("private header"); }],
+    ["places", "NOT_APPLICABLE", "NOT_APPLICABLE|NOT_APPLICABLE|HEADER_ORDER", (table) => { table.headers.reverse(); }],
+    ["places", "NOT_APPLICABLE", "NOT_APPLICABLE|NOT_APPLICABLE|ROW_CARDINALITY", (table) => { table.rows = []; }],
+    ["places", "NOT_APPLICABLE", "NOT_APPLICABLE|NOT_APPLICABLE|ROW_LOCATION", (table) => { table.rows[0].sourceRowNumber += 1; }],
+    ["places", "EXTRA_COLUMN", "EMPTY|STRING|CELL_TYPE_MISMATCH", (table) => { table.rows[0].values["private header"] = "private value"; }, true]
+  ];
+  for (const [sheet, header, suffix, mutate, extra] of cases) {
+    const runtime = loadTransactionBackend("CREATE");
+    if (extra) runtime.sheets.places.headers.push("private header");
+    const before = transactionBefore(runtime);
+    const destination = attachCreateDiagnosticSheet(runtime);
+    const verify = runtime.context.AdminPlaceService_verifyIntendedState_;
+    runtime.context.AdminPlaceService_verifyIntendedState_ = (...args) => {
+      const read = runtime.context.SheetService_readTable_;
+      runtime.context.SheetService_readTable_ = (...readArgs) => {
+        const table = read(...readArgs);
+        if (readArgs[0] !== sheet) return table;
+        const copy = { ...table, headers: table.headers.slice(), rows: table.rows.map((row) => ({ ...row, values: { ...row.values } })) };
+        return mutate(copy) === null ? null : copy;
+      };
+      try { return verify(...args); } finally { runtime.context.SheetService_readTable_ = read; }
+    };
+    assert.deepEqual(callCreate(runtime), { ok: false, error: { code: "SERVER_ERROR", message: "เกิดข้อผิดพลาดของระบบ" } });
+    assertRestored(runtime, before);
+    assertCreateDiagnosticRows(destination.rows, [`ADMIN_PLACE_CREATE_FAILURE|INTENDED_STATE_VERIFY|ADMIN_PLACE_WRITE_VERIFY|${sheet === "places" ? "PLACES" : "DRAFTS"}|${header}|${suffix}`]);
+    assert.ok(runtime.calls.events.findIndex((event) => event.startsWith("clear:")) < runtime.calls.events.indexOf("releaseLock"));
+    assert.ok(runtime.calls.events.indexOf("releaseLock") < runtime.calls.events.indexOf("diagnostic:open"));
+  }
+});
+
+test("Create diagnostic V3 unknown target sheet resolves only to NOT_APPLICABLE", () => {
+  const runtime = loadTransactionBackend("CREATE");
+  const source = runtime.context.AdminPlaceService_verifyIntendedState_.toString();
+  const injected = source.replace("sheetName: AdminPlaceSchema_PLACES_SHEET_NAME_", 'sheetName: "private unknown sheet"');
+  assert.notEqual(injected, source);
+  const verify = vm.runInContext(`(${injected})`, runtime.context);
+  runtime.context.SheetService_readTable_ = () => null;
+  const observed = [];
+  assert.throws(() => verify({ place_headers: [], draft_headers: [] }, {}, (metadata) => observed.push(metadata)), { message: "ADMIN_PLACE_WRITE_VERIFY" });
+  assert.deepEqual(observed, ["NOT_APPLICABLE|NOT_APPLICABLE|NOT_APPLICABLE|NOT_APPLICABLE|TABLE_SHAPE"]);
+});
+
+test("Create diagnostic V3 observer failure and omitted observers preserve verification", () => {
+  const runtime = loadTransactionBackend("CREATE");
+  const snapshot = { place_id: "private ID", place_headers: ["place_id", "name_th"], draft_headers: [] };
+  const intended = { place: { sourceRowNumber: 2, values: { place_id: "private ID", name_th: "expected secret" } } };
+  runtime.context.SheetService_readTable_ = () => ({ headers: snapshot.place_headers, rows: [{ sourceRowNumber: 2, values: { place_id: "private ID", name_th: "actual secret" } }] });
+  let calls = 0;
+  for (const observer of [undefined, () => { calls += 1; throw new Error("private observer"); }]) {
+    assert.throws(() => runtime.context.AdminPlaceService_verifyIntendedState_(snapshot, intended, observer), { message: "ADMIN_PLACE_WRITE_VERIFY" });
+  }
+  assert.equal(calls, 1);
+});
+
+test("Create diagnostic V3 observation failure preserves cleanup response and V2 fallback", () => {
+  const runtime = loadTransactionBackend("CREATE");
+  const before = transactionBefore(runtime);
+  const destination = attachCreateDiagnosticSheet(runtime);
+  const append = runtime.context.SheetService_appendObjectWithRow_;
+  runtime.context.SheetService_appendObjectWithRow_ = (...args) => {
+    const result = append(...args);
+    if (args[0] === "places") {
+      const sheet = runtime.sheets.places;
+      sheet.rows[0][sheet.headers.indexOf("created_at")] = new Date();
+    }
+    return result;
+  };
+  runtime.context.AdminPlaceService_createDiagnosticType_ = () => { throw new Error("private observer failure"); };
+  const expected = plain(runtime.context.AdminPlaceService_error_("SERVER_ERROR", "\u0e40\u0e01\u0e34\u0e14\u0e02\u0e49\u0e2d\u0e1c\u0e34\u0e14\u0e1e\u0e25\u0e32\u0e14\u0e02\u0e2d\u0e07\u0e23\u0e30\u0e1a\u0e1a"));
+  assert.deepEqual(callCreate(runtime), expected);
+  assertRestored(runtime, before);
+  assertCreateDiagnosticRows(destination.rows, ["ADMIN_PLACE_CREATE_FAILURE|INTENDED_STATE_VERIFY|ADMIN_PLACE_WRITE_VERIFY"]);
+  assert.ok(runtime.calls.events.indexOf("releaseLock") < runtime.calls.events.indexOf("diagnostic:open"));
+});
+
+test("Create diagnostic V3 classifies types without getters or coercion and defines EMPTY", () => {
+  const runtime = loadTransactionBackend("CREATE");
+  const type = runtime.context.AdminPlaceService_createDiagnosticType_;
+  let reads = 0;
+  const unsafe = { get valueOf() { reads += 1; throw new Error("secret"); }, get toString() { reads += 1; throw new Error("secret"); }, get [Symbol.toStringTag]() { reads += 1; throw new Error("secret"); } };
+  // EMPTY means only empty string; null and undefined are OTHER, not blank-cell assumptions.
+  for (const [value, expected] of [["", "EMPTY"], [null, "OTHER"], [undefined, "OTHER"], ["x", "STRING"], [0, "NUMBER"], [false, "BOOLEAN"], [new Date(), "DATE"], [unsafe, "OTHER"], [[], "OTHER"]]) assert.equal(type(value), expected);
+  assert.equal(reads, 0);
+});
+
+test("Create diagnostic V3 writer validates every component before opening the destination", () => {
+  const runtime = loadTransactionBackend("CREATE");
+  const destination = attachCreateDiagnosticSheet(runtime);
+  const parts = "ADMIN_PLACE_CREATE_FAILURE|INTENDED_STATE_VERIFY|ADMIN_PLACE_WRITE_VERIFY|PLACES|created_at|STRING|DATE|CELL_TYPE_MISMATCH".split("|");
+  for (let index = 0; index < parts.length; index += 1) {
+    for (const bad of ["private secret", "", "STRING\nprivate"]) {
+      const altered = parts.slice(); altered[index] = bad;
+      assert.equal(runtime.context.AdminPlaceService_writeCreateDiagnostic_(altered.join("|")), false);
+    }
+  }
+  for (const bad of [parts.slice(0, 7).join("|"), parts.concat("private").join("|"), parts.join("|").replace("INTENDED_STATE_VERIFY", "AUDIT")]) assert.equal(runtime.context.AdminPlaceService_writeCreateDiagnostic_(bad), false);
+  assert.deepEqual(runtime.calls.events, []);
+  assert.equal(runtime.context.AdminPlaceService_writeCreateDiagnostic_(parts.join("|")), true);
+  assert.equal(destination.rows.length, 1);
 });
 
 test("Create diagnostic V2 writer rejects arbitrary markers stages and identifiers before opening a sheet", () => {
