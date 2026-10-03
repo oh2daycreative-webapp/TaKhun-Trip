@@ -678,6 +678,42 @@ function callCreate(runtime, content = writeContent(), payloadOverrides = {}) {
   return plain(runtime.context.adminCreatePlace_("TOKEN", { content, ...payloadOverrides }));
 }
 
+function attachCreateDiagnosticSheet(runtime, options = {}) {
+  const rows = [];
+  const headers = options.headers || ["timestamp_utc", "diagnostic"];
+  let attempts = 0;
+  runtime.context.SheetService_getSheet_ = (name) => {
+    assert.equal(name, "_TEMP_ADMIN_PLACE_CREATE_DIAGNOSTICS");
+    runtime.calls.events.push("diagnostic:open");
+    if (options.missing) throw new Error("missing diagnostic destination");
+    return {
+      getLastColumn() { return headers.length; },
+      getLastRow() { return options.blank ? 0 : 1 + rows.length; },
+      getRange(row, column, height, width) {
+        assert.deepEqual([row, column, height, width], [1, 1, 1, 2]);
+        return { getValues() { return [headers]; } };
+      },
+      appendRow(values) {
+        attempts += 1;
+        runtime.calls.events.push("diagnostic:append");
+        if (options.failWrite) throw new Error("private diagnostic sink failure");
+        rows.push(plain(values));
+        if (options.failAfterWrite) throw new Error("private post-write failure");
+      }
+    };
+  };
+  return { rows, get attempts() { return attempts; } };
+}
+
+function assertCreateDiagnosticRows(rows, expected) {
+  assert.deepEqual(rows.map((row) => row[1]), expected);
+  for (const row of rows) {
+    assert.equal(row.length, 2);
+    assert.equal(new Date(row[0]).toISOString(), row[0]);
+    assert.equal(/TOKEN|ADM-authoritative|PLC-|private|secret|stack/.test(row[1]), false);
+  }
+}
+
 function callSave(runtime, content = writeContent(), payloadOverrides = {}) {
   return plain(runtime.context.adminSavePlaceDraft_("TOKEN", {
     place_id: "TX-PLACE", expected_version: 3, content, ...payloadOverrides
@@ -1360,22 +1396,26 @@ test("Create permits a structurally complete empty draft and rejects generated I
 
   const source = adminPlaceServiceSource;
   const lockedCollisionBlock =
-    "    return AdminPlaceService_withWriteLock_(function () {\n" +
+    "    function createUnderLock() {\n" +
+    "      diagnostic.stage = \"CONTEXT\";\n" +
     "      var context = AdminPlaceService_requireContext_(true);\n" +
+    "      diagnostic.stage = \"ID_GENERATION\";\n" +
     "      var placeId = AdminPlaceService_generatePlaceId_();\n" +
+    "      diagnostic.stage = \"ID_COLLISION\";\n" +
     "      if (Object.prototype.hasOwnProperty.call(context.placesById, placeId) ||\n" +
     "          Object.prototype.hasOwnProperty.call(context.draftsById, placeId)) {\n" +
     "        throw new Error(\"ADMIN_PLACE_ID_COLLISION\");\n" +
     "      }\n";
-  const hoistedCollision = source.replace(
-    lockedCollisionBlock,
+  assert.ok(source.includes(lockedCollisionBlock), "collision-hoist mutation target must match");
+  const hoistedCollision = source.replace(lockedCollisionBlock, "    function createUnderLock() {\n").replace(
+    "    diagnostic.stage = \"WRITE_LOCK_ACQUIRE\";\n",
     "    var context = AdminPlaceService_requireContext_(true);\n" +
     "    var placeId = AdminPlaceService_generatePlaceId_();\n" +
     "    if (Object.prototype.hasOwnProperty.call(context.placesById, placeId) ||\n" +
     "        Object.prototype.hasOwnProperty.call(context.draftsById, placeId)) {\n" +
     "      throw new Error(\"ADMIN_PLACE_ID_COLLISION\");\n" +
     "    }\n" +
-    "    return AdminPlaceService_withWriteLock_(function () {\n"
+    "    diagnostic.stage = \"WRITE_LOCK_ACQUIRE\";\n"
   );
   assert.notEqual(hoistedCollision, source, "collision-hoist mutation target must match");
   const hoisted = loadTransactionBackend("CREATE", { createCollision: true, serviceSource: hoistedCollision });
@@ -1644,6 +1684,7 @@ test("Create diagnostic replaces unsafe exceptions with UNKNOWN_ERROR without se
     'new Error("Human text value is invalid.")',
     'new Error("Human text field is invalid.")',
     'new Error("ADMIN_PLACE_WRITE_VERIFY\\nprivate")',
+    'new TypeError("ADMIN_PLACE_APPEND")',
     'new Error("")',
     'Object.assign(new Error(), { message: 123 })',
     'Object.defineProperty(new Error(), "message", { get() { throw new Error("private"); } })',
@@ -1653,6 +1694,7 @@ test("Create diagnostic replaces unsafe exceptions with UNKNOWN_ERROR without se
     const runtime = loadTransactionBackend("CREATE");
     const before = transactionBefore(runtime);
     const logs = [];
+    const destination = attachCreateDiagnosticSheet(runtime);
     runtime.context.console = { error(...args) { logs.push(args); } };
     const thrown = vm.runInContext(expression, runtime.context);
     const append = runtime.context.SheetService_appendObjectWithRow_;
@@ -1666,6 +1708,7 @@ test("Create diagnostic replaces unsafe exceptions with UNKNOWN_ERROR without se
       ok: false, error: { code: "SERVER_ERROR", message: "เกิดข้อผิดพลาดของระบบ" }
     }, expression);
     assert.deepEqual(logs, [["ADMIN_PLACE_CREATE_FAILURE", "UNKNOWN_ERROR"]], expression);
+    assertCreateDiagnosticRows(destination.rows, ["ADMIN_PLACE_CREATE_FAILURE|DRAFT_APPEND|UNKNOWN_ERROR"]);
     assertRestored(runtime, before);
     assert.equal(runtime.lock.released, 1);
   }
@@ -1674,17 +1717,20 @@ test("Create diagnostic replaces unsafe exceptions with UNKNOWN_ERROR without se
 test("Create diagnostic logger failure cannot prevent rollback or change the response", () => {
   const runtime = loadTransactionBackend("CREATE", { wrongPlaceAppendRow: true, unrelatedBusinessRows: true });
   const before = transactionBefore(runtime);
+  const destination = attachCreateDiagnosticSheet(runtime);
   runtime.context.console = { error() { throw new Error("logger unavailable"); } };
   assert.deepEqual(callCreate(runtime), {
     ok: false, error: { code: "SERVER_ERROR", message: "เกิดข้อผิดพลาดของระบบ" }
   });
   assertRestored(runtime, before);
+  assertCreateDiagnosticRows(destination.rows, ["ADMIN_PLACE_CREATE_FAILURE|INTENDED_STATE_VERIFY|ADMIN_PLACE_WRITE_VERIFY"]);
   assert.equal(runtime.lock.released, 1);
 });
 
 test("Create diagnostic preserves the original controlled audit verification failure after cleanup", () => {
   const runtime = loadTransactionBackend("CREATE", { corruptAuditDescriptionReadback: true });
   const before = transactionBefore(runtime);
+  const destination = attachCreateDiagnosticSheet(runtime);
   const logs = [];
   runtime.context.console = { error(...args) { logs.push(args); } };
   assert.deepEqual(callCreate(runtime), {
@@ -1692,18 +1738,279 @@ test("Create diagnostic preserves the original controlled audit verification fai
   });
   assert.deepEqual(logs, [["ADMIN_PLACE_CREATE_FAILURE", "ADMIN_PLACE_AUDIT_VERIFY"]]);
   assertRestored(runtime, before);
+  assertCreateDiagnosticRows(destination.rows, ["ADMIN_PLACE_CREATE_FAILURE|AUDIT|ADMIN_PLACE_AUDIT_VERIFY"]);
   assert.equal(runtime.lock.released, 1);
 });
 
-test("Create diagnostic excludes Gallery validation rejected before the transaction", () => {
+test("Create diagnostic observes Gallery validation without changing its pre-transaction rejection", () => {
   for (const gallery_media_ids of ["invalid|list", ["invalid id"], ["place-temp-gallery-a"]]) {
     const runtime = loadTransactionBackend("CREATE");
     const logs = [];
+    const destination = attachCreateDiagnosticSheet(runtime);
     runtime.context.console = { error(...args) { logs.push(args); } };
     assertError(callCreate(runtime, writeContent({ gallery_media_ids })), "VALIDATION_ERROR");
-    assert.deepEqual(logs, []);
+    assert.deepEqual(logs, [["ADMIN_PLACE_CREATE_FAILURE", "VALIDATION_ERROR"]]);
+    assertCreateDiagnosticRows(destination.rows, ["ADMIN_PLACE_CREATE_FAILURE|PARAMETERS|VALIDATION_ERROR"]);
     assert.deepEqual(runtime.calls.writes, []);
   }
+});
+
+test("Create diagnostic V2 covers authorization lock context ID and capture failures before the inner catch", () => {
+  for (const [options, setup, expected, responseCode] of [
+    [{}, (runtime) => {
+      runtime.context.AuthService_requireAdmin_ = vm.runInContext('() => { throw new Error("UNAUTHORIZED"); }', runtime.context);
+    }, "AUTHORIZATION|UNAUTHORIZED", "UNAUTHORIZED"],
+    [{ role: "viewer" }, null, "WRITE_ROLE|FORBIDDEN", "FORBIDDEN"],
+    [{ lockTimeout: true }, null, "WRITE_LOCK_ACQUIRE|ADMIN_PLACE_WRITE_LOCK", "SERVER_ERROR"],
+    [{}, (runtime) => { runtime.context.LockService.getScriptLock = () => { throw new Error("private"); }; },
+      "WRITE_LOCK_ACQUIRE|UNKNOWN_ERROR", "SERVER_ERROR"],
+    [{}, (runtime) => { runtime.sheets.places.rows.push(PLACE_HEADERS.map(() => "invalid")); },
+      "CONTEXT|ADMIN_PLACE_STATUS", "SERVER_ERROR"],
+    [{ uuidSequence: ["invalid"] }, null, "ID_GENERATION|ADMIN_PLACE_ID_GENERATION", "SERVER_ERROR"],
+    [{ createCollision: true }, null, "ID_COLLISION|ADMIN_PLACE_ID_COLLISION", "SERVER_ERROR"],
+    [{}, (runtime) => {
+      const read = runtime.context.SheetService_readTable_;
+      let reads = 0;
+      runtime.context.SheetService_readTable_ = (...args) => {
+        const table = read(...args);
+        if (args[0] === "places" && ++reads === 3) table.headers.reverse();
+        return table;
+      };
+    }, "STATE_CAPTURE|ADMIN_PLACE_STATE_VERIFY", "SERVER_ERROR"]
+  ]) {
+    const runtime = loadTransactionBackend("CREATE", options);
+    if (setup) setup(runtime);
+    const destination = attachCreateDiagnosticSheet(runtime);
+    const result = callCreate(runtime);
+    assertError(result, responseCode);
+    if (responseCode === "SERVER_ERROR") assert.deepEqual(result, {
+      ok: false, error: { code: "SERVER_ERROR", message: "เกิดข้อผิดพลาดของระบบ" }
+    });
+    assertCreateDiagnosticRows(destination.rows, [`ADMIN_PLACE_CREATE_FAILURE|${expected}`]);
+    assert.deepEqual(runtime.calls.writes, []);
+    if (runtime.lock.released) {
+      assert.ok(runtime.calls.events.indexOf("releaseLock") < runtime.calls.events.indexOf("diagnostic:open"));
+    }
+  }
+});
+
+test("Create diagnostic V2 persists after compensation and lock release even when diagnostic writes fail", () => {
+  for (const destinationOptions of [{}, { failWrite: true }, { failAfterWrite: true }, { missing: true }]) {
+    const runtime = loadTransactionBackend("CREATE", { wrongPlaceAppendRow: true, unrelatedBusinessRows: true });
+    const before = transactionBefore(runtime);
+    const destination = attachCreateDiagnosticSheet(runtime, destinationOptions);
+    assert.deepEqual(callCreate(runtime, writeContent({ name_th: "private payload" })), {
+      ok: false, error: { code: "SERVER_ERROR", message: "เกิดข้อผิดพลาดของระบบ" }
+    });
+    assertRestored(runtime, before);
+    const events = runtime.calls.events;
+    assert.ok(events.findIndex((event) => event.startsWith("clear:")) < events.indexOf("releaseLock"));
+    assert.ok(events.indexOf("releaseLock") < events.indexOf("diagnostic:open"));
+    assert.equal(destination.attempts, destinationOptions.missing ? 0 : 1);
+    if (!destinationOptions.failWrite && !destinationOptions.missing) {
+      assertCreateDiagnosticRows(destination.rows, ["ADMIN_PLACE_CREATE_FAILURE|INTENDED_STATE_VERIFY|ADMIN_PLACE_WRITE_VERIFY"]);
+    }
+  }
+});
+
+test("Create diagnostic V2 retains only the original failure when compensation and lock release also fail", () => {
+  const runtime = loadTransactionBackend("CREATE", {
+    wrongPlaceAppendRow: true, unrelatedBusinessRows: true, incompleteClear: true, throwReleaseLock: true
+  });
+  const destination = attachCreateDiagnosticSheet(runtime);
+  const clear = runtime.context.SheetService_clearRow_;
+  runtime.context.SheetService_clearRow_ = (...args) => {
+    runtime.phase = "restore";
+    return clear(...args);
+  };
+  assert.deepEqual(callCreate(runtime), {
+    ok: false, error: { code: "SERVER_ERROR", message: "เกิดข้อผิดพลาดของระบบ" }
+  });
+  assertCreateDiagnosticRows(destination.rows, [
+    "ADMIN_PLACE_CREATE_FAILURE|INTENDED_STATE_VERIFY|ADMIN_PLACE_WRITE_VERIFY"
+  ]);
+  assert.equal(destination.attempts, 1);
+  assert.ok(runtime.calls.events.some((event) => event.startsWith("clear:")), "compensation was attempted");
+  assert.ok(runtime.calls.events.indexOf("releaseLock") < runtime.calls.events.indexOf("diagnostic:open"));
+});
+
+test("Create diagnostic retains the original pre-write failure while release keeps its original exception precedence", () => {
+  const runtime = loadTransactionBackend("CREATE", { createCollision: true });
+  const destination = attachCreateDiagnosticSheet(runtime);
+  runtime.lock.releaseLock = () => {
+    runtime.calls.events.push("releaseLock");
+    throw new Error("FORBIDDEN");
+  };
+  assert.deepEqual(callCreate(runtime), {
+    ok: false, error: { code: "FORBIDDEN", message: "คุณไม่มีสิทธิ์ดำเนินการนี้" }
+  });
+  assertCreateDiagnosticRows(destination.rows, ["ADMIN_PLACE_CREATE_FAILURE|ID_COLLISION|ADMIN_PLACE_ID_COLLISION"]);
+  assert.deepEqual(runtime.calls.writes, []);
+  assert.equal(destination.attempts, 1);
+  assert.ok(runtime.calls.events.indexOf("releaseLock") < runtime.calls.events.indexOf("diagnostic:open"));
+});
+
+test("Create diagnostic can identify a release-only failure without intercepting lock release", () => {
+  const runtime = loadTransactionBackend("CREATE", { throwReleaseLock: true });
+  const destination = attachCreateDiagnosticSheet(runtime);
+  assert.deepEqual(callCreate(runtime), {
+    ok: false, error: { code: "SERVER_ERROR", message: "เกิดข้อผิดพลาดของระบบ" }
+  });
+  assertCreateDiagnosticRows(destination.rows, ["ADMIN_PLACE_CREATE_FAILURE|WRITE_LOCK_RELEASE|UNKNOWN_ERROR"]);
+  assert.equal(populatedRows(runtime, "places").length, 1, "release failure never introduced compensation in the original flow");
+  assert.equal(populatedRows(runtime, "place_drafts").length, 1);
+  assert.equal(populatedRows(runtime, "activity_logs").length, 1);
+});
+
+test("shared lock helper preserves acquisition release return identity and exception precedence", () => {
+  for (const scenario of ["success", "operation", "release", "both", "timeout", "acquire", "getLock"]) {
+    const runtime = loadTransactionBackend("CREATE");
+    const events = [];
+    const operationError = new Error("operation");
+    const releaseError = new Error("release");
+    const acquireError = new Error("acquire");
+    const value = { original: true };
+    runtime.context.LockService.getScriptLock = () => {
+      events.push("getLock");
+      if (scenario === "getLock") throw acquireError;
+      return {
+        tryLock(timeout) {
+          events.push(`tryLock:${timeout}`);
+          if (scenario === "acquire") throw acquireError;
+          return scenario !== "timeout";
+        },
+        releaseLock() {
+          events.push("releaseLock");
+          if (scenario === "release" || scenario === "both") throw releaseError;
+        }
+      };
+    };
+    const invoke = () => runtime.context.AdminPlaceService_withWriteLock_(() => {
+      events.push("operation");
+      if (scenario === "operation" || scenario === "both") throw operationError;
+      return value;
+    });
+    if (scenario === "success") assert.equal(invoke(), value);
+    else if (scenario === "timeout") assert.throws(invoke, { message: "ADMIN_PLACE_WRITE_LOCK" });
+    else assert.throws(invoke, (error) => error === (
+      scenario === "release" || scenario === "both" ? releaseError :
+      scenario === "operation" ? operationError : acquireError
+    ));
+    assert.deepEqual(events, scenario === "getLock" ? ["getLock"] :
+      scenario === "timeout" || scenario === "acquire" ? ["getLock", "tryLock:10000"] :
+      ["getLock", "tryLock:10000", "operation", "releaseLock"]);
+  }
+});
+
+test("shared execute error observer cannot change existing response mapping and is never called on success", () => {
+  for (const code of ["UNAUTHORIZED", "FORBIDDEN", "VALIDATION_ERROR", "NOT_FOUND", "CONFLICT", "private", null]) {
+    const runtime = loadTransactionBackend("CREATE");
+    const thrown = code === null ? null : new Error(code);
+    const invoke = (observer) => runtime.context.AdminPlaceService_execute_("TOKEN", () => { throw thrown; }, observer);
+    const before = plain(invoke());
+    let observed = 0;
+    assert.deepEqual(plain(invoke((error) => {
+      observed += 1;
+      assert.equal(error, thrown);
+      throw new Error("observer failure");
+    })), before);
+    assert.equal(observed, 1);
+  }
+  const runtime = loadTransactionBackend("CREATE");
+  const value = { original: true };
+  assert.equal(runtime.context.AdminPlaceService_execute_("TOKEN", () => value, () => assert.fail("success observed")), value);
+});
+
+test("Create diagnostic never invokes an exception message getter or changes the existing response mapping", () => {
+  const runtime = loadTransactionBackend("CREATE");
+  const destination = attachCreateDiagnosticSheet(runtime);
+  vm.runInContext(`
+    var diagnosticMessageReads = 0;
+    var diagnosticAuthError = Object.defineProperty(new Error(), "message", {
+      get: function () { return ++diagnosticMessageReads <= 2 ? "UNAUTHORIZED" : "private"; }
+    });
+    AuthService_requireAdmin_ = function () { throw diagnosticAuthError; };
+  `, runtime.context);
+  assert.deepEqual(callCreate(runtime), {
+    ok: false, error: { code: "UNAUTHORIZED", message: "กรุณาเข้าสู่ระบบ" }
+  });
+  assert.equal(runtime.context.diagnosticMessageReads, 2, "only the existing error mapper reads the accessor");
+  assertCreateDiagnosticRows(destination.rows, ["ADMIN_PLACE_CREATE_FAILURE|AUTHORIZATION|UNKNOWN_ERROR"]);
+});
+
+test("non-Create compensation failures never invoke Create diagnostic observation or persistence", () => {
+  const runtime = loadTransactionBackend("UPDATE_DRAFT", { failAuditAppendAfterWrite: true, failRestoreWrite: true });
+  const destination = attachCreateDiagnosticSheet(runtime);
+  let observations = 0;
+  runtime.context.AdminPlaceService_recordCreateDiagnostic_ = () => { observations += 1; };
+  assert.deepEqual(callSave(runtime), {
+    ok: false, error: { code: "SERVER_ERROR", message: "เกิดข้อผิดพลาดของระบบ" }
+  });
+  assert.equal(observations, 0);
+  assert.equal(runtime.lock.released, 1);
+  assert.deepEqual(destination.rows, []);
+  assert.equal(runtime.calls.events.includes("diagnostic:open"), false);
+});
+
+test("Create diagnostic V2 rejects missing blank reordered extended or inexact destination headers without schema writes", () => {
+  for (const options of [
+    { missing: true }, { blank: true }, { headers: [] }, { headers: ["timestamp_utc"] },
+    { headers: ["diagnostic", "timestamp_utc"] }, { headers: ["timestamp_utc", "diagnostic", "extra"] },
+    { headers: [" timestamp_utc", "diagnostic"] }, { headers: ["timestamp_utc", "Diagnostic"] }
+  ]) {
+    const runtime = loadTransactionBackend("CREATE", { createCollision: true });
+    const destination = attachCreateDiagnosticSheet(runtime, options);
+    assert.deepEqual(callCreate(runtime), {
+      ok: false, error: { code: "SERVER_ERROR", message: "เกิดข้อผิดพลาดของระบบ" }
+    });
+    assert.deepEqual(destination.rows, []);
+    assert.equal(destination.attempts, 0);
+    assert.deepEqual(runtime.calls.writes, []);
+    assert.deepEqual(runtime.calls.propertyWrites, []);
+  }
+});
+
+test("Create diagnostic V2 preflight uses only the same controlled writer and never runs business operations", () => {
+  for (const options of [{}, { missing: true }, { failWrite: true }]) {
+    const runtime = loadTransactionBackend("CREATE");
+    const before = transactionBefore(runtime);
+    const destination = attachCreateDiagnosticSheet(runtime, options);
+    assert.equal(runtime.context.adminPlaceCreateDiagnosticPreflight(), !options.missing && !options.failWrite);
+    assertCreateDiagnosticRows(destination.rows, options.missing || options.failWrite ? [] : ["DIAGNOSTIC_PREFLIGHT_OK"]);
+    assert.deepEqual(transactionBefore(runtime), before);
+    assert.deepEqual(runtime.calls.auth, []);
+    assert.deepEqual(runtime.calls.writes, []);
+    assert.deepEqual(runtime.calls.propertyWrites, []);
+  }
+});
+
+test("Create diagnostic V2 writer rejects arbitrary markers stages and identifiers before opening a sheet", () => {
+  const runtime = loadTransactionBackend("CREATE");
+  const destination = attachCreateDiagnosticSheet(runtime);
+  for (const value of [null, {}, "private", "DIAGNOSTIC_PREFLIGHT_OK\nprivate",
+    "ADMIN_PLACE_CREATE_FAILURE|private|ADMIN_PLACE_APPEND",
+    "ADMIN_PLACE_CREATE_FAILURE|PLACE_APPEND|ADMIN_PLACE_PRIVATE",
+    "ADMIN_PLACE_CREATE_FAILURE|PLACE_APPEND|ADMIN_PLACE_APPEND\nprivate",
+    "ADMIN_PLACE_CREATE_FAILURE|PLACE_APPEND|ADMIN_PLACE_AUDIT_VERIFY"]) {
+    assert.equal(runtime.context.AdminPlaceService_writeCreateDiagnostic_(value), false);
+  }
+  assert.deepEqual(destination.rows, []);
+  assert.deepEqual(runtime.calls.events, []);
+});
+
+test("Create diagnostic V2 does not access its destination for success or other Place actions", () => {
+  for (const [action, invoke] of [["CREATE", callCreate], ["UPDATE_DRAFT", callSave]]) {
+    const runtime = loadTransactionBackend(action);
+    const destination = attachCreateDiagnosticSheet(runtime);
+    assert.equal(invoke(runtime).ok, true);
+    assert.deepEqual(destination.rows, []);
+    assert.equal(runtime.calls.events.includes("diagnostic:open"), false);
+  }
+  const runtime = loadTransactionBackend("UPDATE_DRAFT", { failAuditAppendAfterWrite: true });
+  const destination = attachCreateDiagnosticSheet(runtime);
+  assertError(callSave(runtime), "SERVER_ERROR");
+  assert.deepEqual(destination.rows, []);
+  assert.equal(runtime.calls.events.includes("diagnostic:open"), false);
 });
 
 test("Create and Save verification or audit failure compensates under lock without epoch or internal leakage", () => {

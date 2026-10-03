@@ -110,29 +110,41 @@ function adminGetPlaceMediaOptions_(token, payload) {
 }
 
 function adminCreatePlace_(token, payload) {
-  return AdminPlaceService_execute_(token, function (admin) {
+  var diagnostic = { stage: "AUTHORIZATION", failure: null };
+  var operation = function (admin) {
+    diagnostic.stage = "WRITE_ROLE";
     AdminPlaceService_requireWriteRole_(admin);
+    diagnostic.stage = "PARAMETERS";
     var parameters = AdminPlaceService_createParameters_(payload);
-    return AdminPlaceService_withWriteLock_(function () {
+    function createUnderLock() {
+      diagnostic.stage = "CONTEXT";
       var context = AdminPlaceService_requireContext_(true);
+      diagnostic.stage = "ID_GENERATION";
       var placeId = AdminPlaceService_generatePlaceId_();
+      diagnostic.stage = "ID_COLLISION";
       if (Object.prototype.hasOwnProperty.call(context.placesById, placeId) ||
           Object.prototype.hasOwnProperty.call(context.draftsById, placeId)) {
         throw new Error("ADMIN_PLACE_ID_COLLISION");
       }
+      diagnostic.stage = "STATE_CAPTURE";
       var state = AdminPlaceService_captureState_(placeId, false);
       try {
+        diagnostic.stage = "PLACE_CONSTRUCTION";
         var occurredAt = new Date().toISOString();
         var placeRecord = AdminPlaceService_neutralIdentity_(placeId, occurredAt, admin.admin_id);
+        diagnostic.stage = "DRAFT_CONSTRUCTION";
         var draftRecord = AdminPlaceService_newDraft_(placeId, parameters.content, 1, 0, occurredAt, admin.admin_id, null);
+        diagnostic.stage = "PLACE_APPEND";
         var appendedPlace = SheetService_appendObjectWithRow_(
           AdminPlaceSchema_PLACES_SHEET_NAME_, state.place_headers, placeRecord
         );
         state.allocated_rows.place = AdminPlaceService_appendedRowNumber_(appendedPlace);
+        diagnostic.stage = "DRAFT_APPEND";
         var appendedDraft = SheetService_appendObjectWithRow_(
           AdminPlaceSchema_DRAFTS_SHEET_NAME_, state.draft_headers, draftRecord
         );
         state.allocated_rows.draft = AdminPlaceService_appendedRowNumber_(appendedDraft);
+        diagnostic.stage = "INTENDED_STATE_VERIFY";
         AdminPlaceService_verifyIntendedState_(state, {
           place: {
             sourceRowNumber: state.allocated_rows.place,
@@ -143,39 +155,133 @@ function adminCreatePlace_(token, payload) {
             values: AdminPlaceService_completeRow_(state.draft_headers, draftRecord)
           }
         });
+        diagnostic.stage = "AUDIT";
         AdminPlaceService_appendVerifiedAudit_(admin, "CREATE", placeId);
+        diagnostic.stage = "RESPONSE_CONSTRUCTION";
         return AdminPlaceService_success_(AdminPlaceService_writeSuccess_(
           placeId, "draft", 1, 0, true, occurredAt, occurredAt
         ));
       } catch (error) {
-        var diagnostic = "UNKNOWN_ERROR";
-        try {
-          // Only exact, controlled messages are safe; never log arbitrary exception text or stacks.
-          var safeMessages = [
-            "ADMIN_PLACE_APPEND", "ADMIN_PLACE_WRITE_VERIFY", "ADMIN_PLACE_TEXT", "ADMIN_PLACE_TIMESTAMP",
-            "ADMIN_PLACE_AUDIT_ACTOR", "ADMIN_PLACE_AUDIT_INPUT", "ADMIN_PLACE_AUDIT_ID",
-            "ADMIN_PLACE_AUDIT_ID_COLLISION", "ADMIN_PLACE_AUDIT_APPEND", "ADMIN_PLACE_AUDIT_CARDINALITY",
-            "ADMIN_PLACE_AUDIT_VERIFY",
-            "Data source is not configured.", "Requested data is not available.",
-            "Data headers are not available.", "Required data headers are not available.",
-            "Data headers are invalid.", "Data headers must be unique.", "Data headers conflict.",
-            "Required data headers are invalid.", "Required data headers must be unique.",
-            "Data append is invalid."
-          ];
-          var message = error instanceof Error ? error.message : null;
-          if (typeof message === "string" && safeMessages.indexOf(message) !== -1) diagnostic = message;
-        } catch (diagnosticError) {
-          // Unreadable exception values retain the safe fallback.
-        }
-        try {
-          console.error("ADMIN_PLACE_CREATE_FAILURE", diagnostic);
-        } catch (loggingError) {
-          // Diagnostics must never prevent compensation or change the client-safe outcome.
-        }
+        AdminPlaceService_recordCreateDiagnostic_(diagnostic, error);
         return AdminPlaceService_failClosed_(state);
       }
+    }
+    diagnostic.stage = "WRITE_LOCK_ACQUIRE";
+    return AdminPlaceService_withWriteLock_(function () {
+      try {
+        return createUnderLock();
+      } catch (error) {
+        // Keep the original pre-write failure even if the shared lock's finally later throws.
+        AdminPlaceService_recordCreateDiagnostic_(diagnostic, error);
+        throw error;
+      } finally {
+        // Observe the boundary only; the shared helper owns release and exception precedence.
+        diagnostic.stage = "WRITE_LOCK_RELEASE";
+      }
     });
-  });
+  };
+  try {
+    return AdminPlaceService_execute_(token, operation, function (error) {
+      AdminPlaceService_recordCreateDiagnostic_(diagnostic, error);
+    });
+  } finally {
+    // Compensation and the shared lock's finally have unwound before diagnostic I/O.
+    if (diagnostic.failure) {
+      try {
+        AdminPlaceService_writeCreateDiagnostic_(diagnostic.failure);
+      } catch (_diagnosticWriteError) {
+        // Preserve the original return value or exception, without retrying.
+      }
+      try {
+        console.error("ADMIN_PLACE_CREATE_FAILURE", diagnostic.failure.split("|")[2]);
+      } catch (_loggingError) {
+        // Console logging is independently best-effort.
+      }
+    }
+  }
+}
+
+// TEMPORARY V2: remove these helpers and Create-only observation after the one-attempt investigation.
+// No exception text is accepted unless it exactly matches the originating stage's controlled errors.
+var AdminPlaceService_CREATE_DIAGNOSTIC_SHEET_ERRORS_ = [
+  "Data source is not configured.", "Requested data is not available.",
+  "Data headers are not available.", "Required data headers are not available.",
+  "Data headers are invalid.", "Data headers must be unique.", "Data headers conflict.",
+  "Required data headers are invalid.", "Required data headers must be unique."
+];
+var AdminPlaceService_CREATE_DIAGNOSTIC_ERRORS_ = {
+  AUTHORIZATION: ["UNAUTHORIZED", "ADMIN_PLACE_CONTEXT"].concat(AdminPlaceService_CREATE_DIAGNOSTIC_SHEET_ERRORS_),
+  WRITE_ROLE: ["FORBIDDEN"],
+  PARAMETERS: ["VALIDATION_ERROR", "Human text value is invalid."],
+  WRITE_LOCK_ACQUIRE: ["ADMIN_PLACE_WRITE_OPERATION", "ADMIN_PLACE_WRITE_LOCK"],
+  CONTEXT: [
+    "ADMIN_PLACE_CONTEXT_TARGET", "ADMIN_PLACE_DATA", "ADMIN_PLACE_IDENTITY", "ADMIN_PLACE_STATUS",
+    "ADMIN_PLACE_VERSION", "ADMIN_PLACE_DRAFT_IDENTITY", "ADMIN_PLACE_DRAFT_OWNER", "ADMIN_PLACE_DRAFT_VERSION",
+    "ADMIN_PLACE_DRAFT_REQUIRED", "ADMIN_PLACE_CONTENT_REQUIRED", "ADMIN_PLACE_CONTENT", "ADMIN_PLACE_TEXT",
+    "ADMIN_PLACE_LIST", "ADMIN_PLACE_BOOLEAN", "ADMIN_PLACE_NUMBER", "ADMIN_PLACE_COORDINATES", "ADMIN_PLACE_CATEGORY"
+  ].concat(AdminPlaceService_CREATE_DIAGNOSTIC_SHEET_ERRORS_),
+  ID_GENERATION: ["ADMIN_PLACE_ID_GENERATION"],
+  ID_COLLISION: ["ADMIN_PLACE_ID_COLLISION"],
+  STATE_CAPTURE: [
+    "ADMIN_PLACE_STATE_INPUT", "ADMIN_PLACE_STATE_READ", "ADMIN_PLACE_STATE_CARDINALITY", "ADMIN_PLACE_STATE_VERIFY"
+  ].concat(AdminPlaceService_CREATE_DIAGNOSTIC_SHEET_ERRORS_),
+  PLACE_CONSTRUCTION: [],
+  DRAFT_CONSTRUCTION: [], // Create parameters have already normalized Gallery to the empty string.
+  PLACE_APPEND: ["ADMIN_PLACE_APPEND", "Data append is invalid."].concat(AdminPlaceService_CREATE_DIAGNOSTIC_SHEET_ERRORS_),
+  DRAFT_APPEND: ["ADMIN_PLACE_APPEND", "Data append is invalid."].concat(AdminPlaceService_CREATE_DIAGNOSTIC_SHEET_ERRORS_),
+  INTENDED_STATE_VERIFY: ["ADMIN_PLACE_WRITE_VERIFY"].concat(AdminPlaceService_CREATE_DIAGNOSTIC_SHEET_ERRORS_),
+  AUDIT: [
+    "ADMIN_PLACE_AUDIT_ACTOR", "ADMIN_PLACE_AUDIT_INPUT", "ADMIN_PLACE_TEXT", "ADMIN_PLACE_AUDIT_ID",
+    "ADMIN_PLACE_AUDIT_ID_COLLISION", "ADMIN_PLACE_AUDIT_APPEND", "ADMIN_PLACE_AUDIT_CARDINALITY",
+    "ADMIN_PLACE_AUDIT_VERIFY", "Data append is invalid."
+  ].concat(AdminPlaceService_CREATE_DIAGNOSTIC_SHEET_ERRORS_),
+  RESPONSE_CONSTRUCTION: ["ADMIN_PLACE_TIMESTAMP"],
+  WRITE_LOCK_RELEASE: []
+};
+
+function AdminPlaceService_recordCreateDiagnostic_(diagnostic, error) {
+  try {
+    if (diagnostic.failure) return; // One primary failure, never secondary cleanup/release errors.
+    var identifier = "UNKNOWN_ERROR";
+    var allowed = AdminPlaceService_CREATE_DIAGNOSTIC_ERRORS_[diagnostic.stage];
+    try {
+      var descriptor = error instanceof Error && Object.getPrototypeOf(error) === Error.prototype ?
+        Object.getOwnPropertyDescriptor(error, "message") : null;
+      var message = descriptor && Object.prototype.hasOwnProperty.call(descriptor, "value") ? descriptor.value : null;
+      if (typeof message === "string" && allowed.indexOf(message) !== -1) identifier = message;
+    } catch (_unsafeException) {
+      // Unreadable, native, non-Error and unexpected exceptions retain the fixed fallback.
+    }
+    diagnostic.failure = "ADMIN_PLACE_CREATE_FAILURE|" + diagnostic.stage + "|" + identifier;
+  } catch (_diagnosticError) {
+    // Even in-memory diagnostics must not change the business outcome.
+  }
+}
+
+function AdminPlaceService_writeCreateDiagnostic_(value) {
+  try {
+    if (typeof value !== "string") return false;
+    if (value !== "DIAGNOSTIC_PREFLIGHT_OK") {
+      var parts = value.split("|");
+      if (parts.length !== 3 || parts[0] !== "ADMIN_PLACE_CREATE_FAILURE" ||
+          !Object.prototype.hasOwnProperty.call(AdminPlaceService_CREATE_DIAGNOSTIC_ERRORS_, parts[1])) return false;
+      if (parts[2] !== "UNKNOWN_ERROR" && AdminPlaceService_CREATE_DIAGNOSTIC_ERRORS_[parts[1]].indexOf(parts[2]) === -1) return false;
+    }
+    var sheet = SheetService_getSheet_("_TEMP_ADMIN_PLACE_CREATE_DIAGNOSTICS");
+    if (sheet.getLastRow() < 1 || sheet.getLastColumn() !== 2) return false;
+    var headers = sheet.getRange(1, 1, 1, 2).getValues()[0];
+    if (!headers || headers.length !== 2 || headers[0] !== "timestamp_utc" || headers[1] !== "diagnostic") return false;
+    sheet.appendRow([new Date().toISOString(), value]);
+    return true;
+  } catch (_diagnosticWriteError) {
+    // No retries, schema repair, business writes or changes to the original response.
+    return false;
+  }
+}
+
+// Editor-only preflight; deliberately absent from Router. Inspect the temporary sheet for its marker.
+function adminPlaceCreateDiagnosticPreflight() {
+  return AdminPlaceService_writeCreateDiagnostic_("DIAGNOSTIC_PREFLIGHT_OK");
 }
 
 function adminSavePlaceDraft_(token, payload) {
@@ -1106,7 +1212,7 @@ function AdminPlaceService_writeSuccess_(placeId, status, entityVersion, publish
   };
 }
 
-function AdminPlaceService_execute_(token, operation) {
+function AdminPlaceService_execute_(token, operation, onError) {
   try {
     var admin = AuthService_requireAdmin_(token);
     if (!admin || AdminPlaceService_ALLOWED_ROLES_.indexOf(admin.role) === -1) {
@@ -1114,6 +1220,9 @@ function AdminPlaceService_execute_(token, operation) {
     }
     return operation(admin);
   } catch (error) {
+    if (typeof onError === "function") {
+      try { onError(error); } catch (_observerError) { /* Observation cannot change the existing error mapping. */ }
+    }
     var code = error && typeof error.message === "string" ? error.message : "";
     if (code === "UNAUTHORIZED") return AdminPlaceService_error_("UNAUTHORIZED", "กรุณาเข้าสู่ระบบ");
     if (code === "FORBIDDEN") return AdminPlaceService_error_("FORBIDDEN", "คุณไม่มีสิทธิ์ดำเนินการนี้");
