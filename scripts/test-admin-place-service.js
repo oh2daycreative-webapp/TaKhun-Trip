@@ -2963,8 +2963,8 @@ test("all four authoritative Admin roles may list and inspect Places", () => {
 test("mutation proofs reject bypassed authoritative auth and raw-row responses", () => {
   const source = adminPlaceServiceSource;
   const authBypass = source.replace(
-    "var admin = AuthService_requireAdmin_(token);",
-    'var admin = { role: "viewer" };'
+    "function AdminPlaceService_execute_(token, operation) {\n  try {\n    var admin = AuthService_requireAdmin_(token);",
+    'function AdminPlaceService_execute_(token, operation) {\n  try {\n    var admin = { role: "viewer" };'
   );
   assert.notEqual(authBypass, source, "auth mutation target must match production source");
   {
@@ -3606,5 +3606,231 @@ test("destination inspection Router is POST-body-only and runs real service auth
   }
 });
 
+
+
+// Temporary diagnostic: every assertion uses fixed metadata, never production data.
+function diagnose(runtime, payload = { place_id: "PLC-PUBLISHED" }, token = "TOKEN") {
+  return plain(runtime.context.adminDiagnosePlaceDependencies_(token, payload));
+}
+function diagnosticExpected(stage, table, reason, ok = false) {
+  return { ok, stage, table, reason, internal_code: reason };
+}
+test("diagnostic independently requires super_admin and denies invalid sessions before reads", () => {
+  for (const role of ["editor", "reviewer", "viewer", "unknown"]) {
+    const runtime = loadBackend({ role, data: dependencyFixtures() });
+    assert.deepEqual(diagnose(runtime), diagnosticExpected("AUTHORIZATION", "NONE", "FORBIDDEN"));
+    assert.deepEqual(runtime.calls.reads, []);
+  }
+  for (const token of [undefined, "", "invalid"]) {
+    const runtime = loadBackend({ authError: "UNAUTHORIZED", role: "super_admin" });
+    assert.deepEqual(diagnose(runtime, undefined, token), diagnosticExpected("UNKNOWN", "UNKNOWN", "UNKNOWN_ERROR"));
+    assert.deepEqual(runtime.calls.reads, []);
+  }
+});
+test("diagnostic success is fixed and read-only through POST, with no GET action", () => {
+  const runtime = loadBackend({ role: "super_admin", data: dependencyFixtures() });
+  const before = JSON.stringify(runtime.data);
+  assert.deepEqual(post(runtime.context, { action: "adminDiagnosePlaceDependencies", token: "TOKEN", payload: { place_id: "PLC-PUBLISHED" } }),
+    diagnosticExpected("COMPLETE", "NONE", "NONE", true));
+  assert.equal(JSON.stringify(runtime.data), before);
+  assert.deepEqual(runtime.calls.writes, []);
+  assert.deepEqual(runtime.calls.propertyReads, []);
+  assert.deepEqual(runtime.calls.fetches, []);
+  assert.equal(runtime.calls.reads.length, 8);
+  assertError(response(runtime.context.routeRequest_("GET", { parameter: { action: "adminDiagnosePlaceDependencies" } })), "UNKNOWN_ACTION");
+});
+test("diagnostic distinguishes every read stage for known schema failure without retry", () => {
+  for (const name of ["places", ...Object.keys(DEPENDENCY_HEADERS)]) {
+    const runtime = loadBackend({ role: "super_admin", data: dependencyFixtures() });
+    installDiagnosticReadFixture(runtime, name);
+    assert.deepEqual(diagnose(runtime), diagnosticExpected("READ_" + name.toUpperCase(), name.toUpperCase(), "READ_FAILED"));
+    assert.equal(runtime.calls.reads.filter(call => call.name === name).length, 1);
+    assert.deepEqual(runtime.calls.writes, []);
+  }
+});
+test("diagnostic distinguishes invalid ID duplicate ID and status for every index", () => {
+  const ids = { places: "place_id", routes: "route_id", route_places: "route_place_id", products: "product_id", events: "event_id", gallery: "media_id", trip_templates: "template_id", reviews: "review_id" };
+  for (const [name, idKey] of Object.entries(ids)) {
+    for (const reason of ["INVALID_ID", "DUPLICATE_ID", "INVALID_STATUS"]) {
+      const data = dependencyFixtures();
+      if (reason === "INVALID_ID") data[name][0][idKey] = "PRIVATE / ID";
+      if (reason === "DUPLICATE_ID") data[name].push({ ...data[name][0] });
+      if (reason === "INVALID_STATUS") data[name][0].status = "PRIVATE_STATUS";
+      const runtime = loadBackend({ role: "super_admin", data });
+      assert.deepEqual(diagnose(runtime), diagnosticExpected("INDEX_" + name.toUpperCase(), name.toUpperCase(), reason));
+      assertError(inspect(runtime), "SERVER_ERROR");
+      assert.deepEqual(runtime.calls.writes, []);
+    }
+  }
+});
+test("diagnostic distinguishes reference list label orphan and target failures", () => {
+  for (const [name, mutate, reason] of [
+    ["products", row => { row.related_place_id = {}; }, "INVALID_REFERENCE"],
+    ["trip_templates", row => { row.place_ids = {}; }, "INVALID_LIST"],
+    ["products", row => { row.name_th = {}; }, "INVALID_LABEL"],
+    ["routes", row => { row.name_th = {}; }, "INVALID_LABEL"],
+    ["route_places", row => { row.route_id = "MISSING-ROUTE"; row.place_id = "PLC-PUBLISHED"; }, "ORPHAN_ROUTE"]
+  ]) {
+    const data = dependencyFixtures(); mutate(data[name][0]);
+    const runtime = loadBackend({ role: "super_admin", data });
+    assert.deepEqual(diagnose(runtime), diagnosticExpected("INDEX_" + name.toUpperCase(), name.toUpperCase(), reason));
+    assertError(inspect(runtime), "SERVER_ERROR");
+    assert.deepEqual(runtime.calls.writes, []);
+  }
+  const runtime = loadBackend({ role: "super_admin", data: dependencyFixtures() });
+  assert.deepEqual(diagnose(runtime, { place_id: "MISSING-PLACE" }), diagnosticExpected("INDEX_PLACES", "PLACES", "TARGET_NOT_FOUND"));
+  assertError(inspect(runtime, { place_id: "MISSING-PLACE" }), "NOT_FOUND");
+});
+test("diagnostic unknown exceptions never expose message stack or stale observer state", () => {
+  const runtime = loadBackend({ role: "super_admin", data: dependencyFixtures(), readError: "PRIVATE_TOKEN_AND_ID" });
+  assert.deepEqual(diagnose(runtime), diagnosticExpected("UNKNOWN", "UNKNOWN", "UNKNOWN_ERROR"));
+  const indexed = loadBackend({ role: "super_admin", data: dependencyFixtures() });
+  indexed.context.AdminPlaceService_dependencyStoredBoolean_ = () => { throw new Error("PRIVATE_NAME_STACK"); };
+  assert.deepEqual(diagnose(indexed), diagnosticExpected("UNKNOWN", "UNKNOWN", "UNKNOWN_ERROR"));
+  const clean = loadBackend({ role: "super_admin", data: dependencyFixtures() });
+  assert.deepEqual(diagnose(clean), diagnosticExpected("COMPLETE", "NONE", "NONE", true));
+  assert.deepEqual(runtime.calls.writes, []);
+  assert.deepEqual(indexed.calls.writes, []);
+});
+
+test("diagnostic native label exception stays unknown", () => {
+  const runtime = loadBackend({ role: "super_admin", data: dependencyFixtures() });
+  runtime.context.AdminPlaceService_unescapeHumanText_ = () => { throw new TypeError("SECRET_NATIVE_LABEL"); };
+  assert.deepEqual(diagnose(runtime), diagnosticExpected("UNKNOWN", "UNKNOWN", "UNKNOWN_ERROR"));
+  assertError(inspect(runtime), "SERVER_ERROR");
+});
+test("diagnostic uses real authentication validation for absent malformed and unmatched sessions", () => {
+  const runtime = loadBackend({ role: "super_admin", data: dependencyFixtures() });
+  vm.runInContext(read("apps-script/Config.gs"), runtime.context);
+  vm.runInContext(read("apps-script/AuthService.gs"), runtime.context);
+  runtime.context.CryptoService_base64UrlDecode_ = value => [...Buffer.from(value, "base64url")];
+  runtime.context.CryptoService_base64UrlEncode_ = bytes => Buffer.from(bytes).toString("base64url");
+  runtime.context.CryptoService_hashToken_ = () => Buffer.alloc(32).toString("base64url");
+  let sessionReads = 0;
+  runtime.context.SheetService_readTable_ = name => {
+    assert.equal(name, runtime.context.ADMIN_SESSION_SHEET_NAME_);
+    sessionReads++;
+    return { rows: [] };
+  };
+  for (const token of [undefined, "", "invalid", Buffer.alloc(32, 1).toString("base64url")]) {
+    assert.deepEqual(plain(runtime.context.adminDiagnosePlaceDependencies_(token, { place_id: "PLC-PUBLISHED" })),
+      diagnosticExpected("UNKNOWN", "UNKNOWN", "UNKNOWN_ERROR"));
+  }
+  assert.equal(sessionReads, 1);
+  assert.deepEqual(runtime.calls.writes, []);
+});
+
+// Run the real SheetService schema validation, rather than imitating its error text.
+function installDiagnosticReadFixture(runtime, failingTable, mode = "missing_header") {
+  vm.runInContext(read("apps-script/SheetService.gs"), runtime.context);
+  runtime.context.getAppConfig_ = () => ({ spreadsheetId: mode === "missing_config" ? "" : "FIXTURE" });
+  runtime.context.SpreadsheetApp = { openById() { return { getSheetByName(name) {
+    runtime.calls.reads.push({ name });
+    if (name === failingTable && mode === "missing_sheet") return null;
+    const headers = [...runtime.context.AdminPlaceService_DEPENDENCY_HEADERS_[name]];
+    let values = [headers, ...runtime.data[name].map(row => headers.map(key => row[key]))];
+    if (name === failingTable) {
+      if (mode === "empty") values = [];
+      if (mode === "missing_header") values = [["PRIVATE_HEADER"]];
+      if (mode === "duplicate_header") values = [[...headers, headers[0]]];
+      if (mode === "invalid_header") values = [[...headers, 42]];
+      if (mode === "conflicting_header") values = [[...headers, headers[0].toUpperCase()]];
+    }
+    return { getDataRange() { return { getValues() { return values; } }; }, getLastRow() { return values.length; } };
+  } }; } };
+}
+
+test("diagnostic no-observer label catch never inspects exceptional message getters", () => {
+  const runtime = loadBackend({ data: dependencyFixtures() });
+  let messageReads = 0;
+  const exception = Object.defineProperty({}, "message", { get() { messageReads++; throw new Error("NOT_FOUND"); } });
+  runtime.context.AdminPlaceService_unescapeHumanText_ = () => { throw exception; };
+  assertError(inspect(runtime), "SERVER_ERROR");
+  assert.throws(() => runtime.context.AdminPlaceService_dependencyHumanText_("label"),
+    error => error.message === "ADMIN_PLACE_DEPENDENCY_LABEL");
+  assert.equal(messageReads, 0);
+});
+
+test("diagnostic no-observer read and validation sites preserve original thrown codes", () => {
+  const runtime = loadBackend({ data: dependencyFixtures() });
+  let messageReads = 0;
+  const exception = Object.defineProperty({}, "message", { get() { messageReads++; throw new Error("NOT_FOUND"); } });
+  runtime.context.SheetService_readTable_ = () => { throw exception; };
+  assert.throws(() => runtime.context.AdminPlaceService_inspectDependencies_("PLC-PUBLISHED"), error => error === exception);
+  assert.equal(messageReads, 0);
+  for (const [run, code] of [
+    [() => runtime.context.AdminPlaceService_dependencyRows_(null, "ROW_ERROR"), "ROW_ERROR"],
+    [() => runtime.context.AdminPlaceService_dependencyIndex_(table([], [{ id: "bad/id" }]), "id", [], "INDEX_ERROR"), "INDEX_ERROR"],
+    [() => runtime.context.AdminPlaceService_dependencyReference_({}, true), "ADMIN_PLACE_DEPENDENCY_REFERENCE"],
+    [() => runtime.context.AdminPlaceService_dependencyList_({}), "ADMIN_PLACE_DEPENDENCY_LIST"],
+    [() => runtime.context.AdminPlaceService_dependencyHumanText_({}), "ADMIN_PLACE_DEPENDENCY_LABEL"]
+  ]) assert.throws(run, error => error.message === code);
+});
+
+test("diagnostic callbacks receive only fixed primitive metadata at controlled and native failures", () => {
+  for (const kind of ["read", "validation", "native"]) {
+    const runtime = loadBackend({ role: "super_admin", data: dependencyFixtures() });
+    const observed = [];
+    const observer = { enter(...args) { observed.push(args); }, fail(...args) { observed.push(args); } };
+    if (kind === "read") installDiagnosticReadFixture(runtime, "places");
+    if (kind === "validation") runtime.data.places[0].place_id = "PRIVATE / ID";
+    if (kind === "native") runtime.context.SheetService_readTable_ = () => {
+      const error = new TypeError("Required data headers are not available.");
+      error.privateData = "PRIVATE_SENTINEL";
+      throw error;
+    };
+    assert.throws(() => runtime.context.AdminPlaceService_inspectDependencies_("PLC-PUBLISHED", observer));
+    const allowed = new Set(["READ_PLACES", "READ_ROUTES", "READ_ROUTE_PLACES", "READ_PRODUCTS", "READ_EVENTS", "READ_GALLERY", "READ_TRIP_TEMPLATES", "READ_REVIEWS",
+      "INDEX_PLACES", "PLACES", "ROUTES", "ROUTE_PLACES", "PRODUCTS", "EVENTS", "GALLERY", "TRIP_TEMPLATES", "REVIEWS", "READ_FAILED", "INVALID_ID"]);
+    for (const args of observed) for (const value of args) {
+      assert.equal(typeof value, "string", "no Error, stack-bearing object or runtime data may cross the observer boundary");
+      assert.equal(allowed.has(value), true);
+    }
+    assert.equal(observed.some(args => args[0] === "READ_FAILED"), kind === "read");
+    assert.equal(observed.some(args => args[0] === "INVALID_ID"), kind === "validation");
+  }
+});
+
+test("diagnostic native message spoofing always returns UNKNOWN", () => {
+  for (const kind of ["read", "label"]) for (const makeError of [
+    message => new TypeError(message), message => new Error(message), message => ({ message, privateData: "PRIVATE" })
+  ]) {
+    const runtime = loadBackend({ role: "super_admin", data: dependencyFixtures() });
+    if (kind === "read") runtime.context.SheetService_readTable_ = () => { throw makeError("Required data headers are not available."); };
+    else runtime.context.AdminPlaceService_unescapeHumanText_ = () => { throw makeError("ADMIN_PLACE_TEXT"); };
+    assert.deepEqual(diagnose(runtime), diagnosticExpected("UNKNOWN", "UNKNOWN", "UNKNOWN_ERROR"));
+    assert.deepEqual(runtime.calls.writes, []);
+  }
+});
+
+test("diagnostic real controlled read and text validation still classifies fixed metadata", () => {
+  for (const mode of ["missing_config", "missing_sheet", "empty", "missing_header", "duplicate_header", "invalid_header", "conflicting_header"]) {
+    const runtime = loadBackend({ role: "super_admin", data: dependencyFixtures() });
+    installDiagnosticReadFixture(runtime, "places", mode);
+    assert.deepEqual(diagnose(runtime), diagnosticExpected("READ_PLACES", "PLACES", "READ_FAILED"), mode);
+    assertError(inspect(runtime), "SERVER_ERROR");
+    assert.deepEqual(runtime.calls.writes, []);
+  }
+  for (const name of ["x".repeat(20001), "private\u0001text"]) {
+    const runtime = loadBackend({ role: "super_admin", data: dependencyFixtures() });
+    runtime.data.products[0].name_th = name;
+    assert.deepEqual(diagnose(runtime), diagnosticExpected("INDEX_PRODUCTS", "PRODUCTS", "INVALID_LABEL"));
+    assertError(inspect(runtime), "SERVER_ERROR");
+  }
+});
+
+test("diagnostic same-runtime sequential requests cannot reuse failure state", () => {
+  const runtime = loadBackend({ role: "super_admin", data: dependencyFixtures() });
+  const id = runtime.data.products[0].product_id;
+  runtime.data.products[0].product_id = "PRIVATE / ID";
+  assert.deepEqual(diagnose(runtime), diagnosticExpected("INDEX_PRODUCTS", "PRODUCTS", "INVALID_ID"));
+  runtime.data.products[0].product_id = id;
+  const readTable = runtime.context.SheetService_readTable_;
+  runtime.context.SheetService_readTable_ = () => { throw new TypeError("Required data headers are not available."); };
+  assert.deepEqual(diagnose(runtime), diagnosticExpected("UNKNOWN", "UNKNOWN", "UNKNOWN_ERROR"));
+  runtime.context.SheetService_readTable_ = readTable;
+  assert.deepEqual(diagnose(runtime), diagnosticExpected("COMPLETE", "NONE", "NONE", true));
+  assert.deepEqual(runtime.calls.writes, []);
+});
 if (process.exitCode) process.exit(process.exitCode);
 process.stdout.write("Admin Place service verification passed.\n");
