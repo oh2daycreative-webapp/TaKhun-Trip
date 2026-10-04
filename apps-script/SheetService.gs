@@ -44,15 +44,17 @@ function appendSheetObject_(sheetName, requiredHeaders, record) {
   sheet.getRange(sheet.getLastRow() + 1, 1, 1, headers.length).setValues([row]);
 }
 
-function SheetService_readTable_(sheetName, requiredHeaders) {
-  var sheet = SheetService_getSheet_(sheetName);
+// Optional read-validation callback carries no source data; existing errors remain unchanged.
+function SheetService_readTable_(sheetName, requiredHeaders, onInvalid) {
+  var sheet = SheetService_getSheet_(sheetName, onInvalid);
   var values = sheet.getDataRange().getValues();
   if (!values || !values.length || sheet.getLastRow() < 1) {
+    if (onInvalid) onInvalid();
     throw new Error("Data headers are not available.");
   }
 
   var headers = SheetService_normalizeHeaders_(values[0]);
-  var headerMap = SheetService_assertUniqueHeaders_(headers, requiredHeaders);
+  var headerMap = SheetService_assertUniqueHeaders_(headers, requiredHeaders, onInvalid);
   var rows = [];
 
   for (var rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
@@ -72,8 +74,9 @@ function SheetService_readTable_(sheetName, requiredHeaders) {
   return { headers: headers.slice(), headerMap: headerMap, rows: rows };
 }
 
-function SheetService_assertUniqueHeaders_(headers, requiredHeaders) {
+function SheetService_assertUniqueHeaders_(headers, requiredHeaders, onInvalid) {
   if (!Array.isArray(headers) || !Array.isArray(requiredHeaders || [])) {
+    if (onInvalid) onInvalid();
     throw new Error("Data headers are invalid.");
   }
 
@@ -81,14 +84,17 @@ function SheetService_assertUniqueHeaders_(headers, requiredHeaders) {
   var caseFoldedHeaders = Object.create(null);
   headers.forEach(function (header, index) {
     if (typeof header !== "string" || !header.trim()) {
+      if (onInvalid) onInvalid();
       throw new Error("Data headers are invalid.");
     }
     var normalized = header.trim();
     if (Object.prototype.hasOwnProperty.call(headerMap, normalized)) {
+      if (onInvalid) onInvalid();
       throw new Error("Data headers must be unique.");
     }
     var caseFolded = normalized.toLowerCase();
     if (Object.prototype.hasOwnProperty.call(caseFoldedHeaders, caseFolded)) {
+      if (onInvalid) onInvalid();
       throw new Error("Data headers conflict.");
     }
     caseFoldedHeaders[caseFolded] = true;
@@ -98,13 +104,16 @@ function SheetService_assertUniqueHeaders_(headers, requiredHeaders) {
   var requiredMap = Object.create(null);
   (requiredHeaders || []).forEach(function (header) {
     if (typeof header !== "string" || !header || header !== header.trim()) {
+      if (onInvalid) onInvalid();
       throw new Error("Required data headers are invalid.");
     }
     if (Object.prototype.hasOwnProperty.call(requiredMap, header)) {
+      if (onInvalid) onInvalid();
       throw new Error("Required data headers must be unique.");
     }
     requiredMap[header] = true;
     if (!Object.prototype.hasOwnProperty.call(headerMap, header)) {
+      if (onInvalid) onInvalid();
       throw new Error("Required data headers are not available.");
     }
   });
@@ -338,11 +347,17 @@ function SheetService_writeValue_(policy, fieldName, value) {
   throw new Error("Security field is invalid.");
 }
 
-function SheetService_getSheet_(sheetName) {
+function SheetService_getSheet_(sheetName, onInvalid) {
   var config = getAppConfig_();
-  if (!config.spreadsheetId) throw new Error("Data source is not configured.");
+  if (!config.spreadsheetId) {
+    if (onInvalid) onInvalid();
+    throw new Error("Data source is not configured.");
+  }
   var sheet = SpreadsheetApp.openById(config.spreadsheetId).getSheetByName(sheetName);
-  if (!sheet) throw new Error("Requested data is not available.");
+  if (!sheet) {
+    if (onInvalid) onInvalid();
+    throw new Error("Requested data is not available.");
+  }
   return sheet;
 }
 
