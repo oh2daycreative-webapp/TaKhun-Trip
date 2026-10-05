@@ -64,7 +64,6 @@ function routeRequest_(method, event) {
         if (action === "adminSavePlaceDraft") return createJsonResponse_(adminSavePlaceDraft_(body.token, body.payload));
         if (action === "adminPublishPlace") return createJsonResponse_(adminPublishPlace_(body.token, body.payload));
         if (action === "adminInspectPlaceDependencies") return createJsonResponse_(adminInspectPlaceDependencies_(body.token, body.payload));
-        if (action === "adminDiagnosePlaceDependencies") return createJsonResponse_(adminDiagnosePlaceDependencies_(body.token, body.payload));
         if (action === "adminUnpublishPlace") return createJsonResponse_(adminUnpublishPlace_(body.token, body.payload));
         if (action === "adminArchivePlace") return createJsonResponse_(adminArchivePlace_(body.token, body.payload));
         if (action === "adminRestorePlace") return createJsonResponse_(adminRestorePlace_(body.token, body.payload));

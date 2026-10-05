@@ -40,7 +40,7 @@ function assertRouterBoundary(source) {
   const expected = [
     "submitReview", "adminLogin", "adminValidateSession", "adminLogout",
     "adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace",
-    "adminInspectPlaceDependencies", "adminDiagnosePlaceDependencies", "adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace",
+    "adminInspectPlaceDependencies", "adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace",
     "adminGetPlaceMediaOptions", "adminInspectPlaceCreateDestinations"
   ].sort();
   assert.deepEqual(exactActions(source), expected);

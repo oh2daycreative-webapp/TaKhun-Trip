@@ -328,60 +328,6 @@ function adminInspectPlaceDependencies_(token, payload) {
   });
 }
 
-// TEMPORARY diagnostic. Remove this action and observer plumbing after investigation.
-// No ordinary response wrapper: even authentication failures contain only fixed metadata.
-function adminDiagnosePlaceDependencies_(token, payload) {
-  var failure = null;
-  var controlledFailure = {};
-  var stage = "UNKNOWN";
-  var table = "UNKNOWN";
-  var observer = {
-    enter: function (nextStage, nextTable) { stage = nextStage; table = nextTable; },
-    fail: function (reason) {
-      failure = AdminPlaceService_diagnosticMetadata_(false, stage, table, reason);
-      throw controlledFailure;
-    }
-  };
-  try {
-    var admin = AuthService_requireAdmin_(token);
-    if (!admin || admin.role !== "super_admin") {
-      return AdminPlaceService_diagnosticMetadata_(false, "AUTHORIZATION", "NONE", "FORBIDDEN");
-    }
-    var parameters = AdminPlaceService_dependencyParameters_(payload);
-    AdminPlaceService_inspectDependencies_(parameters.place_id, observer);
-    return AdminPlaceService_diagnosticMetadata_(true, "COMPLETE", "NONE", "NONE");
-  } catch (error) {
-    // Only a controlled site can trigger this private, request-local sentinel.
-    if (failure && error === controlledFailure) return failure;
-    return AdminPlaceService_diagnosticMetadata_(false, "UNKNOWN", "UNKNOWN", "UNKNOWN_ERROR");
-  }
-}
-
-function AdminPlaceService_diagnosticMetadata_(ok, stage, table, reason) {
-  var stages = ["UNKNOWN", "AUTHORIZATION", "COMPLETE",
-    "READ_PLACES", "READ_ROUTES", "READ_ROUTE_PLACES", "READ_PRODUCTS", "READ_EVENTS", "READ_GALLERY", "READ_TRIP_TEMPLATES", "READ_REVIEWS",
-    "INDEX_PLACES", "INDEX_ROUTES", "INDEX_ROUTE_PLACES", "INDEX_PRODUCTS", "INDEX_EVENTS", "INDEX_GALLERY", "INDEX_TRIP_TEMPLATES", "INDEX_REVIEWS"];
-  var tables = ["UNKNOWN", "NONE", "PLACES", "ROUTES", "ROUTE_PLACES", "PRODUCTS", "EVENTS", "GALLERY", "TRIP_TEMPLATES", "REVIEWS"];
-  var reasons = ["UNKNOWN_ERROR", "NONE", "FORBIDDEN", "READ_FAILED", "INVALID_TABLE", "INVALID_ID", "DUPLICATE_ID", "INVALID_STATUS",
-    "INVALID_REFERENCE", "INVALID_LIST", "INVALID_LABEL", "ORPHAN_ROUTE", "TARGET_NOT_FOUND"];
-  if (stages.indexOf(stage) === -1 || tables.indexOf(table) === -1 || reasons.indexOf(reason) === -1) {
-    return { ok: false, stage: "UNKNOWN", table: "UNKNOWN", reason: "UNKNOWN_ERROR", internal_code: "UNKNOWN_ERROR" };
-  }
-  return { ok: ok === true, stage: stage, table: table, reason: reason, internal_code: reason };
-}
-
-function AdminPlaceService_dependencyFailure_(observer, reason, errorCode) {
-  if (observer) observer.fail(reason);
-  throw new Error(errorCode);
-}
-
-function AdminPlaceService_dependencyRead_(sheetName, headers, observer, stage, table) {
-  if (!observer) return SheetService_readTable_(sheetName, headers);
-  observer.enter(stage, table);
-  // Only explicit SheetService read-validation sites invoke this no-data callback.
-  return SheetService_readTable_(sheetName, headers, function () { observer.fail("READ_FAILED"); });
-}
-
 function adminUnpublishPlace_(token, payload) {
   return AdminPlaceService_execute_(token, function (admin) {
     AdminPlaceService_requireWriteRole_(admin);
@@ -547,90 +493,88 @@ function AdminPlaceService_dependencyParameters_(payload) {
   return { place_id: source.place_id };
 }
 
-function AdminPlaceService_inspectDependencies_(placeId, observer) {
+function AdminPlaceService_inspectDependencies_(placeId) {
   if (!AdminPlaceService_validId_(placeId)) throw new Error("VALIDATION_ERROR");
   var tables = {
-    places: AdminPlaceService_dependencyRead_(AdminPlaceSchema_PLACES_SHEET_NAME_, AdminPlaceService_DEPENDENCY_HEADERS_.places, observer, "READ_PLACES", "PLACES"),
-    routes: AdminPlaceService_dependencyRead_("routes", AdminPlaceService_DEPENDENCY_HEADERS_.routes, observer, "READ_ROUTES", "ROUTES"),
-    route_places: AdminPlaceService_dependencyRead_("route_places", AdminPlaceService_DEPENDENCY_HEADERS_.route_places, observer, "READ_ROUTE_PLACES", "ROUTE_PLACES"),
-    products: AdminPlaceService_dependencyRead_("products", AdminPlaceService_DEPENDENCY_HEADERS_.products, observer, "READ_PRODUCTS", "PRODUCTS"),
-    events: AdminPlaceService_dependencyRead_("events", AdminPlaceService_DEPENDENCY_HEADERS_.events, observer, "READ_EVENTS", "EVENTS"),
-    gallery: AdminPlaceService_dependencyRead_("gallery", AdminPlaceService_DEPENDENCY_HEADERS_.gallery, observer, "READ_GALLERY", "GALLERY"),
-    trip_templates: AdminPlaceService_dependencyRead_("trip_templates", AdminPlaceService_DEPENDENCY_HEADERS_.trip_templates, observer, "READ_TRIP_TEMPLATES", "TRIP_TEMPLATES"),
-    reviews: AdminPlaceService_dependencyRead_("reviews", AdminPlaceService_DEPENDENCY_HEADERS_.reviews, observer, "READ_REVIEWS", "REVIEWS")
+    places: SheetService_readTable_(AdminPlaceSchema_PLACES_SHEET_NAME_, AdminPlaceService_DEPENDENCY_HEADERS_.places),
+    routes: SheetService_readTable_("routes", AdminPlaceService_DEPENDENCY_HEADERS_.routes),
+    route_places: SheetService_readTable_("route_places", AdminPlaceService_DEPENDENCY_HEADERS_.route_places),
+    products: SheetService_readTable_("products", AdminPlaceService_DEPENDENCY_HEADERS_.products),
+    events: SheetService_readTable_("events", AdminPlaceService_DEPENDENCY_HEADERS_.events),
+    gallery: SheetService_readTable_("gallery", AdminPlaceService_DEPENDENCY_HEADERS_.gallery),
+    trip_templates: SheetService_readTable_("trip_templates", AdminPlaceService_DEPENDENCY_HEADERS_.trip_templates),
+    reviews: SheetService_readTable_("reviews", AdminPlaceService_DEPENDENCY_HEADERS_.reviews)
   };
   var groups = {};
   AdminPlaceService_DEPENDENCY_GROUP_KEYS_.forEach(function (key) { groups[key] = []; });
 
   var places = AdminPlaceService_dependencyIndex_(
-    tables.places, "place_id", AdminPlaceService_STATUSES_, "ADMIN_PLACE_DEPENDENCY_PLACE", observer, "INDEX_PLACES", "PLACES"
+    tables.places, "place_id", AdminPlaceService_STATUSES_, "ADMIN_PLACE_DEPENDENCY_PLACE"
   );
-  if (!Object.prototype.hasOwnProperty.call(places, placeId)) AdminPlaceService_dependencyFailure_(observer, "TARGET_NOT_FOUND", "NOT_FOUND");
+  if (!Object.prototype.hasOwnProperty.call(places, placeId)) throw new Error("NOT_FOUND");
   Object.keys(places).forEach(function (referrerId) {
     var referrer = places[referrerId];
     if (referrerId === placeId) return;
-    var memberships = AdminPlaceService_dependencyList_(referrer.nearby_place_ids, observer);
+    var memberships = AdminPlaceService_dependencyList_(referrer.nearby_place_ids);
     if (memberships.indexOf(placeId) !== -1) {
       AdminPlaceService_dependencyAdd_(groups.nearby_places, referrerId,
-        AdminPlaceService_dependencyLabel_(referrer.name_th, referrer.name_en, referrerId, observer));
+        AdminPlaceService_dependencyLabel_(referrer.name_th, referrer.name_en, referrerId));
     }
   });
 
   var routes = AdminPlaceService_dependencyIndex_(
-    tables.routes, "route_id", AdminPlaceService_DEPENDENCY_COMMON_STATUSES_, "ADMIN_PLACE_DEPENDENCY_ROUTE", observer, "INDEX_ROUTES", "ROUTES"
+    tables.routes, "route_id", AdminPlaceService_DEPENDENCY_COMMON_STATUSES_, "ADMIN_PLACE_DEPENDENCY_ROUTE"
   );
   var routePlaces = AdminPlaceService_dependencyIndex_(
-    tables.route_places, "route_place_id", AdminPlaceService_DEPENDENCY_COMMON_STATUSES_, "ADMIN_PLACE_DEPENDENCY_ROUTE_PLACE", observer, "INDEX_ROUTE_PLACES", "ROUTE_PLACES"
+    tables.route_places, "route_place_id", AdminPlaceService_DEPENDENCY_COMMON_STATUSES_, "ADMIN_PLACE_DEPENDENCY_ROUTE_PLACE"
   );
   Object.keys(routePlaces).forEach(function (relationshipId) {
-    if (observer) observer.enter("INDEX_ROUTE_PLACES", "ROUTE_PLACES");
     var relationship = routePlaces[relationshipId];
     if (relationship.status === "deleted") return;
-    var relationshipPlaceId = AdminPlaceService_dependencyReference_(relationship.place_id, false, observer);
-    var routeId = AdminPlaceService_dependencyReference_(relationship.route_id, false, observer);
+    var relationshipPlaceId = AdminPlaceService_dependencyReference_(relationship.place_id, false);
+    var routeId = AdminPlaceService_dependencyReference_(relationship.route_id, false);
     if (relationshipPlaceId !== placeId) return;
-    if (!Object.prototype.hasOwnProperty.call(routes, routeId)) AdminPlaceService_dependencyFailure_(observer, "ORPHAN_ROUTE", "ADMIN_PLACE_DEPENDENCY_ORPHAN_ROUTE");
+    if (!Object.prototype.hasOwnProperty.call(routes, routeId)) throw new Error("ADMIN_PLACE_DEPENDENCY_ORPHAN_ROUTE");
     var route = routes[routeId];
     if (route.status === "deleted") return;
-    if (observer) observer.enter("INDEX_ROUTES", "ROUTES");
     AdminPlaceService_dependencyAdd_(groups.routes, routeId,
-      AdminPlaceService_dependencyLabel_(route.name_th, route.name_en, routeId, observer));
+      AdminPlaceService_dependencyLabel_(route.name_th, route.name_en, routeId));
   });
 
   AdminPlaceService_dependencyScalarGroup_(
     tables.products, "product_id", "related_place_id", "name_th", "name_en", placeId, groups.products,
-    AdminPlaceService_DEPENDENCY_COMMON_STATUSES_, "ADMIN_PLACE_DEPENDENCY_PRODUCT", observer, "INDEX_PRODUCTS", "PRODUCTS"
+    AdminPlaceService_DEPENDENCY_COMMON_STATUSES_, "ADMIN_PLACE_DEPENDENCY_PRODUCT"
   );
   AdminPlaceService_dependencyScalarGroup_(
     tables.events, "event_id", "related_place_id", "title_th", "title_en", placeId, groups.events,
-    AdminPlaceService_DEPENDENCY_COMMON_STATUSES_, "ADMIN_PLACE_DEPENDENCY_EVENT", observer, "INDEX_EVENTS", "EVENTS"
+    AdminPlaceService_DEPENDENCY_COMMON_STATUSES_, "ADMIN_PLACE_DEPENDENCY_EVENT"
   );
   AdminPlaceService_dependencyScalarGroup_(
     tables.gallery, "media_id", "related_place_id", "title_th", "title_en", placeId, groups.gallery,
-    AdminPlaceService_DEPENDENCY_COMMON_STATUSES_, "ADMIN_PLACE_DEPENDENCY_GALLERY", observer, "INDEX_GALLERY", "GALLERY"
+    AdminPlaceService_DEPENDENCY_COMMON_STATUSES_, "ADMIN_PLACE_DEPENDENCY_GALLERY"
   );
 
   var templates = AdminPlaceService_dependencyIndex_(
-    tables.trip_templates, "template_id", AdminPlaceService_DEPENDENCY_COMMON_STATUSES_, "ADMIN_PLACE_DEPENDENCY_TEMPLATE", observer, "INDEX_TRIP_TEMPLATES", "TRIP_TEMPLATES"
+    tables.trip_templates, "template_id", AdminPlaceService_DEPENDENCY_COMMON_STATUSES_, "ADMIN_PLACE_DEPENDENCY_TEMPLATE"
   );
   Object.keys(templates).forEach(function (templateId) {
     var template = templates[templateId];
-    var templatePlaceIds = AdminPlaceService_dependencyList_(template.place_ids, observer);
+    var templatePlaceIds = AdminPlaceService_dependencyList_(template.place_ids);
     if (template.status === "deleted") return;
     if (templatePlaceIds.indexOf(placeId) !== -1) {
       AdminPlaceService_dependencyAdd_(groups.trip_templates, templateId,
-        AdminPlaceService_dependencyLabel_(template.name_th, template.name_en, templateId, observer));
+        AdminPlaceService_dependencyLabel_(template.name_th, template.name_en, templateId));
     }
   });
 
   var reviews = AdminPlaceService_dependencyIndex_(
-    tables.reviews, "review_id", AdminPlaceService_DEPENDENCY_REVIEW_STATUSES_, "ADMIN_PLACE_DEPENDENCY_REVIEW", observer, "INDEX_REVIEWS", "REVIEWS"
+    tables.reviews, "review_id", AdminPlaceService_DEPENDENCY_REVIEW_STATUSES_, "ADMIN_PLACE_DEPENDENCY_REVIEW"
   );
   Object.keys(reviews).forEach(function (reviewId) {
     var review = reviews[reviewId];
     if (review.status === "deleted") return;
-    if (AdminPlaceService_dependencyReference_(review.place_id, false, observer) !== placeId) return;
-    var reviewerName = AdminPlaceService_dependencyHumanText_(review.reviewer_name, observer);
+    if (AdminPlaceService_dependencyReference_(review.place_id, false) !== placeId) return;
+    var reviewerName = AdminPlaceService_dependencyHumanText_(review.reviewer_name);
     var label = AdminPlaceService_dependencyStoredBoolean_(review.is_anonymous) ? "นักท่องเที่ยว" : (reviewerName || reviewId);
     AdminPlaceService_dependencyAdd_(groups.reviews, reviewId, label);
   });
@@ -643,59 +587,53 @@ function AdminPlaceService_inspectDependencies_(placeId, observer) {
   return { place_id: placeId, checked_at: new Date().toISOString(), groups: groups };
 }
 
-function AdminPlaceService_dependencyRows_(table, errorCode, observer) {
-  if (!table || typeof table !== "object" || !Array.isArray(table.rows)) AdminPlaceService_dependencyFailure_(observer, "INVALID_TABLE", errorCode);
+function AdminPlaceService_dependencyRows_(table, errorCode) {
+  if (!table || typeof table !== "object" || !Array.isArray(table.rows)) throw new Error(errorCode);
   return table.rows.map(function (entry) {
     if (!entry || typeof entry !== "object" || !entry.values || typeof entry.values !== "object" || Array.isArray(entry.values)) {
-      AdminPlaceService_dependencyFailure_(observer, "INVALID_TABLE", errorCode);
+      throw new Error(errorCode);
     }
     return entry.values;
   });
 }
 
-function AdminPlaceService_dependencyIndex_(table, idKey, statuses, errorCode, observer, stage, tableName) {
-  if (observer) observer.enter(stage, tableName);
+function AdminPlaceService_dependencyIndex_(table, idKey, statuses, errorCode) {
   var index = Object.create(null);
-  AdminPlaceService_dependencyRows_(table, errorCode, observer).forEach(function (row) {
+  AdminPlaceService_dependencyRows_(table, errorCode).forEach(function (row) {
     var id = row[idKey];
-    if (!AdminPlaceService_validId_(id)) AdminPlaceService_dependencyFailure_(observer, "INVALID_ID", errorCode);
-    if (Object.prototype.hasOwnProperty.call(index, id)) AdminPlaceService_dependencyFailure_(observer, "DUPLICATE_ID", errorCode);
-    if (typeof row.status !== "string" || statuses.indexOf(row.status) === -1) AdminPlaceService_dependencyFailure_(observer, "INVALID_STATUS", errorCode);
+    if (!AdminPlaceService_validId_(id) || Object.prototype.hasOwnProperty.call(index, id)) throw new Error(errorCode);
+    if (typeof row.status !== "string" || statuses.indexOf(row.status) === -1) throw new Error(errorCode);
     index[id] = row;
   });
   return index;
 }
 
-function AdminPlaceService_dependencyReference_(value, optional, observer) {
-  if (typeof value !== "string") AdminPlaceService_dependencyFailure_(observer, "INVALID_REFERENCE", "ADMIN_PLACE_DEPENDENCY_REFERENCE");
+function AdminPlaceService_dependencyReference_(value, optional) {
+  if (typeof value !== "string") throw new Error("ADMIN_PLACE_DEPENDENCY_REFERENCE");
   var normalized = value.trim();
   if (!normalized && optional) return "";
-  if (!AdminPlaceService_validId_(normalized)) AdminPlaceService_dependencyFailure_(observer, "INVALID_REFERENCE", "ADMIN_PLACE_DEPENDENCY_REFERENCE");
+  if (!AdminPlaceService_validId_(normalized)) throw new Error("ADMIN_PLACE_DEPENDENCY_REFERENCE");
   return normalized;
 }
 
-function AdminPlaceService_dependencyList_(value, observer) {
-  if (typeof value !== "string") AdminPlaceService_dependencyFailure_(observer, "INVALID_LIST", "ADMIN_PLACE_DEPENDENCY_LIST");
+function AdminPlaceService_dependencyList_(value) {
+  if (typeof value !== "string") throw new Error("ADMIN_PLACE_DEPENDENCY_LIST");
   if (!value) return [];
   var seen = Object.create(null);
   var result = [];
   value.split("|").forEach(function (part) {
     var id = part.trim();
     if (!id || Object.prototype.hasOwnProperty.call(seen, id)) return;
-    if (!AdminPlaceService_validId_(id)) AdminPlaceService_dependencyFailure_(observer, "INVALID_LIST", "ADMIN_PLACE_DEPENDENCY_LIST");
+    if (!AdminPlaceService_validId_(id)) throw new Error("ADMIN_PLACE_DEPENDENCY_LIST");
     seen[id] = true;
     result.push(id);
   });
   return result;
 }
 
-function AdminPlaceService_dependencyHumanText_(value, observer) {
+function AdminPlaceService_dependencyHumanText_(value) {
   if (value === undefined || value === null || value === "") return "";
-  if (typeof value !== "string") AdminPlaceService_dependencyFailure_(observer, "INVALID_LABEL", "ADMIN_PLACE_DEPENDENCY_LABEL");
-  if (observer) {
-    return AdminPlaceService_unescapeHumanText_(value, function () { observer.fail("INVALID_LABEL"); });
-  }
-  // Preserve the original catch exactly when diagnostic observation is absent.
+  if (typeof value !== "string") throw new Error("ADMIN_PLACE_DEPENDENCY_LABEL");
   try {
     return AdminPlaceService_unescapeHumanText_(value);
   } catch (_labelError) {
@@ -703,9 +641,9 @@ function AdminPlaceService_dependencyHumanText_(value, observer) {
   }
 }
 
-function AdminPlaceService_dependencyLabel_(primary, secondary, fallback, observer) {
-  var first = AdminPlaceService_dependencyHumanText_(primary, observer);
-  var second = AdminPlaceService_dependencyHumanText_(secondary, observer);
+function AdminPlaceService_dependencyLabel_(primary, secondary, fallback) {
+  var first = AdminPlaceService_dependencyHumanText_(primary);
+  var second = AdminPlaceService_dependencyHumanText_(secondary);
   return first || second || fallback;
 }
 
@@ -721,14 +659,14 @@ function AdminPlaceService_dependencyAdd_(items, entityId, label) {
 }
 
 function AdminPlaceService_dependencyScalarGroup_(table, idKey, referenceKey, primaryLabelKey, secondaryLabelKey,
-    placeId, items, statuses, errorCode, observer, stage, tableName) {
-  var records = AdminPlaceService_dependencyIndex_(table, idKey, statuses, errorCode, observer, stage, tableName);
+    placeId, items, statuses, errorCode) {
+  var records = AdminPlaceService_dependencyIndex_(table, idKey, statuses, errorCode);
   Object.keys(records).forEach(function (entityId) {
     var record = records[entityId];
     if (record.status === "deleted") return;
-    if (AdminPlaceService_dependencyReference_(record[referenceKey], true, observer) !== placeId) return;
+    if (AdminPlaceService_dependencyReference_(record[referenceKey], true) !== placeId) return;
     AdminPlaceService_dependencyAdd_(items, entityId,
-      AdminPlaceService_dependencyLabel_(record[primaryLabelKey], record[secondaryLabelKey], entityId, observer));
+      AdminPlaceService_dependencyLabel_(record[primaryLabelKey], record[secondaryLabelKey], entityId));
   });
 }
 
@@ -1947,22 +1885,18 @@ function AdminPlaceService_validId_(value) {
   return typeof value === "string" && value === value.trim() && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value);
 }
 
-function AdminPlaceService_safeText_(value, onInvalid) {
+function AdminPlaceService_safeText_(value) {
   if (value === undefined || value === null) return "";
-  if (typeof value !== "string" && typeof value !== "number") {
-    if (onInvalid) onInvalid();
-    throw new Error("ADMIN_PLACE_TEXT");
-  }
+  if (typeof value !== "string" && typeof value !== "number") throw new Error("ADMIN_PLACE_TEXT");
   var text = String(value).trim();
   if (text.length > 20000 || /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(text)) {
-    if (onInvalid) onInvalid();
     throw new Error("ADMIN_PLACE_TEXT");
   }
   return text;
 }
 
-function AdminPlaceService_unescapeHumanText_(value, onInvalid) {
-  var text = AdminPlaceService_safeText_(value, onInvalid);
+function AdminPlaceService_unescapeHumanText_(value) {
+  var text = AdminPlaceService_safeText_(value);
   return /^'[=+\-@]/.test(text) ? text.slice(1) : text;
 }
 
