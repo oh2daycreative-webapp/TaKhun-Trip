@@ -92,6 +92,8 @@ function load(options = {}) {
       return rows[name] || [];
     }
   };
+  // Generation races and eviction are tested with the real helper in test-admin-content-service.js.
+  context.ContentCacheService_key_ = () => "content-epoch:test";
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(root, "apps-script", "Config.gs"), "utf8"), context, { filename: "apps-script/Config.gs" });
   serviceFiles.forEach((name) => vm.runInContext(fs.readFileSync(path.join(root, "apps-script", name), "utf8"), context, { filename: `apps-script/${name}` }));
@@ -146,11 +148,11 @@ test("returns exact five-section contract projections limits visibility and stab
 
 test("normalizes language uses English fallback and separates only effective cache keys", () => {
   const omitted = load(); assert.equal(plain(omitted.context.getHomeData_({})).data.featured_places[0].name, "สถานที่ P-1");
-  assert.equal(omitted.cache.puts[0].key, "public:getHomeData:place-epoch:1:lang=th");
-  const thai = load(); thai.context.getHomeData_({ lang: "th" }); assert.equal(thai.cache.puts[0].key, "public:getHomeData:place-epoch:1:lang=th");
-  const unknown = load(); unknown.context.getHomeData_({ lang: "xx" }); assert.equal(unknown.cache.puts[0].key, "public:getHomeData:place-epoch:1:lang=th");
+  assert.equal(omitted.cache.puts[0].key, "public:getHomeData:place-epoch:1:content-epoch:test:lang=th");
+  const thai = load(); thai.context.getHomeData_({ lang: "th" }); assert.equal(thai.cache.puts[0].key, "public:getHomeData:place-epoch:1:content-epoch:test:lang=th");
+  const unknown = load(); unknown.context.getHomeData_({ lang: "xx" }); assert.equal(unknown.cache.puts[0].key, "public:getHomeData:place-epoch:1:content-epoch:test:lang=th");
   const english = load(); const response = plain(english.context.getHomeData_({ lang: "en" }));
-  assert.equal(english.cache.puts[0].key, "public:getHomeData:place-epoch:1:lang=en");
+  assert.equal(english.cache.puts[0].key, "public:getHomeData:place-epoch:1:content-epoch:test:lang=en");
   assert.equal(response.data.featured_places[0].name, "สถานที่ P-1");
   assert.equal(response.data.featured_places[1].name, "Place P-2");
   english.builderCalls.forEach((call) => assert.equal(call.parameters.lang, "en"));
@@ -197,7 +199,7 @@ test("fails atomically and never caches source or builder failures", () => {
 test("uses exact validated cache for miss hit and TTL 300", () => {
   const loaded = load(); const first = plain(loaded.context.getHomeData_({}));
   assertExactSuccess(first); assert.equal(loaded.cache.puts.length, 1); assert.equal(loaded.cache.puts[0].ttl, 300);
-  assert.equal(loaded.cache.puts[0].key, "public:getHomeData:place-epoch:1:lang=th");
+  assert.equal(loaded.cache.puts[0].key, "public:getHomeData:place-epoch:1:content-epoch:test:lang=th");
   const reads = loaded.reads.length; const second = plain(loaded.context.getHomeData_({ lang: "invalid" }));
   assert.deepEqual(second, first); assert.equal(loaded.reads.length, reads); assert.equal(loaded.cache.puts.length, 1);
 });
@@ -209,12 +211,12 @@ test("rejects malformed cached JSON wrong sections extra sections and extra item
     JSON.stringify({ ok: true, data: { featured_routes: [], featured_places: [], featured_products: [], upcoming_events: [], gallery_preview: [], extra: [] }, message: "success" })
   ];
   variants.forEach((cached) => {
-    const cache = createCache(); cache.values.set("public:getHomeData:place-epoch:1:lang=th", cached);
+    const cache = createCache(); cache.values.set("public:getHomeData:place-epoch:1:content-epoch:test:lang=th", cached);
     const loaded = load({ cache }); assertExactSuccess(plain(loaded.context.getHomeData_({}))); assert.equal(loaded.reads.length, 5); assert.equal(cache.puts.length, 1);
   });
   const cache = createCache(); const seeded = load({ cache }); const valid = plain(seeded.context.getHomeData_({}));
   valid.data.featured_routes[0].status = "published";
-  cache.values.set("public:getHomeData:place-epoch:1:lang=th", JSON.stringify(valid)); cache.puts.length = 0; seeded.reads.length = 0;
+  cache.values.set("public:getHomeData:place-epoch:1:content-epoch:test:lang=th", JSON.stringify(valid)); cache.puts.length = 0; seeded.reads.length = 0;
   assertExactSuccess(plain(seeded.context.getHomeData_({}))); assert.equal(seeded.reads.length, 5); assert.equal(cache.puts.length, 1);
 });
 
@@ -233,7 +235,7 @@ test("Home cache becomes unreachable after the Place epoch changes", () => {
   properties.values.set("PLACE_PUBLIC_CACHE_EPOCH", "2");
   assert.deepEqual(plain(loaded.context.getHomeData_({ lang: "th" })), first);
   assert.equal(loaded.reads.length, reads * 2);
-  assert.equal(loaded.cache.puts.at(-1).key, "public:getHomeData:place-epoch:2:lang=th");
+  assert.equal(loaded.cache.puts.at(-1).key, "public:getHomeData:place-epoch:2:content-epoch:test:lang=th");
   assert.equal(JSON.stringify(first).includes("epoch"), false);
 });
 

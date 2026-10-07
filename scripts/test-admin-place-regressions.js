@@ -38,6 +38,8 @@ function exactActions(source) {
 
 function assertRouterBoundary(source) {
   const expected = [
+    "adminGetProducts", "adminGetProductDetail", "createProduct", "updateProduct", "deleteProduct",
+    "adminGetEvents", "adminGetEventDetail", "createEvent", "updateEvent", "deleteEvent",
     "submitReview", "adminLogin", "adminValidateSession", "adminLogout",
     "adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace",
     "adminInspectPlaceDependencies", "adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace",

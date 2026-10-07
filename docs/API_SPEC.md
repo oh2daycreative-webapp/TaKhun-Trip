@@ -2576,3 +2576,9 @@ API ของ **Takhun Trip** ต้องเรียบง่าย ใช้�
 - รองรับภาษาไทย/อังกฤษ
 - รองรับข้อมูลแผนที่และพิกัด
 - ไม่ทำระบบซับซ้อนเกิน MVP
+
+## M8 PR1 Phase A — implemented Product/Event Admin contract
+
+The [Phase A contract](M8_PHASE_A_CONTRACT.md) is authoritative for Product/Event Admin reads, writes, lifecycle, revisions, audit and failure behavior. It supersedes the historical examples in sections 7.12–7.19: create always makes a draft; updates/deletes require `expected_revision`; status assignments follow an explicit transition matrix. Existing action names are preserved, with `adminGetProductDetail` and `adminGetEventDetail` added. All ten actions use authenticated POST-body transport. All four Admin roles can read; only editor/super_admin can write.
+
+Product/Event list/detail, Home and Search cache keys now also include the Script Cache content generation. Existing Place epoch behavior is unchanged. See the contract for exact payload fields, safe error codes, verified-write/audit-warning semantics and Phase B reconciliation requirements. Products/Events UI is not implemented in Phase A.

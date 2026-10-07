@@ -201,6 +201,7 @@ function ProductService_cached_(action, parameters, loader) {
 function ProductService_cacheKey_(action, parameters) {
   var parts = ["public", action];
   if (action === "getProductDetail") parts.push(PlaceService_cacheEpochKey_());
+  parts.push(ContentCacheService_key_());
   Object.keys(parameters || {}).sort().forEach(function (key) {
     parts.push(key + "=" + encodeURIComponent(ProductService_trim_(parameters[key])));
   });

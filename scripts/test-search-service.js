@@ -72,6 +72,8 @@ function load(options = {}) {
       return rows[name] || [];
     }
   };
+  // Generation races and eviction are tested with the real helper in test-admin-content-service.js.
+  context.ContentCacheService_key_ = () => "content-epoch:test";
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(root, "apps-script", "Config.gs"), "utf8"), context, { filename: "apps-script/Config.gs" });
   serviceFiles.forEach((name) => vm.runInContext(fs.readFileSync(path.join(root, "apps-script", name), "utf8"), context, { filename: `apps-script/${name}` }));
@@ -143,10 +145,10 @@ test("NFC whitespace lowercase and effective language produce canonical cache ke
   const decomposed = "Cafe\u0301   NEEDLE";
   const first = load({ rows: { places: [], products: [], events: [], routes: [] } });
   required(first.context)({ keyword: `  ${decomposed} `, lang: "unknown", ignored: "x" });
-  assert.equal(first.cache.gets[0], "public:searchAll:place-epoch:1:keyword=caf%C3%A9%20needle:lang=th");
+  assert.equal(first.cache.gets[0], "public:searchAll:place-epoch:1:content-epoch:test:keyword=caf%C3%A9%20needle:lang=th");
   const second = load({ rows: { places: [], products: [], events: [], routes: [] } });
   required(second.context)({ keyword: "CAFÉ NEEDLE", lang: "en", domain: "gallery" });
-  assert.equal(second.cache.gets[0], "public:searchAll:place-epoch:1:keyword=caf%C3%A9%20needle:lang=en");
+  assert.equal(second.cache.gets[0], "public:searchAll:place-epoch:1:content-epoch:test:keyword=caf%C3%A9%20needle:lang=en");
   assert.deepEqual(second.builderCalls.map((call) => call.parameters.lang), ["en", "en", "en", "en"]);
 });
 
@@ -245,7 +247,7 @@ test("cache hit miss exact validation TTL failures and errors follow contract", 
     JSON.stringify({ ok: true, data: { places: [], products: [], events: [], routes: [], total: "0" }, message: "success" })
   ];
   invalidVariants.forEach((cached) => {
-    const cache = createCache(); cache.values.set("public:searchAll:place-epoch:1:keyword=needle:lang=th", cached);
+    const cache = createCache(); cache.values.set("public:searchAll:place-epoch:1:content-epoch:test:keyword=needle:lang=th", cached);
     const recovery = load({ cache, rows: { places: [], products: [], events: [], routes: [] } });
     assertExactSuccess(plain(required(recovery.context)({ keyword: "needle" }))); assert.equal(recovery.reads.length, 4); assert.equal(cache.puts.length, 1);
   });

@@ -51,6 +51,8 @@ function load(options = {}) {
     PropertiesService: { getScriptProperties: () => propertyStore },
     readSheetObjects_: options.readSheetObjects || ((name) => { reads.push(name); return source[name]; })
   };
+  // Generation races and eviction are tested with the real helper in test-admin-content-service.js.
+  context.ContentCacheService_key_ = () => "content-epoch:test";
   vm.createContext(context);
   vm.runInContext(read("apps-script/Config.gs"), context, { filename: "apps-script/Config.gs" });
   vm.runInContext(read("apps-script/PlaceService.gs"), context, { filename: "apps-script/PlaceService.gs" });

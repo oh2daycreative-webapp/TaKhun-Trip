@@ -1122,3 +1122,25 @@ git diff --check
 ## 29. M7 human-only release gates
 
 Local implementation/test/build completion does not perform remote work. The following remain pending human operations: `clasp push`; Apps Script deployment; Script Property setup/change; production or staging Sheet backup/schema setup; legacy migration dry-run, execution, verification, and rollback exercise; staging/production manual QA; production release; branch push; PR; and merge. Do not mark any as complete without recorded human evidence.
+
+## 30. M8 PR1 Phase A local backend regressions
+
+`node scripts/test-admin-content-service.js` uses in-memory Sheets, locks and cache with the real domain services, SheetService, Router, CryptoService, public readers and AuthService session validation. It is mandatory in `npm test`.
+
+- Check all 25 status pairs per domain, retained soft deletes, safe restore and rejected combined restore/retirement edits.
+- Check all roles, invalid/expired/revoked/inactive sessions, fabricated authority, and auth/revision rechecks after lock acquisition.
+- Check exact payloads, every editable field, domain enums, dates/times, numeric/boolean types, references, duplicate IDs, formulas and unsafe URLs.
+- Check deterministic revisions, stale editors, preflight schema/formats, one-row writes and complete read-back, no retries, uncertain create/update/delete results, audit warnings and lock-release failures.
+- Check actual Product/Event list/detail, Home and Search freshness, cache generation eviction, in-flight readers, public visibility and lost-response reconciliation.
+- Retain Admin Places and Product/Event/Home/Search public regressions, explicit Router allowlist and body-token transport checks.
+
+Required commands: `node scripts/test-admin-content-service.js`, `cmd /c npm test`, `cmd /c npm run build`, `node scripts/test-apps-script.js`, `git diff --check`. The Apps Script suite compiles all `.gs` files and checks unique function names and static routing. Remote Sheets format/schema QA and Phase B browser UI testing remain deferred; do not infer those from local PASS results.
+
+## 31. M8 PR1 Phase B local UI regressions
+
+The mandatory runner now includes `test-admin-content-api.js`, `test-admin-content-model.js` and `test-admin-content-ui.js`. These exercise exact action/body contracts, strict response validation, roles, field mapping, lifecycle/revisions, no retries, double-submit protection, conflict/unknown reconciliation, persistent pending-create markers, preserved unsaved edits, audit warnings, paginated reads, dates/times, Boolean/numeric/URL validation, safe text rendering and labelled responsive UI structure.
+
+Retain all Admin Places and public regressions. Run all three focused suites, `cmd /c npm test`, `cmd /c npm run build`, JavaScript syntax, Apps Script static and `git diff --check`. Use [M8_PHASE_B_QA.md](M8_PHASE_B_QA.md) for the precise later non-production role, lifecycle, failure, keyboard, touch and mobile matrix. Local fixture rendering does not substitute for that remote integration QA.
+
+## 32. M8 PR1 Phase B.1 remediation regressions
+The mandatory Phase B runner includes the narrow native-browser `test-admin-content-browser.js`. It covers Product/Event related-Place Enter isolation, Save behavior, intentional numeric blanks, native `badInput`, field feedback/focus and valid numeric normalization. API contracts cover exact legacy content metadata `YYYY-MM-DD HH:mm:ss` for Product/Event list/detail while authentication timestamps remain strict ISO. Lifecycle expectations use a separately declared literal matrix for both domains.

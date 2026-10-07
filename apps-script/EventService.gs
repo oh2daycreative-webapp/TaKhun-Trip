@@ -168,7 +168,7 @@ function EventService_cached_(action, parameters, loader) {
   return response;
 }
 
-function EventService_cacheKey_(action, parameters) { var parts = ["public", action]; if (action === "getEventDetail") parts.push(PlaceService_cacheEpochKey_()); Object.keys(parameters || {}).sort().forEach(function (key) { parts.push(key + "=" + encodeURIComponent(EventService_trim_(parameters[key]))); }); return parts.join(":"); }
+function EventService_cacheKey_(action, parameters) { var parts = ["public", action]; if (action === "getEventDetail") parts.push(PlaceService_cacheEpochKey_()); parts.push(ContentCacheService_key_()); Object.keys(parameters || {}).sort().forEach(function (key) { parts.push(key + "=" + encodeURIComponent(EventService_trim_(parameters[key]))); }); return parts.join(":"); }
 function EventService_optionalBoolean_(value) { if (value === undefined || value === null || EventService_trim_(value) === "") return { ok: true, hasValue: false, value: false }; if (value === true || value === 1) return { ok: true, hasValue: true, value: true }; if (value === false || value === 0) return { ok: true, hasValue: true, value: false }; var text = EventService_lower_(value); if (text === "true" || text === "1") return { ok: true, hasValue: true, value: true }; if (text === "false" || text === "0") return { ok: true, hasValue: true, value: false }; return { ok: false, hasValue: false, value: false }; }
 function EventService_storedBoolean_(value) { var result = EventService_optionalBoolean_(value); return result.ok && result.hasValue ? result.value : false; }
 function EventService_localized_(row, field, lang) { return EventService_trim_(row[field + "_" + lang]) || EventService_trim_(row[field + "_th"]); }

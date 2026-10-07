@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="../css/components.css">
   <link rel="stylesheet" href="../css/mobile.css">
   <link rel="stylesheet" href="../css/admin.css">
+  <link rel="stylesheet" href="../css/admin-content.css">
 </head>
 <body class="admin-body admin-auth-pending" data-admin-page="products">
   <a class="admin-skip-link" href="#admin-main" data-admin-skip hidden>ข้ามไปยังเนื้อหาหลัก</a>
@@ -53,8 +54,8 @@
     <div class="admin-shell__backdrop" data-admin-backdrop hidden></div>
 
     <main class="admin-main" id="admin-main" data-admin-main tabindex="-1" aria-labelledby="page-title">
-      <section class="placeholder" data-admin-content hidden aria-hidden="true">
-        <p>หน้านี้อยู่ระหว่างการจัดเตรียม</p>
+      <section class="admin-content-manager" data-admin-content hidden aria-hidden="true">
+        <p>กำลังโหลดรายการสินค้าและบริการ</p>
       </section>
     </main>
   </div>
@@ -63,9 +64,11 @@
   <script src="js/admin-api.js" defer></script>
   <script src="js/admin-auth.js" defer></script>
   <script src="js/admin-shell.js" defer></script>
+  <script src="js/admin-content-model.js" defer></script>
+  <script src="js/admin-content-ui.js" defer></script>
   <script>
     window.addEventListener("DOMContentLoaded", function () {
-      window.TakhunAdminShell.init();
+      window.TakhunAdminContentUI.init();
     });
   </script>
 </body>

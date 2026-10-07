@@ -1025,3 +1025,9 @@ M7 Place status is exactly `draft`, `published`, or `archived`. Create produces 
 - รองรับพิกัดและแผนที่
 - รองรับระบบ Admin ที่ใช้งานจริง
 - ไม่สร้างโครงสร้างซับซ้อนเกิน MVP
+
+## M8 PR1 Phase A — Product/Event write interpretation
+
+The [implemented Phase A contract](M8_PHASE_A_CONTRACT.md) uses the existing Product and Event columns only. No draft table, version column, end-date field, Event sort order, or new metadata column is introduced. Product `price_range` remains text; Event scheduling uses one `event_date` and optional same-day times. Five stored statuses remain `draft`, `published`, `hidden`, `archived`, `deleted`; archive/delete retain rows and restore returns to draft only.
+
+IDs/timestamps are server-managed, and revisions are computed from identity/status/all editable fields without storage columns. Audits use the already-established M7 `activity_logs` columns and aliases with entity type product/event. Writers require schema and destination-format preflight; nonempty strings use plain text (`@`), booleans use proven `0` or `0.###############` formats. Formula-bearing rows fail closed. No request changes schema or formats, and no remote setup was performed in this phase.
