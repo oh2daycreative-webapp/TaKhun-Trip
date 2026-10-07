@@ -31,6 +31,8 @@ function properties(initial = "1") { const values = new Map(); if (initial !== n
 function load(options = {}) {
   const source = data(); const store = options.cache || cache(); const propertyStore = options.properties || properties(); const reads = [];
   const context = { JSON, Object, Math, Number, String, Array, Date, RegExp, encodeURIComponent, isFinite, CacheService: { getScriptCache: () => store }, PropertiesService: { getScriptProperties: () => propertyStore }, readSheetObjects_: (name) => { reads.push(name); return source[name]; } };
+  // Generation races and eviction are tested with the real helper in test-admin-content-service.js.
+  context.ContentCacheService_key_ = () => "content-epoch:test";
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(root, "apps-script/Config.gs"), "utf8"), context, { filename: "apps-script/Config.gs" });
   vm.runInContext(fs.readFileSync(path.join(root, "apps-script/PlaceService.gs"), "utf8"), context, { filename: "apps-script/PlaceService.gs" });

@@ -186,6 +186,8 @@ if ($LASTEXITCODE -ne 0) { throw "SheetService verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin Place schema verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-place-service.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Place service verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-content-service.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Product/Event contracts verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-schema.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin auth schema verification failed." }
 & node (Join-Path $PSScriptRoot "test-settings-service.js")

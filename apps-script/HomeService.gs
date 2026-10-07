@@ -25,7 +25,7 @@ function getHomeData_(parameters) {
   var cache = null;
 
   try {
-    cacheKey = "public:getHomeData:" + PlaceService_cacheEpochKey_() + ":lang=" + lang;
+    cacheKey = "public:getHomeData:" + PlaceService_cacheEpochKey_() + ":" + ContentCacheService_key_() + ":lang=" + lang;
     cache = CacheService.getScriptCache();
     var cached = cache.get(cacheKey);
     if (cached) {

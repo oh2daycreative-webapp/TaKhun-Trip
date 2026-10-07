@@ -58,6 +58,16 @@ function routeRequest_(method, event) {
         if (action === "adminLogin") return createJsonResponse_(adminLogin_(body.payload));
         if (action === "adminValidateSession") return createJsonResponse_(adminValidateSession_(body.token));
         if (action === "adminLogout") return createJsonResponse_(adminLogout_(body.token));
+        if (action === "adminGetProducts") return createJsonResponse_(adminGetProducts_(body.token, body.payload));
+        if (action === "adminGetProductDetail") return createJsonResponse_(adminGetProductDetail_(body.token, body.payload));
+        if (action === "createProduct") return createJsonResponse_(createProduct_(body.token, body.payload));
+        if (action === "updateProduct") return createJsonResponse_(updateProduct_(body.token, body.payload));
+        if (action === "deleteProduct") return createJsonResponse_(deleteProduct_(body.token, body.payload));
+        if (action === "adminGetEvents") return createJsonResponse_(adminGetEvents_(body.token, body.payload));
+        if (action === "adminGetEventDetail") return createJsonResponse_(adminGetEventDetail_(body.token, body.payload));
+        if (action === "createEvent") return createJsonResponse_(createEvent_(body.token, body.payload));
+        if (action === "updateEvent") return createJsonResponse_(updateEvent_(body.token, body.payload));
+        if (action === "deleteEvent") return createJsonResponse_(deleteEvent_(body.token, body.payload));
         if (action === "adminGetPlaces") return createJsonResponse_(adminGetPlaces_(body.token, body.payload));
         if (action === "adminGetPlaceDetail") return createJsonResponse_(adminGetPlaceDetail_(body.token, body.payload));
         if (action === "adminCreatePlace") return createJsonResponse_(adminCreatePlace_(body.token, body.payload));

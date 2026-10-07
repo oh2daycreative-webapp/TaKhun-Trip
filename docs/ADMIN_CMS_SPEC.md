@@ -1329,3 +1329,9 @@ Admin / CMS ของ **Takhun Trip** ต้องเป็นระบบที
 - ดูแลต่อได้จริงหลังส่งมอบโครงการ
 
 เป้าหมายสำคัญคือให้ผู้ดูแลสามารถจัดการข้อมูลของเว็บแอปได้เอง โดยไม่ต้องแก้โค้ด
+
+## M8 PR1 Phase A — backend readiness only
+
+Product/Event Admin backend actions are implemented as specified in the [permanent Phase A contract](M8_PHASE_A_CONTRACT.md). The Products/Events pages remain preparation placeholders; no editor scripts or controls have been delivered. Historical UI plans above remain plans.
+
+Phase B must use server-authoritative roles and exact field contracts, retain the detail revision for every update/lifecycle action, handle `CONFLICT` without overwriting, show audit warnings, and reconcile uncertain/lost responses through list/detail reads without automatic mutation retry. Create produces draft; archived/deleted content restores only to draft. Published edits are immediately public; these domains have no Place-style separate draft snapshot.

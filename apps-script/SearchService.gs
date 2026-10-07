@@ -201,7 +201,7 @@ function SearchService_language_(value) {
 }
 
 function SearchService_cacheKey_(parameters) {
-  return "public:searchAll:" + PlaceService_cacheEpochKey_() + ":keyword=" + encodeURIComponent(parameters.canonicalKeyword) + ":lang=" + parameters.lang;
+  return "public:searchAll:" + PlaceService_cacheEpochKey_() + ":" + ContentCacheService_key_() + ":keyword=" + encodeURIComponent(parameters.canonicalKeyword) + ":lang=" + parameters.lang;
 }
 
 function SearchService_validResponse_(response) {
