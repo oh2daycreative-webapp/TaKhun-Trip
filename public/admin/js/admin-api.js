@@ -418,6 +418,12 @@
 
   function validateSuccess(body, data) {
     const action = body.action;
+    const domain = contentDomain(action);
+    if (domain) {
+      const validated = safeContentResponse(data, body, domain);
+      if (!validated) throw safeError("MALFORMED_RESPONSE");
+      return validated;
+    }
     if (action === "adminLogin") {
       if (!exactKeys(data, ["admin", "token", "expires_at"])) throw safeError("MALFORMED_RESPONSE");
       const admin = safeAdmin(data.admin);
@@ -462,11 +468,21 @@
       }
       return validateSuccess(body, result.data);
     }
+    const domain = contentDomain(body.action);
+    if (domain && result.error && result.error.code === "OUTCOME_UNKNOWN") {
+      if (!exactKeys(result, ["ok", "error"]) || !exactKeys(result.error, ["code", "message", "retryable", domain.id]) ||
+          typeof result.error.message !== "string" || result.error.retryable !== false || !validContentId(result.error[domain.id]) ||
+          !/^(create|update|delete)/.test(body.action) || body.payload[domain.id] && body.payload[domain.id] !== result.error[domain.id]) throw safeError("MALFORMED_RESPONSE");
+      const error = safeError("OUTCOME_UNKNOWN");
+      error.retryable = false;
+      error[domain.id] = result.error[domain.id];
+      throw error;
+    }
     if (!exactKeys(result, ["ok", "error"]) || !exactKeys(result.error, ["code", "message"]) ||
         typeof result.error.code !== "string" || !result.error.code || typeof result.error.message !== "string") {
       throw safeError("MALFORMED_RESPONSE");
     }
-    const code = BACKEND_ERROR_CODES.includes(result.error.code) ? result.error.code : "SERVER_ERROR";
+    const code = BACKEND_ERROR_CODES.includes(result.error.code) || domain && ["INVALID_TRANSITION", "DUPLICATE_ID"].includes(result.error.code) ? result.error.code : "SERVER_ERROR";
     throw safeError(code);
   }
 
@@ -529,8 +545,141 @@
   function archivePlace(token, payload) { return placeRequest("adminArchivePlace", token, versionPayload(payload, true)); }
   function restorePlace(token, payload) { return placeRequest("adminRestorePlace", token, versionPayload(payload, false)); }
 
+  const PRODUCT_DOMAIN = Object.freeze({ id: "product_id", title: "name_th", category: "category",
+    fields: "name_th name_en category producer_name related_place_id district description_th description_en price_range phone contact_url google_maps_url latitude longitude image_url tags is_featured sort_order".split(" "),
+    required: ["name_th", "description_th", "category"], categories: "food souvenir herbal honey handicraft fruit community_activity tourism_service accommodation transport".split(" ") });
+  const EVENT_DOMAIN = Object.freeze({ id: "event_id", title: "title_th", category: "event_type",
+    fields: "title_th title_en event_type event_date start_time end_time location_th location_en related_place_id description_th description_en image_url contact_name contact_phone register_url google_maps_url latitude longitude is_featured".split(" "),
+    required: ["title_th", "description_th", "location_th", "event_type", "event_date"], categories: "launch festival community_market learning seasonal otop tourism other".split(" ") });
+  const CONTENT_STATUSES = ["draft", "published", "hidden", "archived", "deleted"];
+  function contentDomain(action) {
+    if (["adminGetProducts", "adminGetProductDetail", "createProduct", "updateProduct", "deleteProduct"].includes(action)) return PRODUCT_DOMAIN;
+    if (["adminGetEvents", "adminGetEventDetail", "createEvent", "updateEvent", "deleteEvent"].includes(action)) return EVENT_DOMAIN;
+    return null;
+  }
+  function validContentTimestamp(value) {
+    if (value === "" || validTimestamp(value)) return true;
+    const match = /^(\d{4})-(\d{2})-(\d{2}) ([01]\d|2[0-3]):([0-5]\d):([0-5]\d)$/.exec(value);
+    if (!match || match[1] === "0000") return false;
+    const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
+    const days = [31, year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    return month >= 1 && month <= 12 && day >= 1 && day <= days[month - 1];
+  }
+  function validContentId(value) { return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(value); }
+  function validRevision(value) { return typeof value === "string" && /^r1-[a-f0-9]{64}$/.test(value); }
+  function contentText(value, maximum = 20000) {
+    if (!validPlaceText(value, 0, maximum) || /^[=+@\-']/.test(value.trim())) validationError();
+    return value.trim();
+  }
+  function contentUrl(value) {
+    const text = contentText(value, 2048);
+    if (!text) return text;
+    if (!validUrl(text) || /\s|%(?:0[0-9a-f]|1[0-9a-f]|7f)/i.test(text)) validationError();
+    const host = /^https?:\/\/([^/?#]+)/i.exec(text)[1].replace(/:[0-9]+$/, "");
+    const labels = host.split(".");
+    if (labels.length < 2 || (/^[0-9.]+$/.test(host) ? labels.length !== 4 || labels.some(label => !/^(?:0|[1-9][0-9]{0,2})$/.test(label) || Number(label) > 255) : !/^[a-z]/i.test(labels[labels.length - 1]))) validationError();
+    return text;
+  }
+  function contentFields(source, domain, complete) {
+    const result = {};
+    for (const key of domain.fields) {
+      if (!Object.prototype.hasOwnProperty.call(source, key)) {
+        if (complete) result[key] = key === "is_featured" ? false : "";
+        continue;
+      }
+      const value = source[key];
+      if (key === "is_featured") { if (typeof value !== "boolean") validationError(); result[key] = value; }
+      else if (["latitude", "longitude", "sort_order"].includes(key)) {
+        if (value !== "" && (typeof value !== "number" || !Number.isFinite(value) ||
+          (key === "sort_order" ? !Number.isSafeInteger(value) || value < 0 : Math.abs(value) > (key === "latitude" ? 90 : 180)))) validationError();
+        result[key] = value;
+      } else result[key] = key.endsWith("_url") ? contentUrl(value) : contentText(value);
+      if (domain.required.includes(key) && !result[key]) validationError();
+      if (key === domain.category && !domain.categories.includes(result[key])) validationError();
+      if (key === "district" && !["", "ban_ta_khun", "khiri_rat_nikhom", "phanom"].includes(result[key])) validationError();
+      if (key === "related_place_id" && result[key] && !validContentId(result[key])) validationError();
+      if (key === "event_date") {
+        const date = result[key];
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date.startsWith("0000") || !validTimestamp(date + "T00:00:00.000Z")) validationError();
+      }
+      if (["start_time", "end_time"].includes(key) && result[key] && !/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(result[key])) validationError();
+      if (key === "tags" && result[key]) {
+        const tags = result[key].split("|").map(tag => contentText(tag, 200));
+        if (tags.length > 100 || tags.some((tag, index) => !tag || tags.indexOf(tag) !== index)) validationError();
+        result[key] = tags.join("|");
+      }
+    }
+    if (complete && domain.required.some(key => !result[key])) validationError();
+    if ("latitude" in result && "longitude" in result && (result.latitude === "") !== (result.longitude === "")) validationError();
+    if ("start_time" in result && "end_time" in result && result.end_time && (!result.start_time || result.end_time <= result.start_time)) validationError();
+    return result;
+  }
+  function contentRequestPayload(payload, domain, operation) {
+    if (operation === "list") {
+      const source = requestObject(payload === undefined ? {} : payload, ["keyword", "status", "page", "page_size", domain.category], [], false), result = {};
+      for (const key of Object.keys(source)) {
+        const value = source[key];
+        if (["page", "page_size"].includes(key)) { if (!Number.isSafeInteger(value) || value < 1 || value > (key === "page" ? 1000000 : 100)) validationError(); result[key] = value; }
+        else { result[key] = contentText(value, key === "keyword" ? 200 : 20000); if (key === "status" && result[key] && !CONTENT_STATUSES.includes(result[key]) || key === domain.category && result[key] && !domain.categories.includes(result[key])) validationError(); }
+      }
+      return result;
+    }
+    const keys = operation === "detail" ? [domain.id] : operation === "delete" ? [domain.id, "expected_revision"] : operation === "create" ? domain.fields : [domain.id, "expected_revision", "status", ...domain.fields];
+    const required = operation === "create" ? domain.required : operation === "detail" ? [domain.id] : [domain.id, "expected_revision"];
+    const source = requestObject(payload, keys, required, false), result = {};
+    if (operation !== "create") { if (!validContentId(source[domain.id])) validationError(); result[domain.id] = source[domain.id]; }
+    if (["update", "delete"].includes(operation)) { if (!validRevision(source.expected_revision)) validationError(); result.expected_revision = source.expected_revision; }
+    if (operation === "update" && Object.keys(source).length < 3) validationError();
+    if (Object.prototype.hasOwnProperty.call(source, "status")) { if (!CONTENT_STATUSES.includes(source.status)) validationError(); result.status = source.status; }
+    if (["create", "update"].includes(operation)) {
+      contentFields(source, domain, operation === "create");
+      Object.assign(result, contentFields(source, domain, false));
+    }
+    return result;
+  }
+  function safeContentResponse(data, body, domain) {
+    if (body.action === "adminGetProducts" || body.action === "adminGetEvents") {
+      if (!exactKeys(data, ["items", "page", "page_size", "total", "total_pages"]) || !Array.isArray(data.items) || !validPagination(data) || data.page > 1000000) return null;
+      const items = data.items.map(item => safeContentRecord(item, domain, false, false));
+      if (items.some(item => !item) || new Set(items.map(item => item[domain.id])).size !== items.length) return null;
+      return { items, total: data.total, page: data.page, page_size: data.page_size, total_pages: data.total_pages };
+    }
+    const detail = body.action.includes("Detail"), result = safeContentRecord(data, domain, detail, !detail);
+    if (!result || body.payload[domain.id] && result[domain.id] !== body.payload[domain.id]) return null;
+    if (body.action.startsWith("create") && result.status !== "draft" || body.action.startsWith("delete") && result.status !== "deleted" || body.payload.status && result.status !== body.payload.status) return null;
+    return result;
+  }
+  function safeContentRecord(data, domain, detail, mutation) {
+    const keys = [domain.id, "status", "revision", "created_at", "updated_at", ...(detail ? ["content"] : [domain.title, domain.category]), ...(mutation ? ["audit_status"] : [])];
+    if (!exactKeys(data, keys) || !validContentId(data[domain.id]) || !CONTENT_STATUSES.includes(data.status) || !validRevision(data.revision) ||
+        ![data.created_at, data.updated_at].every(validContentTimestamp) || mutation && !["recorded", "unconfirmed"].includes(data.audit_status)) return null;
+    // Stored legacy content can be invalid for publishing. Preserve safely typed values for repair.
+    if (detail) {
+      if (!exactKeys(data.content, domain.fields)) return null;
+      for (const key of domain.fields) {
+        const value = data.content[key];
+        if (key === "is_featured" ? typeof value !== "boolean" : ["latitude", "longitude", "sort_order"].includes(key) ? value !== "" && (typeof value !== "number" || !Number.isFinite(value)) : !validPlaceText(value, 0, 20000)) return null;
+      }
+      return { ...data, content: { ...data.content } };
+    }
+    if (!validPlaceText(data[domain.title], 0, 20000) || !validPlaceText(data[domain.category], 0, 20000)) return null;
+    return { ...data };
+  }
+  function getProducts(token, payload) { return placeRequest("adminGetProducts", token, contentRequestPayload(payload, PRODUCT_DOMAIN, "list")); }
+  function getProductDetail(token, payload) { return placeRequest("adminGetProductDetail", token, contentRequestPayload(payload, PRODUCT_DOMAIN, "detail")); }
+  function createProduct(token, payload) { return placeRequest("createProduct", token, contentRequestPayload(payload, PRODUCT_DOMAIN, "create")); }
+  function updateProduct(token, payload) { return placeRequest("updateProduct", token, contentRequestPayload(payload, PRODUCT_DOMAIN, "update")); }
+  function deleteProduct(token, payload) { return placeRequest("deleteProduct", token, contentRequestPayload(payload, PRODUCT_DOMAIN, "delete")); }
+  function getEvents(token, payload) { return placeRequest("adminGetEvents", token, contentRequestPayload(payload, EVENT_DOMAIN, "list")); }
+  function getEventDetail(token, payload) { return placeRequest("adminGetEventDetail", token, contentRequestPayload(payload, EVENT_DOMAIN, "detail")); }
+  function createEvent(token, payload) { return placeRequest("createEvent", token, contentRequestPayload(payload, EVENT_DOMAIN, "create")); }
+  function updateEvent(token, payload) { return placeRequest("updateEvent", token, contentRequestPayload(payload, EVENT_DOMAIN, "update")); }
+  function deleteEvent(token, payload) { return placeRequest("deleteEvent", token, contentRequestPayload(payload, EVENT_DOMAIN, "delete")); }
+
   global.TakhunAdminApi = Object.freeze({
     login, validateSession, logout, getPlaces, getPlaceDetail, getPlaceMediaOptions, inspectPlaceDependencies,
-    createPlace, savePlaceDraft, publishPlace, unpublishPlace, archivePlace, restorePlace
+    createPlace, savePlaceDraft, publishPlace, unpublishPlace, archivePlace, restorePlace,
+    getProducts, getProductDetail, createProduct, updateProduct, deleteProduct,
+    getEvents, getEventDetail, createEvent, updateEvent, deleteEvent
   });
 })(window);

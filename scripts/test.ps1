@@ -188,6 +188,14 @@ if ($LASTEXITCODE -ne 0) { throw "Admin Place schema verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin Place service verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-content-service.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Product/Event contracts verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-content-api.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Product/Event API verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-content-model.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Product/Event model verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-content-ui.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Product/Event UI verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-content-browser.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Product/Event native browser verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-schema.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin auth schema verification failed." }
 & node (Join-Path $PSScriptRoot "test-settings-service.js")

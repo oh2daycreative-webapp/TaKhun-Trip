@@ -1135,3 +1135,12 @@ Local implementation/test/build completion does not perform remote work. The fol
 - Retain Admin Places and Product/Event/Home/Search public regressions, explicit Router allowlist and body-token transport checks.
 
 Required commands: `node scripts/test-admin-content-service.js`, `cmd /c npm test`, `cmd /c npm run build`, `node scripts/test-apps-script.js`, `git diff --check`. The Apps Script suite compiles all `.gs` files and checks unique function names and static routing. Remote Sheets format/schema QA and Phase B browser UI testing remain deferred; do not infer those from local PASS results.
+
+## 31. M8 PR1 Phase B local UI regressions
+
+The mandatory runner now includes `test-admin-content-api.js`, `test-admin-content-model.js` and `test-admin-content-ui.js`. These exercise exact action/body contracts, strict response validation, roles, field mapping, lifecycle/revisions, no retries, double-submit protection, conflict/unknown reconciliation, persistent pending-create markers, preserved unsaved edits, audit warnings, paginated reads, dates/times, Boolean/numeric/URL validation, safe text rendering and labelled responsive UI structure.
+
+Retain all Admin Places and public regressions. Run all three focused suites, `cmd /c npm test`, `cmd /c npm run build`, JavaScript syntax, Apps Script static and `git diff --check`. Use [M8_PHASE_B_QA.md](M8_PHASE_B_QA.md) for the precise later non-production role, lifecycle, failure, keyboard, touch and mobile matrix. Local fixture rendering does not substitute for that remote integration QA.
+
+## 32. M8 PR1 Phase B.1 remediation regressions
+The mandatory Phase B runner includes the narrow native-browser `test-admin-content-browser.js`. It covers Product/Event related-Place Enter isolation, Save behavior, intentional numeric blanks, native `badInput`, field feedback/focus and valid numeric normalization. API contracts cover exact legacy content metadata `YYYY-MM-DD HH:mm:ss` for Product/Event list/detail while authentication timestamps remain strict ISO. Lifecycle expectations use a separately declared literal matrix for both domains.

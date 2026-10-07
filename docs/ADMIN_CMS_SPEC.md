@@ -1332,6 +1332,20 @@ Admin / CMS ของ **Takhun Trip** ต้องเป็นระบบที
 
 ## M8 PR1 Phase A — backend readiness only
 
+Historical Phase A scope below is superseded for UI readiness by the Phase B section following it; its backend contract remains unchanged.
+
 Product/Event Admin backend actions are implemented as specified in the [permanent Phase A contract](M8_PHASE_A_CONTRACT.md). The Products/Events pages remain preparation placeholders; no editor scripts or controls have been delivered. Historical UI plans above remain plans.
 
 Phase B must use server-authoritative roles and exact field contracts, retain the detail revision for every update/lifecycle action, handle `CONFLICT` without overwriting, show audit warnings, and reconcile uncertain/lost responses through list/detail reads without automatic mutation retry. Create produces draft; archived/deleted content restores only to draft. Published edits are immediately public; these domains have no Place-style separate draft snapshot.
+
+## M8 PR1 Phase B — Product/Event Admin UI
+
+Products and Events now have in-page list and editor views within their existing authenticated shell. Lists use 20-row server pagination and only keyword, status and category/type filters. Current-page protected detail reads supply featured and Event schedule summaries omitted from the list projection. Manage opens authoritative detail before any lifecycle action; no mutation uses a list revision.
+
+Viewer/reviewer receive read-only details. Editor/super_admin receive create, editable fields in draft/published/hidden, and the exact Phase A lifecycle actions. Native confirmations guard lifecycle changes; dirty forms must be saved or deliberately reloaded first. Related Place search reuses paginated `adminGetPlaces`, offers draft/published entries and retains the existing relation until changed. The server still validates references and publication eligibility.
+
+Explicit API methods use the existing authenticated POST-body transport. All writes retain returned identity/state/revision; conflict and uncertain outcomes preserve form values and block further writes until authoritative reload. Creation records a sessionStorage pending marker before dispatch and requires explicit list/detail reconciliation after uncertainty, including page reload while pending. Browser storage failure prevents creation. This marker is per browser session, not a server exactly-once guarantee or a cross-device ledger. Audit-unconfirmed success warns without retrying the mutation.
+
+The UI displays Thai field errors, native Boolean controls, paired numeric coordinates and textual Gregorian date/same-day time validation without timezone conversion. Cards, filters and forms share scoped responsive styles, visible focus, labelled controls and live status feedback. URLs remain editable text and are never inserted into active links or remote image elements.
+
+See [non-production QA](M8_PHASE_B_QA.md). Local completion does not claim M8 complete, PR1 merged or deployment completed.

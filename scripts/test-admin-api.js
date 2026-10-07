@@ -363,7 +363,7 @@ function test(name, run) {
 
 test("exports exactly the frozen auth and explicit Place facade surface", async () => {
   const { api } = loadAdminApi();
-  assert.deepEqual(Object.keys(api).sort(), ["login", "logout", "validateSession", ...Object.keys(PLACE_METHODS)].sort());
+  assert.deepEqual(Object.keys(api).sort(), ["login", "logout", "validateSession", ...Object.keys(PLACE_METHODS), "getProducts", "getProductDetail", "createProduct", "updateProduct", "deleteProduct", "getEvents", "getEventDetail", "createEvent", "updateEvent", "deleteEvent"].sort());
   assert.equal(Object.isFrozen(api), true);
   for (const name of Object.keys(api)) assert.equal(typeof api[name], "function");
   for (const forbidden of ["request", "call", "rawFetch", "dispatch"]) assert.equal(forbidden in api, false);
@@ -790,7 +790,7 @@ test("normalizes every documented backend code and clears its exact timer", asyn
 
 test("backend-code assertions reject an executable arbitrary-code acceptance mutation", async () => {
   const source = mutatedSource(
-    "    const code = BACKEND_ERROR_CODES.includes(result.error.code) ? result.error.code : \"SERVER_ERROR\";",
+    "    const code = BACKEND_ERROR_CODES.includes(result.error.code) || domain && [\"INVALID_TRANSITION\", \"DUPLICATE_ID\"].includes(result.error.code) ? result.error.code : \"SERVER_ERROR\";",
     "    const code = typeof result.error.code === \"string\" ? result.error.code : \"SERVER_ERROR\";"
   );
   await proveContractRejects(() => assertBackendErrorCleanup("INTERNAL_DATABASE_DETAIL", source));
