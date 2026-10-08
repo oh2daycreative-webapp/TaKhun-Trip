@@ -74,6 +74,7 @@ $required = @(
   "apps-script/CategoryService.gs",
   "apps-script/PlaceService.gs",
   "apps-script/RouteService.gs",
+  "apps-script/AdminRouteService.gs",
   "apps-script/ProductService.gs",
   "apps-script/EventService.gs",
   "apps-script/GalleryService.gs"
@@ -83,6 +84,7 @@ $required = @(
   "scripts/test-admin-place-schema.js",
   "scripts/test-admin-place-service.js",
   "scripts/test-admin-place-media.js",
+  "scripts/test-admin-route-service.js",
   "scripts/test-admin-places.js",
   "scripts/test-admin-place-regressions.js"
 )
@@ -188,6 +190,8 @@ if ($LASTEXITCODE -ne 0) { throw "Admin Place schema verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin Place service verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-content-service.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Product/Event contracts verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-route-service.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Route service verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-content-api.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Product/Event API verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-content-model.js")

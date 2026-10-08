@@ -55,11 +55,26 @@ function makeData() {
 function createCache(seed = {}) {
   const values = new Map(Object.entries(seed));
   const puts = [];
+  const removes = [];
+
   return {
     values,
     puts,
-    get(key) { return values.has(key) ? values.get(key) : null; },
-    put(key, value, ttl) { puts.push({ key, value, ttl }); values.set(key, value); }
+    removes,
+
+    get(key) {
+      return values.has(key) ? values.get(key) : null;
+    },
+
+    put(key, value, ttl) {
+      puts.push({ key, value, ttl });
+      values.set(key, value);
+    },
+
+    remove(key) {
+      removes.push(key);
+      values.delete(key);
+    }
   };
 }
 
@@ -74,10 +89,42 @@ function loadBackend(options = {}) {
   const cache = options.cache || createCache();
   const properties = options.properties || createProperties();
   const reads = [];
+  let lockHeld = false;
+  let uuidCounter = 0;
   const context = {
     JSON, Object, Math, Number, String, Array, Date, RegExp, encodeURIComponent, isFinite,
-    CacheService: { getScriptCache: () => cache },
-    PropertiesService: { getScriptProperties: () => properties },
+CacheService: {
+  getScriptCache: () => cache
+},
+
+LockService: {
+  getScriptLock: () => ({
+    tryLock() {
+      if (lockHeld) return false;
+      lockHeld = true;
+      return true;
+    },
+
+    releaseLock() {
+      lockHeld = false;
+    }
+  })
+},
+
+Utilities: {
+  getUuid() {
+    uuidCounter += 1;
+
+    return (
+      "00000000-0000-4000-8000-" +
+      String(uuidCounter).padStart(12, "0")
+    );
+  }
+},
+
+PropertiesService: {
+  getScriptProperties: () => properties
+},
     ContentService: {
       MimeType: { JSON: "application/json" },
       createTextOutput(text) { return { text, mime: "", setMimeType(mime) { this.mime = mime; return this; } }; }
@@ -91,6 +138,7 @@ function loadBackend(options = {}) {
   vm.createContext(context);
   vm.runInContext(read("apps-script/Config.gs"), context, { filename: "apps-script/Config.gs" });
   vm.runInContext(read("apps-script/ApiResponse.gs"), context, { filename: "apps-script/ApiResponse.gs" });
+  vm.runInContext(read("apps-script/ContentCacheService.gs"), context, { filename: "apps-script/ContentCacheService.gs" });
   vm.runInContext(read("apps-script/PlaceService.gs"), context, { filename: "apps-script/PlaceService.gs" });
   const routeSource = fs.existsSync(routeServicePath) ? fs.readFileSync(routeServicePath, "utf8") : "";
   vm.runInContext(routeSource, context, { filename: "apps-script/RouteService.gs" });
@@ -232,34 +280,124 @@ test("route and template joins safely support identifiers that match object prot
 test("route cache normalizes effective parameters, separates actions and uses required TTLs", () => {
   const cache = createCache();
   const { context, reads } = loadBackend({ cache });
+
   requireFunction(context, "getRoutes_");
-  context.getRoutes_({ featured: " TRUE ", style: " nature ", lang: "EN", page: "99" });
-  context.getRoutes_({ style: "nature", lang: "en", featured: true });
+
+  context.getRoutes_({
+    featured: " TRUE ",
+    style: " nature ",
+    lang: "EN",
+    page: "99"
+  });
+
+  context.getRoutes_({
+    style: "nature",
+    lang: "en",
+    featured: true
+  });
+
   assert.deepEqual(reads, ["routes"]);
-  assert.equal(cache.puts[0].ttl, 600);
-  assert.match(cache.puts[0].key, /getRoutes/);
-  context.getRouteDetail_({ route_id: " R-2A ", lang: "en" });
-  context.getRouteDetail_({ route_id: "R-2A", lang: "EN" });
-  assert.deepEqual(reads.slice(1), ["routes", "route_places", "places"]);
-  assert.equal(cache.puts[1].ttl, 600);
-  assert.notEqual(cache.puts[0].key, cache.puts[1].key);
-  context.getTripTemplates_({ duration_type: " one_day ", style: " nature ", lang: "EN" });
-  context.getTripTemplates_({ style: "nature", lang: "en", duration_type: "one_day" });
-  assert.deepEqual(reads.slice(4), ["trip_templates", "places"]);
-  assert.equal(cache.puts[2].ttl, 300);
-  assert.notEqual(cache.puts[1].key, cache.puts[2].key);
+
+  const routePut = cache.puts.find(
+    (entry) => entry.key.includes(":getRoutes:")
+  );
+
+  assert.ok(routePut);
+  assert.equal(routePut.ttl, 600);
+  assert.match(routePut.key, /:getRoutes:/);
+
+  context.getRouteDetail_({
+    route_id: " R-2A ",
+    lang: "en"
+  });
+
+  context.getRouteDetail_({
+    route_id: "R-2A",
+    lang: "EN"
+  });
+
+  assert.deepEqual(
+    reads.slice(1),
+    ["routes", "route_places", "places"]
+  );
+
+  const detailPut = cache.puts.find(
+    (entry) => entry.key.includes(":getRouteDetail:")
+  );
+
+  assert.ok(detailPut);
+  assert.equal(detailPut.ttl, 600);
+  assert.notEqual(routePut.key, detailPut.key);
+
+  context.getTripTemplates_({
+    duration_type: " one_day ",
+    style: " nature ",
+    lang: "EN"
+  });
+
+  context.getTripTemplates_({
+    style: "nature",
+    lang: "en",
+    duration_type: "one_day"
+  });
+
+  assert.deepEqual(
+    reads.slice(4),
+    ["trip_templates", "places"]
+  );
+
+  const templatePut = cache.puts.find(
+    (entry) => entry.key.includes(":getTripTemplates:")
+  );
+
+  assert.ok(templatePut);
+  assert.equal(templatePut.ttl, 300);
+  assert.notEqual(detailPut.key, templatePut.key);
 });
 
 test("cache keys separate filters IDs and languages", () => {
   const cache = createCache();
   const { context } = loadBackend({ cache });
+
   requireFunction(context, "getRoutes_");
-  context.getRoutes_({ style: "nature", lang: "th" });
-  context.getRoutes_({ style: "photo", lang: "th" });
-  context.getRoutes_({ style: "nature", lang: "en" });
-  context.getRouteDetail_({ route_id: "R-2A", lang: "th" });
-  context.getRouteDetail_({ route_id: "R-10", lang: "th" });
-  assert.equal(new Set(cache.puts.map((entry) => entry.key)).size, 5);
+
+  context.getRoutes_({
+    style: "nature",
+    lang: "th"
+  });
+
+  context.getRoutes_({
+    style: "photo",
+    lang: "th"
+  });
+
+  context.getRoutes_({
+    style: "nature",
+    lang: "en"
+  });
+
+  context.getRouteDetail_({
+    route_id: "R-2A",
+    lang: "th"
+  });
+
+  context.getRouteDetail_({
+    route_id: "R-10",
+    lang: "th"
+  });
+
+  const responseKeys = cache.puts
+    .map((entry) => entry.key)
+    .filter((key) =>
+      key.includes(":getRoutes:") ||
+      key.includes(":getRouteDetail:") ||
+      key.includes(":getTripTemplates:")
+    );
+
+  assert.equal(
+    new Set(responseKeys).size,
+    5
+  );
 });
 
 test("malformed cache reloads while validation and not-found responses are never cached", () => {
@@ -313,18 +451,143 @@ test("only Route Detail and Trip Templates change namespace with the Place epoch
 
   context.getRouteDetail_({ route_id: "R-2A", lang: "th" });
   const detailReads = reads.length;
-  assert.match(cache.puts.at(-1).key, /:getRouteDetail:place-epoch:2:/);
+  assert.match(cache.puts.at(-1).key, /:getRouteDetail:content-epoch:/);
+  assert.match(cache.puts.at(-1).key, /:place-epoch:2:/);
   properties.values.set("PLACE_PUBLIC_CACHE_EPOCH", "3");
   context.getRouteDetail_({ route_id: "R-2A", lang: "th" });
   assert.equal(reads.length, detailReads + 3);
-  assert.match(cache.puts.at(-1).key, /:getRouteDetail:place-epoch:3:/);
+  assert.match(cache.puts.at(-1).key, /:getRouteDetail:content-epoch:/);
+  assert.match(cache.puts.at(-1).key, /:place-epoch:3:/);
 
   context.getTripTemplates_({ duration_type: "one_day", lang: "th" });
   const templateReads = reads.length;
   properties.values.set("PLACE_PUBLIC_CACHE_EPOCH", "4");
   context.getTripTemplates_({ duration_type: "one_day", lang: "th" });
   assert.equal(reads.length, templateReads + 2);
-  assert.match(cache.puts.at(-1).key, /:getTripTemplates:place-epoch:4:/);
+  assert.match(cache.puts.at(-1).key, /:getTripTemplates:content-epoch:/);
+  assert.match(cache.puts.at(-1).key, /:place-epoch:4:/);
+});
+
+test("all public Route caches change namespace with the Content generation", () => {
+  const cache = createCache();
+  const { context, reads } = loadBackend({ cache });
+
+  requireFunction(context, "getRoutes_");
+  requireFunction(context, "getRouteDetail_");
+  requireFunction(context, "getTripTemplates_");
+  requireFunction(
+    context,
+    "ContentCacheService_invalidateUnderLock_"
+  );
+
+  context.getRoutes_({ lang: "th" });
+
+  const routeKey1 = cache.puts
+    .map((entry) => entry.key)
+    .find((key) => key.includes(":getRoutes:"));
+
+  assert.ok(routeKey1);
+  assert.match(routeKey1, /content-epoch:/);
+
+  const routeReads = reads.length;
+
+  context.ContentCacheService_invalidateUnderLock_();
+
+  context.getRoutes_({ lang: "th" });
+
+  assert.equal(
+    reads.length,
+    routeReads + 1,
+    "getRoutes must reload after Content generation invalidation"
+  );
+
+  const routeKeys = cache.puts
+    .map((entry) => entry.key)
+    .filter((key) => key.includes(":getRoutes:"));
+
+  assert.notEqual(
+    routeKeys.at(-1),
+    routeKey1,
+    "getRoutes must use a new Content generation namespace"
+  );
+
+  context.getRouteDetail_({
+    route_id: "R-2A",
+    lang: "th"
+  });
+
+  const detailKey1 = cache.puts
+    .map((entry) => entry.key)
+    .filter((key) => key.includes(":getRouteDetail:"))
+    .at(-1);
+
+  assert.ok(detailKey1);
+  assert.match(detailKey1, /content-epoch:/);
+
+  const detailReads = reads.length;
+
+  context.ContentCacheService_invalidateUnderLock_();
+
+  context.getRouteDetail_({
+    route_id: "R-2A",
+    lang: "th"
+  });
+
+  assert.equal(
+    reads.length,
+    detailReads + 3,
+    "getRouteDetail must reload after Content generation invalidation"
+  );
+
+  const detailKey2 = cache.puts
+    .map((entry) => entry.key)
+    .filter((key) => key.includes(":getRouteDetail:"))
+    .at(-1);
+
+  assert.notEqual(
+    detailKey2,
+    detailKey1,
+    "getRouteDetail must use a new Content generation namespace"
+  );
+
+  context.getTripTemplates_({
+    duration_type: "one_day",
+    lang: "th"
+  });
+
+  const templateKey1 = cache.puts
+    .map((entry) => entry.key)
+    .filter((key) => key.includes(":getTripTemplates:"))
+    .at(-1);
+
+  assert.ok(templateKey1);
+  assert.match(templateKey1, /content-epoch:/);
+
+  const templateReads = reads.length;
+
+  context.ContentCacheService_invalidateUnderLock_();
+
+  context.getTripTemplates_({
+    duration_type: "one_day",
+    lang: "th"
+  });
+
+  assert.equal(
+    reads.length,
+    templateReads + 2,
+    "getTripTemplates must reload after Content generation invalidation"
+  );
+
+  const templateKey2 = cache.puts
+    .map((entry) => entry.key)
+    .filter((key) => key.includes(":getTripTemplates:"))
+    .at(-1);
+
+  assert.notEqual(
+    templateKey2,
+    templateKey1,
+    "getTripTemplates must use a new Content generation namespace"
+  );
 });
 
 if (process.exitCode) process.exit(process.exitCode);
