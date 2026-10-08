@@ -54,6 +54,7 @@ async function rejects(fn, code) { await assert.rejects(async () => fn(), error 
       await rejects(() => harness({}).api[`update${entity}`](token, bad), "VALIDATION_ERROR");
     }
     for (const code of ["CONFLICT", "INVALID_TRANSITION", "DUPLICATE_ID"]) await rejects(() => harness(null, { code, message: "private" }).api[`create${entity}`](token, content), code);
+    await rejects(() => harness(null, { code: "CONTENT_LOCK", message: "private" }).api[`create${entity}`](token, content), "SERVER_ERROR");
     const unknown = harness(null, { code: "OUTCOME_UNKNOWN", message: "private", retryable: false, [idKey]: "ID-1" });
     await assert.rejects(unknown.api[`create${entity}`](token, content), e => e.code === "OUTCOME_UNKNOWN" && e[idKey] === "ID-1" && e.retryable === false && !JSON.stringify(e).includes("private"));
     assert.equal(unknown.calls.length, 1);
@@ -75,7 +76,124 @@ async function rejects(fn, code) { await assert.rejects(async () => fn(), error 
     const legacy = { ...base, content: { ...content, description_th: "=legacy", image_url: "javascript:legacy" } };
     assert.equal((await harness(legacy).api[`get${entity}Detail`](token, { [idKey]: "ID-1" })).content.description_th, "=legacy");
   }
+  const routeFields = "name_th name_en slug short_description_th short_description_en description_th description_en duration travel_style cover_image_url map_focus_lat map_focus_lng is_featured sort_order".split(" ");
+  const stopFields = "route_place_id place_id day_number stop_order start_time end_time note_th note_en status".split(" ");
+  const routeContent = Object.fromEntries(routeFields.map(key => [key, ""]));
+  Object.assign(routeContent, {
+    name_th: "Route", short_description_th: "Short", description_th: "Description", slug: "route-one",
+    travel_style: "nature|slow_travel", cover_image_url: "https://example.com/route.jpg",
+    map_focus_lat: 8.9, map_focus_lng: 98.5, is_featured: false, sort_order: 0
+  });
+  const routeStops = [
+    { route_place_id: "REL-1", place_id: "PLACE-1", day_number: 1, stop_order: 1, start_time: "09:00", end_time: "10:00", note_th: "First", note_en: "", status: "draft" },
+    { route_place_id: "", place_id: "PLACE-2", day_number: "", stop_order: 2, start_time: "", end_time: "", note_th: "", note_en: "", status: "draft" }
+  ];
+  const routeBase = { route_id: "ROUTE-1", status: "draft", revision, created_at: stamp, updated_at: stamp };
+  const routeSummary = { ...routeBase, name_th: "Route", travel_style: "nature|slow_travel" };
+  const routeDetail = { ...routeBase, content: routeContent, stops: routeStops };
+  for (const [method, payload, data, action] of [
+    ["getRoutes", { keyword: "Route", status: "draft", page: 1, page_size: 20 }, { items: [routeSummary], page: 1, page_size: 20, total: 1, total_pages: 1 }, "adminGetRoutes"],
+    ["getRouteDetail", { route_id: "ROUTE-1" }, routeDetail, "adminGetRouteDetail"],
+    ["createRoute", { content: routeContent, stops: routeStops, status: "draft" }, { ...routeSummary, audit_status: "unconfirmed" }, "createRoute"],
+    ["updateRoute", { route_id: "ROUTE-1", expected_revision: revision, content: routeContent, stops: routeStops, status: "draft" }, { ...routeSummary, audit_status: "recorded" }, "updateRoute"],
+    ["deleteRoute", { route_id: "ROUTE-1", expected_revision: revision }, { ...routeSummary, status: "deleted", audit_status: "recorded" }, "deleteRoute"]
+  ]) {
+    const h = harness(data);
+    assert.equal(typeof h.api[method], "function", `${method} export`);
+    assert.equal(JSON.stringify(await h.api[method](token, payload)), JSON.stringify(data));
+    assert.equal(h.calls.length, 1);
+    assert.deepEqual(JSON.parse(h.calls[0].options.body), { action, token, payload });
+    assert.equal(h.calls[0].options.method, "POST");
+    await rejects(() => harness({ ...data, private_column: "secret" }).api[method](token, payload), "MALFORMED_RESPONSE");
+  }
+  for (const [payload, patch] of [
+    [{ content: { ...routeContent, private: "secret" } }, null],
+    [{ content: { ...routeContent, name_th: " =SUM(A1)" } }, null],
+    [{ content: { ...routeContent, slug: "Bad Slug" } }, null],
+    [{ content: { ...routeContent, slug: "a".repeat(201) } }, null],
+    [{ content: { ...routeContent, cover_image_url: "https://127.1/x" } }, null],
+    [{ content: { ...routeContent, map_focus_lat: 91 } }, null],
+    [{ content: { ...routeContent, map_focus_lng: "98" } }, null],
+    [{ content: { ...routeContent, map_focus_lng: "" } }, null],
+    [{ content: { ...routeContent, map_focus_lat: "" } }, null],
+    [{ content: { ...routeContent, is_featured: "false" } }, null],
+    [{ content: { ...routeContent, sort_order: -1 } }, null],
+    [{ content: { ...routeContent, travel_style: "nature|nature" } }, null],
+    [{ content: { ...routeContent, travel_style: "Nature" } }, null],
+    [{ content: { ...routeContent, travel_style: "nature||lake" } }, null],
+    [{ content: { ...routeContent, travel_style: "a".repeat(501) } }, null],
+    [{ content: routeContent, route_id: "ROUTE-1" }, null]
+  ]) {
+    const h = harness({});
+    await rejects(() => h.api.createRoute(token, patch ? { ...payload, ...patch } : payload), "VALIDATION_ERROR");
+    assert.equal(h.calls.length, 0);
+  }
+  for (const coordinates of [
+    { map_focus_lat: "", map_focus_lng: "" },
+    { map_focus_lat: 8.9, map_focus_lng: 98.5 },
+    { map_focus_lat: 0, map_focus_lng: 0 }
+  ]) {
+    const h = harness({ ...routeSummary, audit_status: "recorded" });
+    await h.api.createRoute(token, { content: { ...routeContent, ...coordinates } });
+    const sent = JSON.parse(h.calls[0].options.body).payload.content;
+    assert.equal(sent.map_focus_lat, coordinates.map_focus_lat);
+    assert.equal(sent.map_focus_lng, coordinates.map_focus_lng);
+  }
+  for (const payload of [{ page: "1" }, { page: 1000001 }, { page_size: 101 }, { status: "all" }, { keyword: "a".repeat(201) }, { category: "nature" }]) {
+    const h = harness({});
+    await rejects(() => h.api.getRoutes(token, payload), "VALIDATION_ERROR");
+    assert.equal(h.calls.length, 0);
+  }
+  for (const stops of [
+    [{ ...routeStops[0], stop_order: 2 }],
+    [routeStops[0], { ...routeStops[1], place_id: "PLACE-1" }],
+    [routeStops[0], { ...routeStops[1], route_place_id: "REL-1" }],
+    [{ ...routeStops[0], day_number: 0 }],
+    [{ ...routeStops[0], start_time: "9:00" }],
+    [{ ...routeStops[0], start_time: "10:00", end_time: "10:00" }],
+    [{ ...routeStops[0], start_time: "", end_time: "10:00" }],
+    [{ ...routeStops[0], status: "published" }],
+    [{ ...routeStops[0], private: "secret" }]
+  ]) {
+    const h = harness({});
+    await rejects(() => h.api.createRoute(token, { content: routeContent, stops }), "VALIDATION_ERROR");
+    assert.equal(h.calls.length, 0);
+  }
+  await rejects(() => harness({}).api.createRoute(token, { content: routeContent, stops: Array.from({ length: 101 }, (_, index) => ({ ...routeStops[0], route_place_id: "", place_id: `P-${index}`, stop_order: index + 1 })) }), "VALIDATION_ERROR");
+  for (const stops of [null, false, "", 0]) {
+    const h = harness({});
+    await rejects(() => h.api.updateRoute(token, { route_id: "ROUTE-1", expected_revision: revision, stops }), "VALIDATION_ERROR");
+    assert.equal(h.calls.length, 0);
+  }
+  for (const bad of [
+    {},
+    { route_id: "ROUTE-1", expected_revision: revision },
+    { route_id: "ROUTE-1", expected_revision: "bad", status: "draft" },
+    { route_id: "ROUTE-1", expected_revision: revision, content: { name_th: "partial" } }
+  ]) await rejects(() => harness({}).api.updateRoute(token, bad), "VALIDATION_ERROR");
+  await rejects(() => harness({ ...routeDetail, stops: [{ ...routeStops[0], stop_order: 2 }] }).api.getRouteDetail(token, { route_id: "ROUTE-1" }), "MALFORMED_RESPONSE");
+  await rejects(() => harness({ ...routeDetail, stops: [routeStops[0], { ...routeStops[1], place_id: "PLACE-1" }] }).api.getRouteDetail(token, { route_id: "ROUTE-1" }), "MALFORMED_RESPONSE");
+  await rejects(() => harness({ ...routeDetail, stops: [routeStops[0], { ...routeStops[1], route_place_id: "REL-1" }] }).api.getRouteDetail(token, { route_id: "ROUTE-1" }), "MALFORMED_RESPONSE");
+  await rejects(() => harness({ ...routeDetail, stops: [{ ...routeStops[0], status: "published" }] }).api.getRouteDetail(token, { route_id: "ROUTE-1" }), "MALFORMED_RESPONSE");
+  await rejects(() => harness({ ...routeDetail, content: { ...routeContent, private: "secret" } }).api.getRouteDetail(token, { route_id: "ROUTE-1" }), "MALFORMED_RESPONSE");
+  for (const code of ["CONFLICT", "INVALID_TRANSITION"]) await rejects(() => harness(null, { code, message: "private" }).api.updateRoute(token, { route_id: "ROUTE-1", expected_revision: revision, status: "published" }), code);
+  await rejects(() => harness(null, { code: "CONTENT_LOCK", message: "private" }).api.updateRoute(token, { route_id: "ROUTE-1", expected_revision: revision, status: "published" }), "SERVER_ERROR");
+  const uncertainRoute = harness(null, { code: "OUTCOME_UNKNOWN", message: "private", retryable: false, route_id: "ROUTE-1" });
+  await assert.rejects(uncertainRoute.api.updateRoute(token, { route_id: "ROUTE-1", expected_revision: revision, status: "published" }), error => error.code === "OUTCOME_UNKNOWN" && error.route_id === "ROUTE-1" && error.retryable === false && !JSON.stringify(error).includes("private"));
+  assert.equal(uncertainRoute.calls.length, 1);
+  for (const error of [
+    { code: "OUTCOME_UNKNOWN", message: "private", retryable: true, route_id: "ROUTE-1" },
+    { code: "OUTCOME_UNKNOWN", message: "private", retryable: false, route_id: "bad id" },
+    { code: "OUTCOME_UNKNOWN", message: "private", retryable: false, route_id: "ROUTE-1", details: "secret" }
+  ]) await rejects(() => harness(null, error).api.updateRoute(token, { route_id: "ROUTE-1", expected_revision: revision, status: "published" }), "MALFORMED_RESPONSE");
+  for (const failure of [new Error("network secret"), { name: "AbortError" }]) {
+    const h = harness(null, null, failure);
+    await rejects(() => h.api.createRoute(token, { content: routeContent }), failure.name === "AbortError" ? "TIMEOUT" : "NETWORK_ERROR");
+    assert.equal(h.calls.length, 1, "uncertain Route mutations never retry");
+  }
+  const legacyRoute = { ...routeDetail, created_at: "2026-07-11 10:00:00", updated_at: "2024-02-29 23:59:59", content: { ...routeContent, description_th: "=legacy", cover_image_url: "javascript:legacy", travel_style: "Legacy Value", map_focus_lat: 999, sort_order: -1 } };
+  assert.equal((await harness(legacyRoute).api.getRouteDetail(token, { route_id: "ROUTE-1" })).content.description_th, "=legacy");
   const admin = { admin_id: "ADM-123e4567-e89b-12d3-a456-426614174000", username: "operator", display_name: "Operator", role: "super_admin" };
   await rejects(() => harness({ admin, expires_at: "2026-07-11 10:00:00" }).api.validateSession(token), "MALFORMED_RESPONSE");
-  console.log("Admin Product/Event API contracts passed.");
+  console.log("Admin Product/Event/Route API contracts passed.");
 })().catch(error => { console.error(error); process.exitCode = 1; });

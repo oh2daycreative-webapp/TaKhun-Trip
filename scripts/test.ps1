@@ -198,6 +198,8 @@ if ($LASTEXITCODE -ne 0) { throw "Admin Product/Event API verification failed." 
 if ($LASTEXITCODE -ne 0) { throw "Admin Product/Event model verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-content-ui.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Product/Event UI verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-routes-ui.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Routes UI verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-content-browser.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Product/Event native browser verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-schema.js")

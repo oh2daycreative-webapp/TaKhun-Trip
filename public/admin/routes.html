@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="../css/components.css">
   <link rel="stylesheet" href="../css/mobile.css">
   <link rel="stylesheet" href="../css/admin.css">
+  <link rel="stylesheet" href="../css/admin-content.css">
 </head>
 <body class="admin-body admin-auth-pending" data-admin-page="routes">
   <a class="admin-skip-link" href="#admin-main" data-admin-skip hidden>ข้ามไปยังเนื้อหาหลัก</a>
@@ -53,8 +54,61 @@
     <div class="admin-shell__backdrop" data-admin-backdrop hidden></div>
 
     <main class="admin-main" id="admin-main" data-admin-main tabindex="-1" aria-labelledby="page-title">
-      <section class="placeholder" data-admin-content hidden aria-hidden="true">
-        <p>หน้านี้อยู่ระหว่างการจัดเตรียม</p>
+      <section class="admin-routes" data-admin-content data-admin-routes hidden aria-hidden="true">
+        <div data-route-list-view>
+          <div class="admin-routes__toolbar">
+            <h2>รายการเส้นทาง</h2>
+            <button class="button" type="button" data-route-create>สร้างเส้นทางใหม่</button>
+          </div>
+          <form class="admin-routes__filters" data-route-filters>
+            <label>ค้นหา <input type="search" name="keyword" maxlength="200" autocomplete="off"></label>
+            <label>สถานะ
+              <select name="status"><option value="">ทุกสถานะ</option><option value="draft">ฉบับร่าง</option><option value="published">เผยแพร่</option><option value="hidden">ซ่อน</option><option value="archived">เก็บถาวร</option><option value="deleted">ลบแล้ว</option></select>
+            </label>
+            <button class="button" type="submit">ค้นหา</button>
+            <button class="button" type="button" data-route-refresh>โหลดใหม่</button>
+          </form>
+          <p class="content-notice" data-route-list-status role="status" aria-live="polite" aria-atomic="true"></p>
+          <div class="content-list" data-route-list></div>
+          <nav class="admin-routes__pagination" data-route-pagination aria-label="หน้ารายการเส้นทาง"></nav>
+          <section class="admin-routes__uncertain" data-route-uncertain hidden>
+            <p>มีการสร้างเส้นทางครั้งก่อนที่ยังยืนยันผลไม่ได้ กรุณาตรวจสอบรายการบนเซิร์ฟเวอร์ก่อนสร้างซ้ำ</p>
+            <button class="button" type="button" data-route-uncertain-reconcile>โหลดรายการเพื่อตรวจสอบ</button>
+            <button class="button" type="button" data-route-uncertain-complete hidden>ตรวจสอบรายการแล้ว อนุญาตให้สร้างใหม่</button>
+          </section>
+        </div>
+
+        <div data-route-editor-view hidden>
+          <div class="admin-routes__toolbar"><h2 data-route-editor-title>รายละเอียดเส้นทาง</h2><button class="button" type="button" data-route-back>กลับรายการเส้นทาง</button></div>
+          <p data-route-identity></p>
+          <p class="content-notice" data-route-editor-status role="status" aria-live="assertive" aria-atomic="true"></p>
+          <form class="admin-routes__editor" data-route-editor novalidate>
+            <fieldset data-route-content-fields><legend>ข้อมูลเส้นทาง</legend>
+              <div class="content-grid">
+                <label class="content-field">ชื่อภาษาไทย * <input name="name_th" required maxlength="20000"></label>
+                <label class="content-field">ชื่อภาษาอังกฤษ <input name="name_en" maxlength="20000"></label>
+                <label class="content-field">Slug <input name="slug" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" maxlength="200"></label>
+                <label class="content-field">คำอธิบายสั้นภาษาไทย * <textarea name="short_description_th" required maxlength="20000"></textarea></label>
+                <label class="content-field">คำอธิบายสั้นภาษาอังกฤษ <textarea name="short_description_en" maxlength="20000"></textarea></label>
+                <label class="content-field">รายละเอียดภาษาไทย * <textarea name="description_th" required maxlength="20000"></textarea></label>
+                <label class="content-field">รายละเอียดภาษาอังกฤษ <textarea name="description_en" maxlength="20000"></textarea></label>
+                <label class="content-field">ระยะเวลา <input name="duration" maxlength="20000"></label>
+                <label class="content-field">รูปแบบการเดินทาง <input name="travel_style" maxlength="500"><small>คั่นหลายรูปแบบด้วย | เช่น nature|slow_travel</small></label>
+                <label class="content-field">URL ภาพปก <input name="cover_image_url" type="url" maxlength="2048"></label>
+                <label class="content-field">ละติจูดจุดโฟกัส <input name="map_focus_lat" type="number" min="-90" max="90" step="any"></label>
+                <label class="content-field">ลองจิจูดจุดโฟกัส <input name="map_focus_lng" type="number" min="-180" max="180" step="any"></label>
+                <label class="content-field admin-routes__checkbox"><input name="is_featured" type="checkbox"> เส้นทางแนะนำ</label>
+                <label class="content-field">ลำดับแสดงผล <input name="sort_order" type="number" min="0" step="1"></label>
+              </div>
+            </fieldset>
+            <fieldset data-route-stops-fields><legend>สถานที่แวะตามลำดับ</legend>
+              <div class="admin-routes__place-picker"><label>ค้นหาสถานที่ <input type="search" data-route-place-keyword maxlength="200"></label><button class="button" type="button" data-route-place-search>ค้นหา</button><select data-route-place-results aria-label="ผลการค้นหาสถานที่"></select><button class="button" type="button" data-route-add-stop>เพิ่มสถานที่</button><button class="button" type="button" data-route-place-next>หน้าสถานที่ถัดไป</button></div>
+              <p data-route-place-status role="status" aria-live="polite"></p>
+              <div class="admin-routes__stops" data-route-stops></div>
+            </fieldset>
+            <div class="admin-routes__actions"><button class="button" type="submit" data-route-save>บันทึก</button><div data-route-lifecycle></div><button class="button" type="button" data-route-delete>ลบแบบซอฟต์</button><button class="button" type="button" data-route-reconcile hidden>โหลดข้อมูลล่าสุดเพื่อกระทบยอด</button></div>
+          </form>
+        </div>
       </section>
     </main>
   </div>
@@ -63,9 +117,10 @@
   <script src="js/admin-api.js" defer></script>
   <script src="js/admin-auth.js" defer></script>
   <script src="js/admin-shell.js" defer></script>
+  <script src="js/admin-routes.js" defer></script>
   <script>
     window.addEventListener("DOMContentLoaded", function () {
-      window.TakhunAdminShell.init();
+      window.TakhunAdminRoutes.init();
     });
   </script>
 </body>

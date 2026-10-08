@@ -296,7 +296,7 @@ test("all protected pages declare the source guard and one semantic shared shell
     assert.equal(occurrences(html, /<a class="admin-skip-link"/g), 1, `${key}: skip link`);
     assert.match(html, /class="admin-skip-link"[^>]+href="#admin-main"[^>]+data-admin-skip[^>]+hidden/);
     assert.equal(occurrences(html, /<header\b/g), 1, `${key}: header`);
-    assert.equal(occurrences(html, /<nav\b/g), key === "places" ? 2 : 1, `${key}: nav`);
+    assert.equal(occurrences(html, /<nav\b/g), ["places", "routes"].includes(key) ? 2 : 1, `${key}: nav`);
     assert.equal(occurrences(html, /<main\b/g), 1, `${key}: main`);
     assert.equal(occurrences(html, /<h1\b/g), 1, `${key}: h1`);
     assert.match(html, new RegExp(`<h1 id="page-title" data-admin-page-title>${heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</h1>`));
@@ -322,10 +322,10 @@ test("all protected pages load exact dependencies in safe order and explicitly i
     const positions = ordered.map((src) => html.indexOf(`<script src="${src}" defer></script>`));
     assert.equal(positions.every((position) => position >= 0), true, `${key}: missing dependency`);
     assert.equal(positions.every((position, index) => index === 0 || positions[index - 1] < position), true, `${key}: script order`);
-    if (["places", "place-edit", "products", "events"].includes(key)) {
+    if (["places", "place-edit", "routes", "products", "events"].includes(key)) {
       const content = key === "products" || key === "events";
-      const controller = content ? "admin-content-ui" : key === "places" ? "admin-places" : "admin-place-edit";
-      const initializer = content ? "TakhunAdminContentUI" : key === "places" ? "TakhunAdminPlaces" : "TakhunAdminPlaceEdit";
+      const controller = content ? "admin-content-ui" : key === "places" ? "admin-places" : key === "routes" ? "admin-routes" : "admin-place-edit";
+      const initializer = content ? "TakhunAdminContentUI" : key === "places" ? "TakhunAdminPlaces" : key === "routes" ? "TakhunAdminRoutes" : "TakhunAdminPlaceEdit";
       const controllerPosition = html.indexOf(`<script src="js/${controller}.js" defer></script>`);
       assert.equal(controllerPosition > positions[positions.length - 1], true, `${key}: controller dependency`);
       assert.equal(occurrences(html, new RegExp(`${initializer}\\.init\\(\\)`, "g")), 1, `${key}: controller init invocation`);
@@ -341,7 +341,7 @@ test("protected placeholders retain Milestone intent without metrics CRUD modera
   const forbidden = /(?:metric|analytics|chart|<table\b|<form\b|data-admin-(?:count|create|edit|delete|publish|upload)|เพิ่ม|แก้ไข|ลบ|เผยแพร่|อัปโหลด|อนุมัติรีวิว|จัดการบทบาท|language-switch)/i;
   for (const [key] of pageFixtures) {
     const html = htmlFor(key);
-    if (["places", "place-edit", "products", "events"].includes(key)) continue;
+    if (["places", "place-edit", "routes", "products", "events"].includes(key)) continue;
     assert.match(html, /class="placeholder"/);
     if (key !== "404") assert.match(html, /หน้านี้อยู่ระหว่างการจัดเตรียม/);
     else assert.match(html, /ไม่พบหน้า Admin/);
