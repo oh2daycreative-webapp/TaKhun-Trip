@@ -40,6 +40,7 @@ function assertRouterBoundary(source) {
   const expected = [
     "adminGetProducts", "adminGetProductDetail", "createProduct", "updateProduct", "deleteProduct",
     "adminGetEvents", "adminGetEventDetail", "createEvent", "updateEvent", "deleteEvent",
+    "adminGetRoutes", "adminGetRouteDetail", "createRoute", "updateRoute", "deleteRoute",
     "submitReview", "adminLogin", "adminValidateSession", "adminLogout",
     "adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace",
     "adminInspectPlaceDependencies", "adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace",

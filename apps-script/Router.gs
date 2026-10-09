@@ -68,6 +68,11 @@ function routeRequest_(method, event) {
         if (action === "createEvent") return createJsonResponse_(createEvent_(body.token, body.payload));
         if (action === "updateEvent") return createJsonResponse_(updateEvent_(body.token, body.payload));
         if (action === "deleteEvent") return createJsonResponse_(deleteEvent_(body.token, body.payload));
+        if (action === "adminGetRoutes") return createJsonResponse_(adminGetRoutes_(body.token, body.payload));
+        if (action === "adminGetRouteDetail") return createJsonResponse_(adminGetRouteDetail_(body.token, body.payload));
+        if (action === "createRoute") return createJsonResponse_(createRoute_(body.token, body.payload));
+        if (action === "updateRoute") return createJsonResponse_(updateRoute_(body.token, body.payload));
+        if (action === "deleteRoute") return createJsonResponse_(deleteRoute_(body.token, body.payload));
         if (action === "adminGetPlaces") return createJsonResponse_(adminGetPlaces_(body.token, body.payload));
         if (action === "adminGetPlaceDetail") return createJsonResponse_(adminGetPlaceDetail_(body.token, body.payload));
         if (action === "adminCreatePlace") return createJsonResponse_(adminCreatePlace_(body.token, body.payload));

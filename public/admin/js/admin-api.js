@@ -420,7 +420,7 @@
     const action = body.action;
     const domain = contentDomain(action);
     if (domain) {
-      const validated = safeContentResponse(data, body, domain);
+      const validated = domain === ROUTE_DOMAIN ? safeRouteResponse(data, body) : safeContentResponse(data, body, domain);
       if (!validated) throw safeError("MALFORMED_RESPONSE");
       return validated;
     }
@@ -551,10 +551,12 @@
   const EVENT_DOMAIN = Object.freeze({ id: "event_id", title: "title_th", category: "event_type",
     fields: "title_th title_en event_type event_date start_time end_time location_th location_en related_place_id description_th description_en image_url contact_name contact_phone register_url google_maps_url latitude longitude is_featured".split(" "),
     required: ["title_th", "description_th", "location_th", "event_type", "event_date"], categories: "launch festival community_market learning seasonal otop tourism other".split(" ") });
+  const ROUTE_DOMAIN = Object.freeze({ id: "route_id" });
   const CONTENT_STATUSES = ["draft", "published", "hidden", "archived", "deleted"];
   function contentDomain(action) {
     if (["adminGetProducts", "adminGetProductDetail", "createProduct", "updateProduct", "deleteProduct"].includes(action)) return PRODUCT_DOMAIN;
     if (["adminGetEvents", "adminGetEventDetail", "createEvent", "updateEvent", "deleteEvent"].includes(action)) return EVENT_DOMAIN;
+    if (["adminGetRoutes", "adminGetRouteDetail", "createRoute", "updateRoute", "deleteRoute"].includes(action)) return ROUTE_DOMAIN;
     return null;
   }
   function validContentTimestamp(value) {
@@ -665,6 +667,134 @@
     if (!validPlaceText(data[domain.title], 0, 20000) || !validPlaceText(data[domain.category], 0, 20000)) return null;
     return { ...data };
   }
+  const ROUTE_CONTENT_FIELDS = "name_th name_en slug short_description_th short_description_en description_th description_en duration travel_style cover_image_url map_focus_lat map_focus_lng is_featured sort_order".split(" ");
+  const ROUTE_REQUIRED_FIELDS = ["name_th", "short_description_th", "description_th"];
+  const ROUTE_STOP_FIELDS = "route_place_id place_id day_number stop_order start_time end_time note_th note_en status".split(" ");
+  function routeContent(source, responseMode) {
+    if (!exactKeys(source, ROUTE_CONTENT_FIELDS)) {
+      if (responseMode) return null;
+      validationError();
+    }
+    const result = {};
+    for (const key of ROUTE_CONTENT_FIELDS) {
+      const value = source[key];
+      if (key === "is_featured") {
+        if (responseMode && value === "") result[key] = false;
+        else {
+          if (typeof value !== "boolean") { if (responseMode) return null; validationError(); }
+          result[key] = value;
+        }
+      } else if (["map_focus_lat", "map_focus_lng", "sort_order"].includes(key)) {
+        if (value !== "" && (typeof value !== "number" || !Number.isFinite(value))) { if (responseMode) return null; validationError(); }
+        if (!responseMode && value !== "" && (key === "sort_order" ? !Number.isSafeInteger(value) || value < 0 : Math.abs(value) > (key === "map_focus_lat" ? 90 : 180))) validationError();
+        result[key] = value;
+      } else if (responseMode) {
+        if (!validPlaceText(value, 0, 20000)) return null;
+        result[key] = value;
+      } else {
+        result[key] = key === "cover_image_url" ? contentUrl(value) : contentText(value, key === "slug" ? 200 : key === "travel_style" ? 500 : 20000);
+      }
+    }
+    if (!responseMode) {
+      if (ROUTE_REQUIRED_FIELDS.some(key => !result[key])) validationError();
+      if ((result.map_focus_lat === "") !== (result.map_focus_lng === "")) validationError();
+      if (result.slug && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(result.slug)) validationError();
+      if (result.travel_style) {
+        const styles = result.travel_style.split("|");
+        if (styles.some((style, index) => !/^[a-z0-9]+(?:_[a-z0-9]+)*$/.test(style) || styles.indexOf(style) !== index)) validationError();
+        result.travel_style = styles.join("|");
+      }
+    }
+    return result;
+  }
+  function routeStops(source, routeStatus, responseMode) {
+    if (!Array.isArray(source) || source.length > 100) { if (responseMode) return null; validationError(); }
+    const placeIds = new Set(), relationIds = new Set(), result = [];
+    for (let index = 0; index < source.length; index += 1) {
+      const stop = source[index];
+      if (!stop || Array.isArray(stop) || typeof stop !== "object" || Object.keys(stop).some(key => !ROUTE_STOP_FIELDS.includes(key)) ||
+          !Object.prototype.hasOwnProperty.call(stop, "place_id")) { if (responseMode) return null; validationError(); }
+      if (responseMode && !exactKeys(stop, ROUTE_STOP_FIELDS)) return null;
+      const relationId = Object.prototype.hasOwnProperty.call(stop, "route_place_id") ? stop.route_place_id : "";
+      if (relationId !== "" && !validContentId(relationId) || !validContentId(stop.place_id) || placeIds.has(stop.place_id) || relationId && relationIds.has(relationId)) {
+        if (responseMode) return null; validationError();
+      }
+      const dayNumber = Object.prototype.hasOwnProperty.call(stop, "day_number") ? stop.day_number : "";
+      const suppliedOrder = Object.prototype.hasOwnProperty.call(stop, "stop_order") ? stop.stop_order : index + 1;
+      if (dayNumber !== "" && (!Number.isSafeInteger(dayNumber) || dayNumber < 1) || !Number.isSafeInteger(suppliedOrder) || suppliedOrder !== index + 1) {
+        if (responseMode) return null; validationError();
+      }
+      const startTime = Object.prototype.hasOwnProperty.call(stop, "start_time") ? stop.start_time : "";
+      const endTime = Object.prototype.hasOwnProperty.call(stop, "end_time") ? stop.end_time : "";
+      if (typeof startTime !== "string" || startTime && !/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(startTime) ||
+          typeof endTime !== "string" || endTime && !/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(endTime) || endTime && (!startTime || endTime <= startTime)) {
+        if (responseMode) return null; validationError();
+      }
+      const status = Object.prototype.hasOwnProperty.call(stop, "status") ? stop.status : undefined;
+      if (status !== undefined && (!CONTENT_STATUSES.includes(status) || routeStatus && status !== routeStatus)) { if (responseMode) return null; validationError(); }
+      const normalized = { ...stop, route_place_id: relationId, day_number: dayNumber, stop_order: index + 1, start_time: startTime, end_time: endTime };
+      for (const key of ["note_th", "note_en"]) {
+        const value = Object.prototype.hasOwnProperty.call(stop, key) ? stop[key] : "";
+        if (responseMode ? !validPlaceText(value, 0, 20000) : false) return null;
+        normalized[key] = responseMode ? value : contentText(value);
+      }
+      if (responseMode) normalized.status = status;
+      placeIds.add(stop.place_id);
+      if (relationId) relationIds.add(relationId);
+      result.push(normalized);
+    }
+    return result;
+  }
+  function routeRequestPayload(payload, operation) {
+    if (operation === "list") {
+      const source = requestObject(payload === undefined ? {} : payload, ["keyword", "status", "page", "page_size"], [], false), result = {};
+      for (const key of Object.keys(source)) {
+        const value = source[key];
+        if (key === "page" || key === "page_size") {
+          if (!Number.isSafeInteger(value) || value < 1 || value > (key === "page" ? 1000000 : 100)) validationError();
+          result[key] = value;
+        } else {
+          result[key] = contentText(value, key === "keyword" ? 200 : 20000);
+          if (key === "status" && result[key] && !CONTENT_STATUSES.includes(result[key])) validationError();
+        }
+      }
+      return result;
+    }
+    const allowed = operation === "detail" ? ["route_id"] : operation === "delete" ? ["route_id", "expected_revision"] : operation === "create" ? ["content", "stops", "status"] : ["route_id", "expected_revision", "content", "stops", "status"];
+    const required = operation === "detail" ? ["route_id"] : operation === "delete" ? ["route_id", "expected_revision"] : operation === "create" ? ["content"] : ["route_id", "expected_revision"];
+    const source = requestObject(payload, allowed, required, false), result = {};
+    if (operation !== "create") { if (!validContentId(source.route_id)) validationError(); result.route_id = source.route_id; }
+    if (operation === "detail") return result;
+    if (operation === "delete" || operation === "update") { if (!validRevision(source.expected_revision)) validationError(); result.expected_revision = source.expected_revision; }
+    if (operation === "update" && !["content", "stops", "status"].some(key => Object.prototype.hasOwnProperty.call(source, key))) validationError();
+    if (Object.prototype.hasOwnProperty.call(source, "status")) {
+      if (!CONTENT_STATUSES.includes(source.status) || operation === "create" && !["draft", "published"].includes(source.status)) validationError();
+      result.status = source.status;
+    }
+    if (Object.prototype.hasOwnProperty.call(source, "content")) result.content = routeContent(source.content, false);
+    if (operation === "create" || Object.prototype.hasOwnProperty.call(source, "stops")) result.stops = routeStops(Object.prototype.hasOwnProperty.call(source, "stops") ? source.stops : [], operation === "create" ? source.status || "draft" : source.status || "", false);
+    return result;
+  }
+  function safeRouteRecord(data, detail, mutation) {
+    const keys = ["route_id", "status", "revision", "created_at", "updated_at", ...(detail ? ["content", "stops"] : ["name_th", "travel_style"]), ...(mutation ? ["audit_status"] : [])];
+    if (!exactKeys(data, keys) || !validContentId(data.route_id) || !CONTENT_STATUSES.includes(data.status) || !validRevision(data.revision) ||
+        ![data.created_at, data.updated_at].every(validContentTimestamp) || mutation && !["recorded", "unconfirmed"].includes(data.audit_status)) return null;
+    if (!detail) return validPlaceText(data.name_th, 0, 20000) && validPlaceText(data.travel_style, 0, 20000) ? { ...data } : null;
+    const content = routeContent(data.content, true), stops = routeStops(data.stops, data.status, true);
+    return content && stops ? { ...data, content, stops } : null;
+  }
+  function safeRouteResponse(data, body) {
+    if (body.action === "adminGetRoutes") {
+      if (!exactKeys(data, ["items", "page", "page_size", "total", "total_pages"]) || !Array.isArray(data.items) || !validPagination(data) || data.page > 1000000) return null;
+      const items = data.items.map(item => safeRouteRecord(item, false, false));
+      if (items.some(item => !item) || new Set(items.map(item => item.route_id)).size !== items.length) return null;
+      return { items, page: data.page, page_size: data.page_size, total: data.total, total_pages: data.total_pages };
+    }
+    const detail = body.action === "adminGetRouteDetail", result = safeRouteRecord(data, detail, !detail);
+    if (!result || body.payload.route_id && result.route_id !== body.payload.route_id) return null;
+    if (body.action === "createRoute" && result.status !== (body.payload.status || "draft") || body.action === "deleteRoute" && result.status !== "deleted" || body.action === "updateRoute" && body.payload.status && result.status !== body.payload.status) return null;
+    return result;
+  }
   function getProducts(token, payload) { return placeRequest("adminGetProducts", token, contentRequestPayload(payload, PRODUCT_DOMAIN, "list")); }
   function getProductDetail(token, payload) { return placeRequest("adminGetProductDetail", token, contentRequestPayload(payload, PRODUCT_DOMAIN, "detail")); }
   function createProduct(token, payload) { return placeRequest("createProduct", token, contentRequestPayload(payload, PRODUCT_DOMAIN, "create")); }
@@ -675,11 +805,17 @@
   function createEvent(token, payload) { return placeRequest("createEvent", token, contentRequestPayload(payload, EVENT_DOMAIN, "create")); }
   function updateEvent(token, payload) { return placeRequest("updateEvent", token, contentRequestPayload(payload, EVENT_DOMAIN, "update")); }
   function deleteEvent(token, payload) { return placeRequest("deleteEvent", token, contentRequestPayload(payload, EVENT_DOMAIN, "delete")); }
+  function getRoutes(token, payload) { return placeRequest("adminGetRoutes", token, routeRequestPayload(payload, "list")); }
+  function getRouteDetail(token, payload) { return placeRequest("adminGetRouteDetail", token, routeRequestPayload(payload, "detail")); }
+  function createRoute(token, payload) { return placeRequest("createRoute", token, routeRequestPayload(payload, "create")); }
+  function updateRoute(token, payload) { return placeRequest("updateRoute", token, routeRequestPayload(payload, "update")); }
+  function deleteRoute(token, payload) { return placeRequest("deleteRoute", token, routeRequestPayload(payload, "delete")); }
 
   global.TakhunAdminApi = Object.freeze({
     login, validateSession, logout, getPlaces, getPlaceDetail, getPlaceMediaOptions, inspectPlaceDependencies,
     createPlace, savePlaceDraft, publishPlace, unpublishPlace, archivePlace, restorePlace,
     getProducts, getProductDetail, createProduct, updateProduct, deleteProduct,
-    getEvents, getEventDetail, createEvent, updateEvent, deleteEvent
+    getEvents, getEventDetail, createEvent, updateEvent, deleteEvent,
+    getRoutes, getRouteDetail, createRoute, updateRoute, deleteRoute
   });
 })(window);

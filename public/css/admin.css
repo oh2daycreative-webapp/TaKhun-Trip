@@ -102,3 +102,27 @@
   .admin-shell *,
   .admin-skip-link { scroll-behavior: auto; transition: none !important; animation: none !important; }
 }
+
+.admin-routes { min-width: 0; }
+.admin-routes__toolbar, .admin-routes__actions, .admin-routes__pagination, .admin-routes__stop-actions, .admin-routes__place-picker { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
+.admin-routes__toolbar { justify-content: space-between; margin-bottom: 1rem; }
+.admin-routes__toolbar h2 { margin: 0; }
+.admin-routes__filters { display: grid; grid-template-columns: minmax(0, 2fr) minmax(10rem, 1fr) auto auto; align-items: end; gap: .75rem; margin-bottom: 1rem; }
+.admin-routes__filters label, .admin-routes__place-picker label, .admin-routes__stop label { display: grid; min-width: 0; gap: .35rem; font-weight: 700; }
+.admin-routes input, .admin-routes select, .admin-routes textarea { box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; padding: .65rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); font: inherit; }
+.admin-routes textarea { min-height: 7rem; resize: vertical; }
+.admin-routes fieldset { min-width: 0; margin: 1rem 0; padding: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
+.admin-routes legend { padding-inline: .4rem; color: var(--color-primary-dark); font-weight: 850; }
+.admin-routes__checkbox { display: flex !important; min-height: 44px; flex-direction: row !important; align-items: center; }
+.admin-routes__checkbox input { width: 1.5rem; min-height: 1.5rem; }
+.admin-routes__place-picker > * { flex: 1 1 12rem; }
+.admin-routes__place-picker .button { flex: 0 1 auto; min-height: 44px; }
+.admin-routes__stops { display: grid; gap: 1rem; margin-top: 1rem; }
+.admin-routes__stop { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; min-width: 0; padding: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); }
+.admin-routes__stop h3, .admin-routes__stop > label:first-of-type, .admin-routes__stop-actions { grid-column: 1 / -1; }
+.admin-routes__stop-actions .button, .admin-routes__actions .button, .admin-routes__pagination .button { min-width: 44px; min-height: 44px; }
+.admin-routes__uncertain { margin-block: 1rem; padding: 1rem; border: 2px solid #9a6700; border-radius: var(--radius-sm); background: #fff8db; color: #5f3d00; }
+.admin-routes__uncertain p { margin-top: 0; }
+.admin-routes :focus-visible { outline: 3px solid var(--color-primary-dark); outline-offset: 3px; }
+.admin-routes :disabled { cursor: not-allowed; opacity: .6; }
+@media (max-width: 699px) { .admin-routes__filters, .admin-routes__stop { grid-template-columns: minmax(0, 1fr); } .admin-routes__stop h3, .admin-routes__stop > label:first-of-type, .admin-routes__stop-actions { grid-column: 1; } .admin-routes__stop-actions .button, .admin-routes__actions .button { flex: 1 1 100%; } }

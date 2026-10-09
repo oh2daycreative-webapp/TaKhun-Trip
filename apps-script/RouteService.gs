@@ -231,8 +231,18 @@ function RouteService_getCachedPublicResponse_(action, parameters, ttlSeconds, l
 }
 
 function RouteService_cacheKey_(action, parameters) {
-  var parts = ["public", action];
-  if (action === "getRouteDetail" || action === "getTripTemplates") parts.push(PlaceService_cacheEpochKey_());
+  var parts = [
+    "public",
+    action,
+    ContentCacheService_key_()
+  ];
+
+  if (
+    action === "getRouteDetail" ||
+    action === "getTripTemplates"
+  ) {
+    parts.push(PlaceService_cacheEpochKey_());
+  }
   Object.keys(parameters || {}).sort().forEach(function (key) {
     parts.push(key + "=" + encodeURIComponent(RouteService_trim_(parameters[key])));
   });

@@ -39,6 +39,7 @@ for (const { name, source } of sources) {
 const postActions = [
   "adminGetProducts", "adminGetProductDetail", "createProduct", "updateProduct", "deleteProduct",
   "adminGetEvents", "adminGetEventDetail", "createEvent", "updateEvent", "deleteEvent",
+  "adminGetRoutes", "adminGetRouteDetail", "createRoute", "updateRoute", "deleteRoute",
   "submitReview", "adminLogin", "adminValidateSession", "adminLogout",
   "adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace",
   "adminInspectPlaceDependencies", "adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace",
@@ -140,10 +141,68 @@ function createRouterRuntime({ routerSource = router, json = JSON } = {}) {
       return { ok: true, data: { action } };
     };
   }
+    for (const action of [
+    "adminGetRoutes",
+    "adminGetRouteDetail",
+    "createRoute",
+    "updateRoute",
+    "deleteRoute"
+  ]) {
+    context[`${action}_`] = (...args) => {
+      calls.push({ action, args });
+      return { ok: true, data: { action } };
+    };
+  }
   vm.createContext(context);
   vm.runInContext(apiResponse, context, { filename: "apps-script/ApiResponse.gs" });
   vm.runInContext(routerSource, context, { filename: "apps-script/Router.gs" });
   return { context, calls };
+}
+
+// Admin Route actions forward only the body token and payload,
+// never query/header/event authority.
+for (const [action, payload] of [
+  ["adminGetRoutes", { status: "draft", page: 1, page_size: 20 }],
+  ["adminGetRouteDetail", { route_id: "ROUTE-1" }],
+  ["createRoute", {
+    status: "draft",
+    content: { name_th: "Route Test" },
+    stops: []
+  }],
+  ["updateRoute", {
+    route_id: "ROUTE-1",
+    expected_revision: "r1-test",
+    content: { name_th: "Route Updated" },
+    stops: []
+  }],
+  ["deleteRoute", {
+    route_id: "ROUTE-1",
+    expected_revision: "r1-test"
+  }]
+]) {
+  const runtime = createRouterRuntime();
+  const token = "BODY_TOKEN";
+
+  assert.deepEqual(
+    post(runtime, { action, token, payload }, {
+      parameter: {
+        action: "adminLogout",
+        token: "QUERY_TOKEN",
+        payload: "QUERY_PAYLOAD"
+      },
+      headers: {
+        Authorization: "Bearer HEADER_TOKEN"
+      },
+      token: "EVENT_TOKEN",
+      payload: "EVENT_PAYLOAD"
+    }),
+    { ok: true, data: { action } }
+  );
+
+  assert.deepEqual(
+    runtime.calls,
+    [{ action, args: [token, payload] }]
+  );
 }
 
 // Admin Place actions forward only the body token and payload, never query/header authority.
