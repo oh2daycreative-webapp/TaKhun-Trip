@@ -447,6 +447,12 @@ Google Sheets ควรมีชีตดังนี้
 
 ### 11.3 Gallery Category Enum
 
+> **M8 Phase A authority:** New and republished Gallery rows use exactly
+> `dam_lake`, `mountain_nature`, `community_life`, `food_fruit`, or
+> `activity_tradition`. The older values in this table are legacy-only: they
+> remain readable in Admin and published legacy rows remain visible in
+> unfiltered public reads, but they cannot be newly published or republished.
+
 | Value | Display TH |
 |---|---|
 | `place` | สถานที่ |
@@ -456,6 +462,40 @@ Google Sheets ควรมีชีตดังนี้
 | `community` | ชุมชน |
 | `hero` | ภาพ Hero |
 | `other` | อื่น ๆ |
+
+---
+
+### 11.4 M8 Gallery authoring and lifecycle
+
+Image authoring selects an approved manifest item whose `entity_type` and
+`role` are both `gallery`. The row `media_id` equals that manifest `media_id`
+and is immutable. Requests never accept image, thumbnail, or video URLs;
+source/filesystem paths; or raw HTML. Legacy physical URL columns remain inert
+compatibility columns and are blank on newly created images.
+
+Statuses are `draft`, `published`, `hidden`, `archived`, and `deleted`.
+Deletion is a status update only. Legacy video rows remain readable and allow
+lifecycle transitions only; video content cannot be edited and new videos
+cannot be authored.
+
+The exact transition matrix is:
+
+| Current status | Allowed next status |
+|---|---|
+| `draft` | `published`, `archived`, `deleted` |
+| `published` | `hidden`, `archived`, `deleted` |
+| `hidden` | `draft`, `published`, `archived`, `deleted` |
+| `archived` | `draft`, `deleted` |
+| `deleted` | `draft` |
+
+Every other direct transition is invalid. Legacy videos use lifecycle-only
+requests and cannot transition to `published`; an already-published legacy
+video remains readable until an authorized lifecycle change is requested.
+
+The revision is `r1-` plus lowercase SHA-256 over typed canonical values for
+`media_id`, all twelve content fields, and `status`. Timestamps and unknown
+extension columns are excluded. Writers use the actual physical headers,
+preserve extensions, and reject duplicate or case-conflicting headers.
 
 ---
 

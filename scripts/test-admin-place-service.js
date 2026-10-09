@@ -296,7 +296,7 @@ function loadBackend(options = {}) {
     }
   };
   vm.createContext(context);
-  for (const file of ["apps-script/AdminPlaceSchema.gs", "apps-script/AdminPlaceService.gs", "apps-script/ApiResponse.gs", "apps-script/Router.gs"]) {
+  for (const file of ["apps-script/AdminPlaceSchema.gs", "apps-script/ApprovedMediaService.gs", "apps-script/AdminPlaceService.gs", "apps-script/ApiResponse.gs", "apps-script/Router.gs"]) {
     const source = file === "apps-script/AdminPlaceService.gs" && options.serviceSource ? options.serviceSource : read(file);
     vm.runInContext(source, context, { filename: file });
   }
@@ -682,6 +682,7 @@ function loadTransactionBackend(action, options = {}) {
     return runtime.appendResult;
   };
   vm.runInContext(read("apps-script/AdminPlaceSchema.gs"), context, { filename: "apps-script/AdminPlaceSchema.gs" });
+  vm.runInContext(read("apps-script/ApprovedMediaService.gs"), context, { filename: "apps-script/ApprovedMediaService.gs" });
   vm.runInContext(read("apps-script/Config.gs"), context, { filename: "apps-script/Config.gs" });
   vm.runInContext(read("apps-script/PlaceService.gs"), context, { filename: "apps-script/PlaceService.gs" });
   vm.runInContext(options.serviceSource || read("apps-script/AdminPlaceService.gs"), context, { filename: "apps-script/AdminPlaceService.gs" });

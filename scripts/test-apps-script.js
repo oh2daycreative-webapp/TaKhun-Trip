@@ -40,6 +40,7 @@ const postActions = [
   "adminGetProducts", "adminGetProductDetail", "createProduct", "updateProduct", "deleteProduct",
   "adminGetEvents", "adminGetEventDetail", "createEvent", "updateEvent", "deleteEvent",
   "adminGetRoutes", "adminGetRouteDetail", "createRoute", "updateRoute", "deleteRoute",
+  "adminGetGallery", "adminGetGalleryDetail", "adminGetGalleryMediaOptions", "createGalleryItem", "updateGalleryItem", "deleteGalleryItem",
   "submitReview", "adminLogin", "adminValidateSession", "adminLogout",
   "adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace",
   "adminInspectPlaceDependencies", "adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace",
@@ -153,10 +154,19 @@ function createRouterRuntime({ routerSource = router, json = JSON } = {}) {
       return { ok: true, data: { action } };
     };
   }
+  for (const action of ["adminGetGallery", "adminGetGalleryDetail", "adminGetGalleryMediaOptions", "createGalleryItem", "updateGalleryItem", "deleteGalleryItem"]) {
+    context[`${action}_`] = (...args) => { calls.push({ action, args }); return { ok: true, data: { action } }; };
+  }
   vm.createContext(context);
   vm.runInContext(apiResponse, context, { filename: "apps-script/ApiResponse.gs" });
   vm.runInContext(routerSource, context, { filename: "apps-script/Router.gs" });
   return { context, calls };
+}
+
+for (const action of ["adminGetGallery", "adminGetGalleryDetail", "adminGetGalleryMediaOptions", "createGalleryItem", "updateGalleryItem", "deleteGalleryItem"]) {
+  const runtime = createRouterRuntime(), token = "BODY_TOKEN", payload = { marker: action };
+  assert.deepEqual(post(runtime, { action, token, payload }, { parameter: { action: "adminLogout" }, token: "EVENT_TOKEN" }), { ok: true, data: { action } });
+  assert.deepEqual(runtime.calls, [{ action, args: [token, payload] }]);
 }
 
 // Admin Route actions forward only the body token and payload,

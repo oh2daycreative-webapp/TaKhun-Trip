@@ -198,6 +198,43 @@ async function rejects(fn, code) { await assert.rejects(async () => fn(), error 
   for (const malformed of ["false", 0, null]) {
     await rejects(() => harness({ ...routeDetail, content: { ...routeContent, is_featured: malformed } }).api.getRouteDetail(token, { route_id: "ROUTE-1" }), "MALFORMED_RESPONSE");
   }
+  const galleryContent = { title_th: "Gallery", title_en: "", category: "dam_lake", related_place_id: "", caption_th: "", caption_en: "", credit: "", sort_order: 0, image_url: "", thumbnail_url: "", video_url: "", media_type: "image" };
+  const galleryBase = { media_id: "gallery-one", title_th: "Gallery", media_type: "image", category: "dam_lake", status: "draft", revision, created_at: stamp, updated_at: stamp, media_state: "approved_image" };
+  const galleryDetail = { ...galleryBase, content: galleryContent };
+  const galleryOption = { media_id: "gallery-one", entity_type: "gallery", entity_id: "GALLERY-ONE", role: "gallery", alt_th: "ภาพ", alt_en: "Image", fallback: "assets/media/placeholders/gallery.svg", outputs: [{ width: 640, height: 427, path: "assets/media/generated/gallery/gallery-one-640.webp" }] };
+  for (const [method, payload, data, action] of [
+    ["getGallery", { category: "dam_lake", status: "draft", media_type: "image", page: 1, page_size: 20 }, { items: [galleryBase], page: 1, page_size: 20, total: 1, total_pages: 1 }, "adminGetGallery"],
+    ["getGalleryDetail", { media_id: "gallery-one" }, galleryDetail, "adminGetGalleryDetail"],
+    ["getGalleryMediaOptions", { page: 1, page_size: 20 }, { items: [galleryOption], page: 1, page_size: 20, total: 1, total_pages: 1 }, "adminGetGalleryMediaOptions"],
+    ["createGalleryItem", { media_id: "gallery-one", title_th: "Gallery", title_en: "", category: "dam_lake", related_place_id: "", caption_th: "", caption_en: "", credit: "", sort_order: 0 }, { ...galleryBase, audit_status: "recorded" }, "createGalleryItem"],
+    ["updateGalleryItem", { media_id: "gallery-one", expected_revision: revision, status: "published" }, { ...galleryBase, status: "published", audit_status: "recorded" }, "updateGalleryItem"],
+    ["deleteGalleryItem", { media_id: "gallery-one", expected_revision: revision }, { ...galleryBase, status: "deleted", audit_status: "unconfirmed" }, "deleteGalleryItem"]
+  ]) {
+    const h = harness(data);
+    assert.equal(typeof h.api[method], "function", `${method} export`);
+    assert.equal(JSON.stringify(await h.api[method](token, payload)), JSON.stringify(data));
+    assert.deepEqual(JSON.parse(h.calls[0].options.body), { action, token, payload });
+  }
+  for (const forbidden of ["image_url", "thumbnail_url", "video_url", "source_path", "filesystem_path", "html"]) {
+    const h = harness({});
+    await rejects(() => h.api.createGalleryItem(token, { media_id: "gallery-one", title_th: "Gallery", title_en: "", category: "dam_lake", related_place_id: "", caption_th: "", caption_en: "", credit: "", sort_order: 0, [forbidden]: forbidden === "html" ? "<b>x</b>" : "https://example.com/x" }), "VALIDATION_ERROR");
+    assert.equal(h.calls.length, 0);
+  }
+  await rejects(() => harness({}).api.createGalleryItem(token, { media_id: "gallery-one", title_th: "Gallery", title_en: "", category: "legacy", related_place_id: "", caption_th: "", caption_en: "", credit: "", sort_order: 0 }), "VALIDATION_ERROR");
+  assert.equal((await harness({ ...galleryDetail, content: { ...galleryContent, sort_order: "" } }).api.getGalleryDetail(token, { media_id: "gallery-one" })).content.sort_order, "");
+  const uncertainGallery = harness(null, { code: "OUTCOME_UNKNOWN", message: "private", retryable: false, media_id: "gallery-one" });
+  await assert.rejects(uncertainGallery.api.updateGalleryItem(token, { media_id: "gallery-one", expected_revision: revision, status: "published" }), error => error.code === "OUTCOME_UNKNOWN" && error.media_id === "gallery-one" && error.retryable === false);
+  for (const malformed of [
+    { ...galleryBase, status: "published", audit_status: "recorded" },
+    { ...galleryBase, media_type: "video", media_state: "legacy_video", audit_status: "recorded" }
+  ]) await rejects(() => harness(malformed).api.createGalleryItem(token, { media_id: "gallery-one", title_th: "Gallery", title_en: "", category: "dam_lake", related_place_id: "", caption_th: "", caption_en: "", credit: "", sort_order: 0 }), "MALFORMED_RESPONSE");
+  for (const content of [
+    { ...galleryContent, media_type: "video" },
+    { ...galleryContent, category: "mountain_nature" },
+    { ...galleryContent, title_th: "Contradiction" }
+  ]) await rejects(() => harness({ ...galleryDetail, content }).api.getGalleryDetail(token, { media_id: "gallery-one" }), "MALFORMED_RESPONSE");
+  const legacyVideoDetail = { ...galleryDetail, media_id: "LEGACY-VIDEO", media_type: "video", media_state: "legacy_video", category: "event", title_th: "Legacy", content: { ...galleryContent, media_type: "video", category: "event", title_th: "Legacy", video_url: "https://video.example/legacy.mp4" } };
+  assert.equal((await harness(legacyVideoDetail).api.getGalleryDetail(token, { media_id: "LEGACY-VIDEO" })).media_state, "legacy_video");
   const legacyRoute = { ...routeDetail, created_at: "2026-07-11 10:00:00", updated_at: "2024-02-29 23:59:59", content: { ...routeContent, description_th: "=legacy", cover_image_url: "javascript:legacy", travel_style: "Legacy Value", map_focus_lat: 999, sort_order: -1 } };
   assert.equal((await harness(legacyRoute).api.getRouteDetail(token, { route_id: "ROUTE-1" })).content.description_th, "=legacy");
   const admin = { admin_id: "ADM-123e4567-e89b-12d3-a456-426614174000", username: "operator", display_name: "Operator", role: "super_admin" };

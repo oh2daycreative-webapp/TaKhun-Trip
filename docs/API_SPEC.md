@@ -874,14 +874,14 @@ GET ?action=getEventDetail&event_id=EVT-001&lang=th
 ### Request
 
 ```text
-GET ?action=getGallery&category=place&related_place_id=BTK-001&lang=th
+GET ?action=getGallery&category=dam_lake&related_place_id=BTK-001&lang=th
 ```
 
 ### Query Parameters
 
 | Parameter | Required | Example |
 |---|---:|---|
-| `category` | no | `place` |
+| `category` | no | `dam_lake` |
 | `media_type` | no | `image` |
 | `related_place_id` | no | `BTK-001` |
 | `lang` | no | `th` |
@@ -897,7 +897,7 @@ GET ?action=getGallery&category=place&related_place_id=BTK-001&lang=th
         "media_id": "GAL-001",
         "title": "ทะเลสาบเชี่ยวหลาน",
         "media_type": "image",
-        "category": "place",
+        "category": "dam_lake",
         "related_place_id": "BTK-001",
         "image_url": "",
         "video_url": "",
@@ -1982,24 +1982,22 @@ Except for the M7 Place replacement in section 21, sections 7.3 through 7.29 des
 
 ## 7.25 `createGalleryItem`
 
-เพิ่มรูปภาพ/วิดีโอ
+เพิ่มรูปภาพจาก approved manifest เท่านั้น (ไม่รองรับการสร้างวิดีโอ)
 
 ```json
 {
   "action": "createGalleryItem",
   "token": "session-token",
   "payload": {
+    "media_id": "gallery-dam-lake-001",
     "title_th": "ทะเลสาบเชี่ยวหลาน",
     "title_en": "",
-    "media_type": "image",
-    "category": "place",
+    "category": "dam_lake",
     "related_place_id": "BTK-001",
-    "image_url": "",
-    "video_url": "",
-    "thumbnail_url": "",
     "caption_th": "",
+    "caption_en": "",
     "credit": "",
-    "status": "published"
+    "sort_order": 0
   }
 }
 ```
@@ -2008,14 +2006,15 @@ Except for the M7 Place replacement in section 21, sections 7.3 through 7.29 des
 
 ## 7.26 `updateGalleryItem`
 
-แก้ไขรูปภาพ/วิดีโอ
+แก้ไขเนื้อหารูปภาพ; วิดีโอเดิมเปลี่ยนได้เฉพาะ lifecycle
 
 ```json
 {
   "action": "updateGalleryItem",
   "token": "session-token",
   "payload": {
-    "media_id": "GAL-001",
+    "media_id": "gallery-dam-lake-001",
+    "expected_revision": "r1-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     "title_th": "ทะเลสาบเชี่ยวหลาน",
     "status": "published"
   }
@@ -2033,7 +2032,8 @@ Except for the M7 Place replacement in section 21, sections 7.3 through 7.29 des
   "action": "deleteGalleryItem",
   "token": "session-token",
   "payload": {
-    "media_id": "GAL-001"
+    "media_id": "gallery-dam-lake-001",
+    "expected_revision": "r1-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   }
 }
 ```
@@ -2466,6 +2466,119 @@ page=1&page_size=20
 - กิจกรรม: `event_date asc`
 - สินค้า: `is_featured desc`, `sort_order asc`
 - Gallery: `sort_order asc`, `created_at desc`
+
+## M8 Phase A Gallery Admin authority
+
+This section supersedes the older Gallery authoring examples in 7.24â€“7.27.
+The protected POST actions are `adminGetGallery`, `adminGetGalleryDetail`,
+`adminGetGalleryMediaOptions`, `createGalleryItem`, `updateGalleryItem`, and
+`deleteGalleryItem`. Reads allow all four Admin roles; mutations use the
+established writer roles.
+
+List accepts `keyword`, `status`, `media_type`, `category`, `page`, and
+`page_size`; Detail accepts exactly `media_id`; Media Options accepts only
+`keyword`, `page`, and `page_size`. Media Options returns sanitized manifest
+items with `entity_type=gallery` and `role=gallery`.
+
+Create accepts immutable lowercase manifest `media_id` plus exactly
+`title_th`, `title_en`, `category`, `related_place_id`, `caption_th`,
+`caption_en`, `credit`, and `sort_order`. It creates an image draft. Update
+requires `media_id`, `expected_revision`, and at least one editable field or
+status. Delete requires exactly `media_id` and `expected_revision` and performs
+a soft delete. URL, path, HTML, and video-authoring keys are rejected.
+
+Canonical categories are `dam_lake`, `mountain_nature`, `community_life`,
+`food_fruit`, and `activity_tradition`. Legacy categories remain readable in
+Admin and published legacy rows remain visible in unfiltered public reads, but
+cannot be newly published. Legacy videos are readable and lifecycle-only.
+
+Mutation results include `audit_status` as `recorded` or `unconfirmed`. A
+verified entity write followed by audit uncertainty succeeds as
+`unconfirmed`; uncertain entity state returns `OUTCOME_UNKNOWN`,
+`retryable:false`, and `media_id` when known. Clients never automatically
+retry mutations. Mutation invalidation advances the ContentCache generation,
+so old cache keys cannot be reused; the public Gallery TTL remains 600 seconds.
+
+### Gallery lifecycle transitions
+
+| Current status | Allowed next status |
+|---|---|
+| `draft` | `published`, `archived`, `deleted` |
+| `published` | `hidden`, `archived`, `deleted` |
+| `hidden` | `draft`, `published`, `archived`, `deleted` |
+| `archived` | `draft`, `deleted` |
+| `deleted` | `draft` |
+
+All other direct transitions are rejected with `INVALID_TRANSITION`. Legacy
+videos are lifecycle-only and cannot transition to `published`.
+
+### Exact sanitized Gallery Admin responses
+
+`adminGetGallery` returns:
+
+```text
+data = {
+  items: [{
+    media_id, title_th, media_type, category, status, revision,
+    created_at, updated_at, media_state
+  }],
+  page, page_size, total, total_pages
+}
+```
+
+`media_state` is exactly `approved_image` or `legacy_video`. `revision` is
+`r1-` followed by 64 lowercase hexadecimal characters. Timestamps are
+canonical ISO timestamps or accepted legacy `YYYY-MM-DD HH:mm:ss` values.
+
+`adminGetGalleryDetail` returns the same outer item keys plus:
+
+```text
+content = {
+  title_th, title_en, media_type, category, related_place_id,
+  image_url, video_url, thumbnail_url, caption_th, caption_en,
+  credit, sort_order
+}
+```
+
+The duplicated outer `title_th`, `media_type`, and `category` values equal the
+corresponding `content` values.
+
+`adminGetGalleryMediaOptions` returns:
+
+```text
+data = {
+  items: [{
+    media_id, entity_type, entity_id, role, alt_th, alt_en, fallback,
+    outputs: [{ width, height, path }]
+  }],
+  page, page_size, total, total_pages
+}
+```
+
+Every option has `entity_type = gallery` and `role = gallery`; source paths,
+hashes, byte counts, and other manifest internals are excluded.
+
+`createGalleryItem`, `updateGalleryItem`, and `deleteGalleryItem` return:
+
+```text
+data = {
+  media_id, title_th, media_type, category, status, revision,
+  created_at, updated_at, media_state, audit_status
+}
+```
+
+Create always returns a draft image. Delete always returns `status = deleted`.
+`audit_status` is exactly `recorded` or `unconfirmed`. An uncertain entity
+mutation returns no success data and exposes only:
+
+```text
+error = {
+  code: "OUTCOME_UNKNOWN",
+  message,
+  retryable: false,
+  media_id
+}
+```
 
 ### 18.2 Admin
 

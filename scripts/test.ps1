@@ -70,6 +70,8 @@ $required = @(
   "apps-script/SheetService.gs",
   "apps-script/AdminPlaceSchema.gs",
   "apps-script/AdminPlaceService.gs",
+  "apps-script/ApprovedMediaService.gs",
+  "apps-script/AdminGalleryService.gs",
   "apps-script/SettingsService.gs",
   "apps-script/CategoryService.gs",
   "apps-script/PlaceService.gs",
@@ -190,6 +192,8 @@ if ($LASTEXITCODE -ne 0) { throw "Admin Place schema verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin Place service verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-content-service.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Product/Event contracts verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-gallery-service.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Gallery service verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-route-service.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Route service verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-content-api.js")
