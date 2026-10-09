@@ -13,17 +13,22 @@
   let elements, token, role, canWrite = false, initialized = false, bound = false;
   let page = 1, filters = { keyword: "", status: "" }, listBusy = false, mutationBusy = false, mutationRequestBusy = false, detailGeneration = 0;
   let record = null, stops = [], placeResults = [], placePage = 1, placeTotalPages = 0, placeGeneration = 0, placeBusy = false, dirty = false, blocked = false, currentView = "list";
+  let deleteAuditWarning = "", mutationMessageGeneration = 0;
+  let uncertainMarkerKey = "", uncertainGeneration = 0, uncertainReadyGeneration = -1;
 
   function q(selector) { return global.document.querySelector(selector); }
   function node(tag, text, className) { const item = global.document.createElement(tag); if (text !== undefined) item.textContent = text; if (className) item.className = className; return item; }
   function button(text, handler) { const item = node("button", text, "button"); item.type = "button"; item.addEventListener("click", handler); return item; }
   function show(item, visible) { item.hidden = !visible; }
-  function announce(text, editor) { (editor ? elements.editorStatus : elements.listStatus).textContent = text; }
+  function announce(text, editor) { (editor ? elements.editorStatus : elements.listStatus).textContent = !editor && deleteAuditWarning ? (text ? `${text} · ${deleteAuditWarning}` : deleteAuditWarning) : text; }
+  function beginMutationMessage() { deleteAuditWarning = ""; return ++mutationMessageGeneration; }
   function safeMessage(error) {
     return ({ UNAUTHORIZED: "กรุณาเข้าสู่ระบบอีกครั้ง", FORBIDDEN: "บัญชีนี้ไม่มีสิทธิ์ทำรายการ", VALIDATION_ERROR: "ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง", NOT_FOUND: "ไม่พบเส้นทาง", CONFLICT: "ข้อมูลบนเซิร์ฟเวอร์เปลี่ยนแล้ว กรุณาโหลดข้อมูลล่าสุดเพื่อกระทบยอด", INVALID_TRANSITION: "ไม่สามารถเปลี่ยนเป็นสถานะนี้ได้", OUTCOME_UNKNOWN: "ยังยืนยันผลรายการไม่ได้ กรุณากระทบยอดก่อนทำรายการใหม่", NETWORK_ERROR: "การเชื่อมต่อขัดข้อง ผลรายการอาจยังไม่แน่นอน", TIMEOUT: "หมดเวลารอผล ผลรายการอาจยังไม่แน่นอน" })[error && error.code] || "ไม่สามารถทำรายการได้ในขณะนี้";
   }
   function readMarker() { try { const value = global.sessionStorage.getItem(MARKER); return value ? JSON.parse(value) : null; } catch (_error) { return null; } }
-  function writeMarker(value) { try { if (value) global.sessionStorage.setItem(MARKER, JSON.stringify(value)); else global.sessionStorage.removeItem(MARKER); return true; } catch (_error) { return false; } }
+  function resetUncertainReadiness(marker) { uncertainMarkerKey = marker ? JSON.stringify(marker) : ""; uncertainGeneration += 1; uncertainReadyGeneration = -1; if (elements) elements.uncertainComplete.hidden = true; }
+  function writeMarker(value) { try { if (value) global.sessionStorage.setItem(MARKER, JSON.stringify(value)); else global.sessionStorage.removeItem(MARKER); resetUncertainReadiness(value); return true; } catch (_error) { return false; } }
+  function syncUncertainControls() { const marker = readMarker(); if ((marker ? JSON.stringify(marker) : "") !== uncertainMarkerKey) resetUncertainReadiness(marker); show(elements.uncertain, !!marker); elements.create.disabled = !!marker; elements.uncertainComplete.hidden = !marker || uncertainReadyGeneration !== uncertainGeneration; return marker; }
   function writer() { return canWrite && !mutationBusy && !blocked; }
   function setDirty(value) { dirty = value; }
   function syncPlaceControls() {
@@ -148,12 +153,12 @@
   function blockFor(error, creating) {
     const uncertain = error && UNCERTAIN_CODES.includes(error.code);
     if (error && error.code === "CONFLICT" || uncertain) blocked = true;
-    if (creating && uncertain) writeMarker({ route_id: error && error.route_id || "", at: Date.now() });
+    if (creating && uncertain) { writeMarker({ route_id: error && error.route_id || "", at: Date.now() }); syncUncertainControls(); }
     announce(safeMessage(error), true); syncMutationControls();
   }
   async function save(event) {
     event.preventDefault(); if (!writer() || !validEditor()) return;
-    const turn = detailGeneration;
+    const turn = detailGeneration; beginMutationMessage();
     mutationBusy = true; syncMutationControls(); const creating = !record, status = record ? record.status : "draft";
     if (creating && !writeMarker({ route_id: "", at: Date.now() })) { mutationBusy = false; announce("ไม่สามารถเก็บสถานะความไม่แน่นอนได้ จึงยังไม่เริ่มสร้าง", true); syncMutationControls(); return; }
     const payload = creating ? { content: readContent(), stops: requestStops(status) } : { route_id: record.route_id, expected_revision: record.revision, content: readContent(), stops: requestStops(status) };
@@ -180,25 +185,30 @@
     if (!writer() || !record || !(TRANSITIONS[record.status] || []).includes(status)) return;
     if (dirty) { announce("กรุณาบันทึกหรือโหลดข้อมูลล่าสุดก่อนเปลี่ยนสถานะ", true); return; }
     if (!global.confirm(`ยืนยันเปลี่ยนสถานะเป็น ${STATUS_LABELS[status]}?`)) return;
-    const turn = detailGeneration; mutationBusy = true; mutationRequestBusy = true; syncMutationControls();
+    const turn = detailGeneration; beginMutationMessage(); mutationBusy = true; mutationRequestBusy = true; syncMutationControls();
     let result;
     try { result = await global.TakhunAdminApi.updateRoute(token, { route_id: record.route_id, expected_revision: record.revision, status }); }
     catch (error) { mutationRequestBusy = false; blockFor(error, false); mutationBusy = false; syncMutationControls(); return; }
     mutationRequestBusy = false;
     if (turn !== detailGeneration) { mutationBusy = false; return; }
     record = { ...record, ...result };
-    try { const loaded = await global.TakhunAdminApi.getRouteDetail(token, { route_id: record.route_id }); if (turn !== detailGeneration) return; record = loaded; mutationBusy = false; renderEditor(); announce(`เปลี่ยนสถานะเป็น ${STATUS_LABELS[status]} แล้ว`, true); }
-    catch (_error) { if (turn !== detailGeneration) return; blocked = true; mutationBusy = false; announce("เปลี่ยนสถานะได้รับการยืนยันแล้ว แต่โหลดข้อมูลล่าสุดไม่สำเร็จ กรุณากระทบยอด", true); syncMutationControls(); }
+    try { const loaded = await global.TakhunAdminApi.getRouteDetail(token, { route_id: record.route_id }); if (turn !== detailGeneration) return; record = loaded; mutationBusy = false; renderEditor(); announce(result.audit_status === "unconfirmed" ? `เปลี่ยนสถานะเป็น ${STATUS_LABELS[status]} แล้ว แต่ยังยืนยันบันทึกตรวจสอบไม่ได้` : `เปลี่ยนสถานะเป็น ${STATUS_LABELS[status]} แล้ว`, true); }
+    catch (_error) { if (turn !== detailGeneration) return; blocked = true; mutationBusy = false; announce(result.audit_status === "unconfirmed" ? "เปลี่ยนสถานะได้รับการยืนยันแล้ว แต่โหลดข้อมูลล่าสุดไม่สำเร็จ และยังยืนยันบันทึกตรวจสอบไม่ได้ กรุณากระทบยอด" : "เปลี่ยนสถานะได้รับการยืนยันแล้ว แต่โหลดข้อมูลล่าสุดไม่สำเร็จ กรุณากระทบยอด", true); syncMutationControls(); }
   }
   async function removeRoute() {
     if (!writer() || !record || !(TRANSITIONS[record.status] || []).includes("deleted")) return;
     if (dirty) { announce("กรุณาบันทึกหรือโหลดข้อมูลล่าสุดก่อนลบ", true); return; }
     if (!global.confirm("ยืนยันลบแบบซอฟต์? ข้อมูลจะยังคงอยู่ในระบบ")) return;
+    const messageGeneration = beginMutationMessage();
     mutationBusy = true; mutationRequestBusy = true; syncMutationControls();
-    try { await global.TakhunAdminApi.deleteRoute(token, { route_id: record.route_id, expected_revision: record.revision }); }
+    let result;
+    try { result = await global.TakhunAdminApi.deleteRoute(token, { route_id: record.route_id, expected_revision: record.revision }); }
     catch (error) { mutationRequestBusy = false; blockFor(error, false); mutationBusy = false; syncMutationControls(); return; }
     mutationRequestBusy = false; mutationBusy = false; setDirty(false); currentView = "list"; show(elements.editorView, false); show(elements.listView, true); syncMutationControls();
+    // Keep the confirmed Delete's audit notice when any pending list read finishes.
+    deleteAuditWarning = result.audit_status === "unconfirmed" ? "ลบแล้ว แต่ยังยืนยันบันทึกตรวจสอบไม่ได้" : "";
     await loadList(true);
+    if (result.audit_status === "unconfirmed" && messageGeneration === mutationMessageGeneration) announce("", false);
   }
   async function reconcileEditor() {
     if (!record || mutationBusy) return; const turn = detailGeneration, routeId = record.route_id; mutationBusy = true; syncMutationControls();
@@ -226,11 +236,14 @@
     stops.push({ route_place_id: "", place_id: placeId, place_name: place && place.name_th || placeId, day_number: "", start_time: "", end_time: "", note_th: "", note_en: "" }); setDirty(true); renderStops();
   }
   async function reconcileUncertain() {
-    const marker = readMarker(); if (!marker) return;
+    const marker = syncUncertainControls(); if (!marker) return;
+    const markerKey = uncertainMarkerKey, turn = ++uncertainGeneration;
+    uncertainReadyGeneration = -1; elements.uncertainComplete.hidden = true;
     let ok = false;
     if (marker.route_id) { try { await global.TakhunAdminApi.getRouteDetail(token, { route_id: marker.route_id }); ok = true; } catch (_error) { ok = await loadList(true); } }
     else ok = await loadList(true);
-    elements.uncertainComplete.hidden = !ok;
+    if (turn !== uncertainGeneration || JSON.stringify(readMarker()) !== markerKey) return;
+    uncertainReadyGeneration = ok ? turn : -1; syncUncertainControls();
   }
   function bind() {
     elements.filters.addEventListener("submit", event => { event.preventDefault(); filters = { keyword: elements.filters.elements.namedItem("keyword").value.trim(), status: elements.filters.elements.namedItem("status").value }; loadList(true); });
@@ -239,13 +252,13 @@
     elements.editor.addEventListener("submit", save); elements.delete.addEventListener("click", removeRoute); elements.reconcile.addEventListener("click", reconcileEditor);
     elements.placeSearch.addEventListener("click", () => searchPlaces(true)); elements.placeNext.addEventListener("click", () => searchPlaces(false)); elements.addStop.addEventListener("click", addStop);
     elements.editor.addEventListener("input", () => { if (currentView === "editor") setDirty(true); }); elements.editor.addEventListener("change", () => { if (currentView === "editor") setDirty(true); });
-    elements.uncertainReconcile.addEventListener("click", reconcileUncertain); elements.uncertainComplete.addEventListener("click", () => { if (!global.confirm("ยืนยันว่าตรวจสอบรายการบนเซิร์ฟเวอร์แล้ว?")) return; writeMarker(null); show(elements.uncertain, false); elements.create.disabled = false; });
+    elements.uncertainReconcile.addEventListener("click", reconcileUncertain); elements.uncertainComplete.addEventListener("click", () => { if (!syncUncertainControls() || uncertainReadyGeneration !== uncertainGeneration) return; if (!global.confirm("ยืนยันว่าตรวจสอบรายการบนเซิร์ฟเวอร์แล้ว?")) return; writeMarker(null); syncUncertainControls(); });
     global.addEventListener("beforeunload", event => { if (dirty || mutationBusy) { event.preventDefault(); event.returnValue = ""; } });
   }
   async function complete(result) {
     if (bound) return; const session = global.TakhunAdminAuth.readSession(); if (!session || !session.token) return; bound = true;
     collect(); token = session.token; role = result.admin && result.admin.role || session.role; canWrite = role === "super_admin" || role === "editor";
-    elements.create.hidden = !canWrite; const marker = readMarker(); show(elements.uncertain, !!marker); elements.create.disabled = !!marker;
+    elements.create.hidden = !canWrite; syncUncertainControls();
     bind(); return loadList(true);
   }
   async function init() {

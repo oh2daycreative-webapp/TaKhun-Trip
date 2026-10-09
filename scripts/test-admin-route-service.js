@@ -86,6 +86,13 @@ function stop(placeId, overrides = {}) {
   };
 }
 
+function reorderTable(table, physicalHeaders) {
+  const originalHeaders = table[0].slice();
+  const indexes = physicalHeaders.map(field => originalHeaders.indexOf(field));
+  assert.equal(indexes.every(index => index >= 0), true, "reordered headers must preserve every field");
+  for (let row = 0; row < table.length; row += 1) table[row] = indexes.map(index => table[row][index]);
+}
+
 function harness(options = {}) {
   let held = false;
   let uuid = 0;
@@ -144,7 +151,7 @@ function harness(options = {}) {
           (_, ci) => {
             const field = tables[name][0][c - 1 + ci];
 
-            if (options.badFormat) {
+            if (options.badFormat || options.badFormatField === field) {
               return "General";
             }
 
@@ -158,7 +165,7 @@ function harness(options = {}) {
       ],
 
       getFormulas: () => [
-        Array(nc).fill(options.formula ? "=1+1" : "")
+        Array.from({ length: nc }, (_, ci) => options.formula || options.formulaField === tables[name][0][c - 1 + ci] ? "=1+1" : "")
       ],
 
       setValues: rows => {
@@ -1372,6 +1379,155 @@ test("Route lock release failure does not replace a known successful result", ()
     result.data.audit_status,
     "recorded"
   );
+});
+
+for (const action of ["updateRoute", "deleteRoute"]) {
+  test(`Route ${action === "updateRoute" ? "stop removal" : "Delete"} preserves extension column values`, () => {
+    const h = harness();
+    const created = h.call("createRoute", "editor", {
+      content: routeContent(),
+      stops: [stop("PLC-1")]
+    }).data;
+    h.tables.routes[0].push("custom_route_notes");
+    h.tables.routes[1].push("Keep parent note");
+    h.tables.route_places[0].push("custom_stop_notes");
+    h.tables.route_places[1].push("Keep relationship note");
+    const payload = {
+      route_id: created.route_id,
+      expected_revision: created.revision
+    };
+    if (action === "updateRoute") payload.stops = [];
+    const result = h.call(action, "editor", payload);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(h.tables.routes[1].at(-1), "Keep parent note");
+    assert.equal(h.tables.route_places[1].at(-1), "Keep relationship note");
+    assert.equal(h.tables.route_places[1][stopHeaders.indexOf("status")], "deleted");
+  });
+}
+
+test("Route lifecycle delete verifies the persisted aggregate with soft-deleted stops", () => {
+  const h = harness();
+  const created = h.call("createRoute", "editor", {
+    content: routeContent(),
+    stops: [stop("PLC-1", { stop_order: 1 }), stop("PLC-2", { stop_order: 2 })]
+  }).data;
+  const deleted = h.call("updateRoute", "editor", {
+    route_id: created.route_id,
+    expected_revision: created.revision,
+    status: "deleted"
+  });
+  assert.equal(deleted.ok, true, JSON.stringify(deleted));
+  assert.equal(deleted.data.status, "deleted");
+  assert.equal(deleted.data.audit_status, "recorded");
+  const stopStatus = h.tables.route_places[0].indexOf("status");
+  assert.deepEqual(h.tables.route_places.slice(1).map(row => row[stopStatus]), ["deleted", "deleted"]);
+  const detail = h.call("adminGetRouteDetail", "viewer", { route_id: created.route_id });
+  assert.equal(detail.ok, true);
+  assert.deepEqual(detail.data.stops, []);
+  assert.equal(deleted.data.revision, detail.data.revision, "returned revision must match the verified persisted aggregate");
+  assert.equal(h.tables.activity_logs.length, 3, "verified lifecycle deletion appends its audit after Create");
+});
+
+test("Route deleted updates never append newly submitted relationships", () => {
+  const h = harness();
+  const created = h.call("createRoute", "editor", {
+    content: routeContent(),
+    stops: [stop("PLC-1", { stop_order: 1 }), stop("PLC-2", { stop_order: 2 })]
+  }).data;
+  const before = h.call("adminGetRouteDetail", "editor", { route_id: created.route_id }).data;
+  const deleted = h.call("updateRoute", "editor", {
+    route_id: created.route_id,
+    expected_revision: before.revision,
+    status: "deleted",
+    stops: [
+      { ...before.stops[0], status: "deleted" },
+      stop("PLC-3", { stop_order: 2, note_th: "Must not become an unverified deleted row" })
+    ]
+  });
+  assert.equal(deleted.ok, true, JSON.stringify(deleted));
+  assert.equal(deleted.data.audit_status, "recorded");
+  assert.equal(h.tables.route_places.length, 3, "deleted updates cannot append a row excluded from aggregate verification");
+  const placeIndex = h.tables.route_places[0].indexOf("place_id");
+  const statusIndex = h.tables.route_places[0].indexOf("status");
+  assert.deepEqual(h.tables.route_places.slice(1).map(row => row[placeIndex]), ["PLC-1", "PLC-2"]);
+  assert.deepEqual(h.tables.route_places.slice(1).map(row => row[statusIndex]), ["deleted", "deleted"]);
+  const detail = h.call("adminGetRouteDetail", "viewer", { route_id: created.route_id }).data;
+  assert.deepEqual(detail.stops, []);
+  assert.equal(deleted.data.revision, detail.revision);
+});
+
+test("Route writes remain safe and logical with reordered physical headers", () => {
+  const h = harness();
+  const created = h.call("createRoute", "editor", {
+    content: routeContent(),
+    stops: [stop("PLC-1", { stop_order: 1 }), stop("PLC-2", { stop_order: 2 })]
+  }).data;
+  reorderTable(h.tables.routes, ["is_featured", ...routeHeaders.filter(field => field !== "is_featured")]);
+  reorderTable(h.tables.route_places, ["status", "place_id", ...stopHeaders.filter(field => !["status", "place_id"].includes(field))]);
+  const before = h.call("adminGetRouteDetail", "editor", { route_id: created.route_id }).data;
+  const updated = h.call("updateRoute", "editor", {
+    route_id: created.route_id,
+    expected_revision: before.revision,
+    content: routeContent({ name_th: "Reordered route" }),
+    stops: [{ ...before.stops[1], stop_order: 1 }]
+  });
+  assert.equal(updated.ok, true, JSON.stringify(updated));
+  const detail = h.call("adminGetRouteDetail", "viewer", { route_id: created.route_id }).data;
+  assert.equal(detail.content.name_th, "Reordered route");
+  assert.deepEqual(detail.stops.map(item => item.place_id), ["PLC-2"]);
+  assert.equal(detail.stops[0].route_place_id, before.stops[1].route_place_id);
+  const relationId = h.tables.route_places[0].indexOf("route_place_id");
+  const relationStatus = h.tables.route_places[0].indexOf("status");
+  const removed = h.tables.route_places.find(row => row[relationId] === before.stops[0].route_place_id);
+  assert.equal(removed[relationStatus], "deleted", "soft removal follows logical headers after physical reorder");
+});
+
+for (const unsafe of ["formulaField", "badFormatField"]) {
+  test(`Route reordered-header preflight still rejects unsafe ${unsafe === "formulaField" ? "formula" : "format"} cells`, () => {
+    const h = harness();
+    const created = h.call("createRoute", "editor", { content: routeContent(), stops: [] }).data;
+    reorderTable(h.tables.routes, ["is_featured", ...routeHeaders.filter(field => field !== "is_featured")]);
+    h.options[unsafe] = "name_th";
+    const effectsBefore = h.effects.length;
+    const result = h.call("updateRoute", "editor", {
+      route_id: created.route_id,
+      expected_revision: created.revision,
+      content: routeContent({ name_th: "Unsafe destination" })
+    });
+    error(result, "SERVER_ERROR");
+    assert.equal(h.effects.length, effectsBefore, "unsafe reordered physical cell must fail before mutation");
+  });
+}
+
+test("Route status-only publish validates retained legacy content before mutation", () => {
+  const h = harness();
+  const created = h.call("createRoute", "editor", { content: routeContent(), stops: [] }).data;
+  const nameIndex = h.tables.routes[0].indexOf("name_th");
+  const statusIndex = h.tables.routes[0].indexOf("status");
+  h.tables.routes[1][nameIndex] = "";
+  const legacy = h.call("adminGetRouteDetail", "editor", { route_id: created.route_id }).data;
+  const effectsBefore = h.effects.length;
+  const rejected = h.call("updateRoute", "editor", {
+    route_id: created.route_id,
+    expected_revision: legacy.revision,
+    status: "published"
+  });
+  error(rejected, "VALIDATION_ERROR");
+  assert.equal(h.effects.length, effectsBefore);
+  assert.equal(h.tables.routes[1][statusIndex], "draft");
+  const repaired = h.call("updateRoute", "editor", {
+    route_id: created.route_id,
+    expected_revision: legacy.revision,
+    content: routeContent({ name_th: "Repaired route" })
+  });
+  assert.equal(repaired.ok, true, JSON.stringify(repaired));
+  const published = h.call("updateRoute", "editor", {
+    route_id: created.route_id,
+    expected_revision: repaired.data.revision,
+    status: "published"
+  });
+  assert.equal(published.ok, true, JSON.stringify(published));
+  assert.equal(published.data.status, "published");
 });
 
 console.log(

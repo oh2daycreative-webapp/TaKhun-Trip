@@ -1005,6 +1005,23 @@ function AdminRouteService_updatePlan_(payload) {
     );
   }
 
+  if (nextStatus === "published") {
+    var publishContent = {};
+
+    AdminRouteService_ROUTE_FIELDS_.forEach(function (field) {
+      publishContent[field] = content[field];
+    });
+
+    if (publishContent.is_featured === "") {
+      publishContent.is_featured = false;
+    }
+
+    content = AdminRouteService_routeContent_(
+      publishContent,
+      true
+    );
+  }
+
   var submittedStops;
 
   if (p.stops === undefined) {
@@ -1038,6 +1055,13 @@ function AdminRouteService_updatePlan_(payload) {
     nextStatus
   );
 
+  if (nextStatus === "deleted") {
+    // Deleted aggregates retain existing rows, but never add new inactive rows.
+    submittedStops = submittedStops.filter(function (stop) {
+      return !!stop.route_place_id;
+    });
+  }
+
   var reconciled = AdminRouteService_reconcileStops_(
     stopTable,
     routeId,
@@ -1064,12 +1088,13 @@ function AdminRouteService_updatePlan_(payload) {
     stopTable: stopTable,
     routeEntry: routeEntry,
     route: route,
-    activeStops: reconciled.active,
+    relationshipWrites: reconciled.active,
+    activeStops: nextStatus === "deleted" ? [] : reconciled.active,
     removedStops: reconciled.removed,
     previousRevision: currentRevision,
     revision: AdminRouteService_revision_(
       route,
-      reconciled.active
+      nextStatus === "deleted" ? [] : reconciled.active
     )
   };
 }
@@ -1324,7 +1349,7 @@ function AdminRouteService_preflightPlan_(plan, admin, action) {
     AdminRouteService_assertFormats_(
       routeSheet,
       routeRowNumber,
-      AdminRouteService_ROUTE_HEADERS_,
+      plan.routeTable.headers,
       routeRecord
     );
   } else {
@@ -1347,7 +1372,7 @@ function AdminRouteService_preflightPlan_(plan, admin, action) {
   var existingStopWrites = [];
   var newStopWrites = [];
 
-  plan.activeStops.forEach(function (stop) {
+  (plan.relationshipWrites || plan.activeStops).forEach(function (stop) {
     var record = AdminRouteService_fullRecord_(
       AdminRouteService_STOP_HEADERS_,
       stop
@@ -1368,7 +1393,7 @@ function AdminRouteService_preflightPlan_(plan, admin, action) {
       AdminRouteService_assertFormats_(
         stopSheet,
         existing[0].sourceRowNumber,
-        AdminRouteService_STOP_HEADERS_,
+        plan.stopTable.headers,
         record
       );
 
@@ -1393,7 +1418,7 @@ function AdminRouteService_preflightPlan_(plan, admin, action) {
       AdminRouteService_assertFormats_(
         stopSheet,
         entry.sourceRowNumber,
-        AdminRouteService_STOP_HEADERS_,
+        plan.stopTable.headers,
         record
       );
 

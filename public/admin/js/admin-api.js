@@ -679,8 +679,11 @@
     for (const key of ROUTE_CONTENT_FIELDS) {
       const value = source[key];
       if (key === "is_featured") {
-        if (typeof value !== "boolean") { if (responseMode) return null; validationError(); }
-        result[key] = value;
+        if (responseMode && value === "") result[key] = false;
+        else {
+          if (typeof value !== "boolean") { if (responseMode) return null; validationError(); }
+          result[key] = value;
+        }
       } else if (["map_focus_lat", "map_focus_lng", "sort_order"].includes(key)) {
         if (value !== "" && (typeof value !== "number" || !Number.isFinite(value))) { if (responseMode) return null; validationError(); }
         if (!responseMode && value !== "" && (key === "sort_order" ? !Number.isSafeInteger(value) || value < 0 : Math.abs(value) > (key === "map_focus_lat" ? 90 : 180))) validationError();

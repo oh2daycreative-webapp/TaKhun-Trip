@@ -44,18 +44,18 @@ function harness(role = "editor", marker = null) {
   const placeKeyword = make("[data-route-place-keyword]", "input"), placeSearch = make("[data-route-place-search]", "button"), placeResults = make("[data-route-place-results]", "select"), addStop = make("[data-route-add-stop]", "button"), placeNext = make("[data-route-place-next]", "button"), placeStatus = make("[data-route-place-status]", "p");
   host.append(listView, editorView, filters, create, refresh, listStatus, list, pagination, uncertain, uncertainReconcile, uncertainComplete, editor, editorTitle, editorStatus, identity, back, contentFields, stopsFields, stops, lifecycle, save, remove, reconcile, placeKeyword, placeSearch, placeResults, addStop, placeNext, placeStatus);
   const storage = new Map(); if (marker) storage.set("takhun-routes-uncertain-create", JSON.stringify(marker));
-  const calls = [], writes = [], listeners = {}; let current = route(), failure = null, pending = null, listPending = null, detailPending = null, detailFailure = null, detailHandler = null, placeHandler = null, confirms = true;
+  const calls = [], writes = [], listeners = {}; let current = route(), failure = null, pending = null, listPending = null, detailPending = null, detailFailure = null, detailHandler = null, placeHandler = null, confirms = true, auditStatus = "recorded";
   const api = {
     getRoutes: async (_token, payload) => { calls.push(["list", payload]); if (listPending) await listPending; return { items: [{ route_id: current.route_id, status: current.status, revision: current.revision, created_at: current.created_at, updated_at: current.updated_at, name_th: current.content.name_th, travel_style: current.content.travel_style }], page: payload.page, page_size: 20, total: 21, total_pages: 2 }; },
     getRouteDetail: async (_token, payload) => { calls.push(["detail", payload]); if (detailHandler) return detailHandler(payload); if (detailPending) await detailPending; if (detailFailure) throw detailFailure; return JSON.parse(JSON.stringify(current)); },
     getPlaces: async (_token, payload) => { calls.push(["places", payload]); if (placeHandler) return placeHandler(payload); return { items: [{ place_id: "P-2", name_th: "สถานที่สอง", status: "published" }, { place_id: "P-3", name_th: "สถานที่สาม", status: "published" }], page: payload.page, page_size: 20, total: 2, total_pages: 1 }; },
     createRoute: async (_token, payload) => mutate("create", payload), updateRoute: async (_token, payload) => mutate("update", payload), deleteRoute: async (_token, payload) => mutate("delete", payload)
   };
-  async function mutate(kind, payload) { writes.push([kind, payload]); if (pending) await pending; if (failure) throw failure; current = { ...current, status: kind === "delete" ? "deleted" : payload.status || current.status, revision: "r1-" + "b".repeat(64), content: payload.content || current.content, stops: payload.stops || current.stops }; return { route_id: current.route_id, status: current.status, revision: current.revision, created_at: current.created_at, updated_at: current.updated_at, name_th: current.content.name_th, travel_style: current.content.travel_style, audit_status: "recorded" }; }
+  async function mutate(kind, payload) { writes.push([kind, payload]); if (pending) await pending; if (failure) throw failure; current = { ...current, status: kind === "delete" ? "deleted" : payload.status || current.status, revision: "r1-" + "b".repeat(64), content: payload.content || current.content, stops: payload.stops || current.stops }; return { route_id: current.route_id, status: current.status, revision: current.revision, created_at: current.created_at, updated_at: current.updated_at, name_th: current.content.name_th, travel_style: current.content.travel_style, audit_status: auditStatus }; }
   const document = { querySelector: selector => selectors[selector], createElement: element, body: { classList: { contains: () => true } } }; Object.defineProperty(document, "activeElement", { get: () => activeElement });
   const window = { document, confirm: () => confirms, addEventListener: (type, handler) => { listeners[type] = handler; }, sessionStorage: { getItem: key => storage.get(key) || null, setItem: (key,value) => storage.set(key,value), removeItem: key => storage.delete(key) }, TakhunAdminShell: { init: async () => ({ status: "authenticated", admin: { role } }) }, TakhunAdminAuth: { readSession: () => ({ token: "TOKEN", role }) }, TakhunAdminApi: api, Date };
   window.window = window; vm.runInNewContext(source, { window, URLSearchParams, MutationObserver: undefined, console }, { filename: "admin-routes.js" });
-  return { window, api, calls, writes, storage, listeners, fields, values: { host,listView,editorView,filters,keyword,statusFilter,create,refresh,list,pagination,editor,stops,lifecycle,save,remove,reconcile,placeKeyword,placeSearch,placeResults,placeNext,placeStatus,addStop,uncertain,uncertainReconcile,uncertainComplete,editorStatus,identity,back }, setFailure(value) { failure = value; }, setPending(value) { pending = value; }, setListPending(value) { listPending = value; }, setDetailPending(value) { detailPending = value; }, setDetailFailure(value) { detailFailure = value; }, setDetailHandler(value) { detailHandler = value; }, setPlaceHandler(value) { placeHandler = value; }, setConfirm(value) { confirms = value; }, setCurrent(value) { current = value; }, current: () => current };
+  return { window, api, calls, writes, storage, listeners, fields, values: { host,listView,editorView,filters,keyword,statusFilter,create,refresh,list,pagination,editor,stops,lifecycle,save,remove,reconcile,placeKeyword,placeSearch,placeResults,placeNext,placeStatus,addStop,uncertain,uncertainReconcile,uncertainComplete,editorStatus,identity,back,listStatus }, setFailure(value) { failure = value; }, setPending(value) { pending = value; }, setListPending(value) { listPending = value; }, setDetailPending(value) { detailPending = value; }, setDetailFailure(value) { detailFailure = value; }, setDetailHandler(value) { detailHandler = value; }, setPlaceHandler(value) { placeHandler = value; }, setConfirm(value) { confirms = value; }, setAuditStatus(value) { auditStatus = value; }, setCurrent(value) { current = value; }, current: () => current };
 }
 
 (async () => {
@@ -77,12 +77,114 @@ function harness(role = "editor", marker = null) {
   const existingSelect = edit.values.stops.children[0].children[1].children[0]; existingSelect.value = "P-2"; existingSelect.selectedIndex = 1; await existingSelect.fire("change"); await edit.values.editor.fire("submit"); assert.equal(edit.writes[0][1].stops[0].route_place_id, "REL-1", "changing Place preserves relation identity");
   assert.ok(byText(edit.values.lifecycle, "เปลี่ยนเป็น เผยแพร่")); assert.equal(byText(edit.values.lifecycle, "เปลี่ยนเป็น ซ่อน"), undefined, "invalid transition is absent");
   const stale = harness(); await stale.window.TakhunAdminRoutes.init(); await byText(stale.values.list, "แก้ไข").fire("click"); stale.fields.name_th.value = "แก้ไข"; await stale.values.editor.fire("input"); stale.setFailure({ code: "CONFLICT" }); await stale.values.editor.fire("submit"); await stale.values.editor.fire("submit"); assert.equal(stale.writes.length, 1, "conflict never retries"); assert.equal(stale.values.reconcile.hidden, false); stale.setFailure(null); await stale.values.reconcile.fire("click"); assert.equal(stale.calls.at(-1)[0], "detail", "reconciliation is a read");
-  for (const code of ["OUTCOME_UNKNOWN", "NETWORK_ERROR", "TIMEOUT"]) { const uncertain = harness(); await uncertain.window.TakhunAdminRoutes.init(); await uncertain.values.create.fire("click"); uncertain.fields.name_th.value = "ใหม่"; uncertain.fields.short_description_th.value = "สั้น"; uncertain.fields.description_th.value = "รายละเอียด"; uncertain.setFailure({ code, route_id: code === "OUTCOME_UNKNOWN" ? "ROUTE-2" : undefined }); await uncertain.values.editor.fire("submit"); await uncertain.values.editor.fire("submit"); assert.equal(uncertain.writes.length, 1, `${code} never retries`); assert.ok(uncertain.storage.has("takhun-routes-uncertain-create")); }
+  for (const code of ["OUTCOME_UNKNOWN", "NETWORK_ERROR", "TIMEOUT"]) { const uncertain = harness(); await uncertain.window.TakhunAdminRoutes.init(); await uncertain.values.create.fire("click"); uncertain.fields.name_th.value = "ใหม่"; uncertain.fields.short_description_th.value = "สั้น"; uncertain.fields.description_th.value = "รายละเอียด"; uncertain.setFailure({ code, route_id: code === "OUTCOME_UNKNOWN" ? "ROUTE-2" : undefined }); await uncertain.values.editor.fire("submit"); await uncertain.values.editor.fire("submit"); assert.equal(uncertain.writes.length, 1, `${code} never retries`); assert.ok(uncertain.storage.has("takhun-routes-uncertain-create")); assert.equal(uncertain.values.uncertain.hidden, false, `${code} exposes same-session reconciliation`); await uncertain.values.back.fire("click"); assert.equal(uncertain.values.listView.hidden, false, `${code} returns to the list without reload`); assert.equal(uncertain.values.create.disabled, true, `${code} blocks another Create while uncertain`); await uncertain.values.create.fire("click"); assert.equal(uncertain.values.editorView.hidden, true, `${code} cannot reopen Create before reconciliation`); uncertain.setFailure(null); await uncertain.values.uncertainReconcile.fire("click"); assert.equal(uncertain.values.uncertainComplete.hidden, false, `${code} reconciliation can complete in the same session`); await uncertain.values.uncertainComplete.fire("click"); assert.equal(uncertain.storage.has("takhun-routes-uncertain-create"), false); assert.equal(uncertain.writes.length, 1, `${code} reconciliation never resends Create`); }
+  const repeatedUncertainty = harness(); await repeatedUncertainty.window.TakhunAdminRoutes.init();
+  for (const cycle of ["A", "B"]) {
+    await repeatedUncertainty.values.create.fire("click");
+    repeatedUncertainty.fields.name_th.value = `ใหม่ ${cycle}`; repeatedUncertainty.fields.short_description_th.value = "สั้น"; repeatedUncertainty.fields.description_th.value = "รายละเอียด";
+    repeatedUncertainty.setFailure({ code: "TIMEOUT" }); await repeatedUncertainty.values.editor.fire("submit");
+    const marker = repeatedUncertainty.storage.get("takhun-routes-uncertain-create");
+    assert.ok(marker); assert.equal(repeatedUncertainty.values.uncertain.hidden, false);
+    assert.equal(repeatedUncertainty.values.uncertainComplete.hidden, true, `cycle ${cycle} must own fresh reconciliation readiness`);
+    if (cycle === "B") {
+      await repeatedUncertainty.values.uncertainComplete.fire("click");
+      assert.equal(repeatedUncertainty.storage.get("takhun-routes-uncertain-create"), marker, "cycle B premature completion cannot clear its marker");
+    }
+    assert.equal(repeatedUncertainty.values.create.disabled, true);
+    await repeatedUncertainty.values.back.fire("click"); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    repeatedUncertainty.setFailure(null); await repeatedUncertainty.values.uncertainReconcile.fire("click");
+    assert.equal(repeatedUncertainty.values.uncertainComplete.hidden, false);
+    await repeatedUncertainty.values.uncertainComplete.fire("click");
+    assert.equal(repeatedUncertainty.storage.has("takhun-routes-uncertain-create"), false);
+    assert.equal(repeatedUncertainty.values.create.disabled, false);
+  }
+  assert.deepEqual(repeatedUncertainty.writes.map(item => item[0]), ["create", "create"], "two same-controller uncertainty cycles never resend Create");
+  const staleUncertaintyRead = harness(); await staleUncertaintyRead.window.TakhunAdminRoutes.init();
+  await staleUncertaintyRead.values.create.fire("click");
+  staleUncertaintyRead.fields.name_th.value = "ใหม่ A"; staleUncertaintyRead.fields.short_description_th.value = "สั้น"; staleUncertaintyRead.fields.description_th.value = "รายละเอียด";
+  staleUncertaintyRead.setFailure({ code: "OUTCOME_UNKNOWN", route_id: "ROUTE-A" }); await staleUncertaintyRead.values.editor.fire("submit");
+  await staleUncertaintyRead.values.back.fire("click"); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  let releaseOldMarkerRead, markerReads = 0;
+  staleUncertaintyRead.setDetailHandler(() => ++markerReads === 1 ? new Promise(resolve => { releaseOldMarkerRead = resolve; }) : Promise.resolve({ ...route(), route_id: "ROUTE-A" }));
+  const oldMarkerRead = staleUncertaintyRead.values.uncertainReconcile.fire("click");
+  await flushUntil(() => typeof releaseOldMarkerRead === "function");
+  await staleUncertaintyRead.values.uncertainReconcile.fire("click");
+  assert.equal(staleUncertaintyRead.values.uncertainComplete.hidden, false, "a newer read can reconcile A while its older read remains pending");
+  await staleUncertaintyRead.values.uncertainComplete.fire("click");
+  assert.equal(staleUncertaintyRead.storage.has("takhun-routes-uncertain-create"), false);
+  await staleUncertaintyRead.values.create.fire("click");
+  staleUncertaintyRead.fields.name_th.value = "ใหม่ B"; staleUncertaintyRead.fields.short_description_th.value = "สั้น"; staleUncertaintyRead.fields.description_th.value = "รายละเอียด";
+  staleUncertaintyRead.setFailure({ code: "TIMEOUT" }); await staleUncertaintyRead.values.editor.fire("submit");
+  const newerMarker = staleUncertaintyRead.storage.get("takhun-routes-uncertain-create");
+  assert.ok(newerMarker); assert.equal(staleUncertaintyRead.values.uncertainComplete.hidden, true);
+  releaseOldMarkerRead({ ...route(), route_id: "ROUTE-A" }); await oldMarkerRead;
+  assert.equal(staleUncertaintyRead.values.uncertainComplete.hidden, true, "A's old reconciliation cannot enable completion for B");
+  await staleUncertaintyRead.values.uncertainComplete.fire("click");
+  assert.equal(staleUncertaintyRead.storage.get("takhun-routes-uncertain-create"), newerMarker);
+  assert.equal(staleUncertaintyRead.values.create.disabled, true);
+  assert.deepEqual(staleUncertaintyRead.writes.map(item => item[0]), ["create", "create"], "stale reconciliation never resends or clears the newer Create");
   const rejected = harness(); await rejected.window.TakhunAdminRoutes.init(); await rejected.values.create.fire("click"); rejected.fields.name_th.value = "ใหม่"; rejected.fields.short_description_th.value = "สั้น"; rejected.fields.description_th.value = "รายละเอียด"; rejected.setFailure({ code: "VALIDATION_ERROR" }); await rejected.values.editor.fire("submit"); assert.equal(rejected.storage.has("takhun-routes-uncertain-create"), false, "definitive create rejection clears the pre-dispatch marker");
   const readback = harness(); await readback.window.TakhunAdminRoutes.init(); await readback.values.create.fire("click"); readback.fields.name_th.value = "ใหม่"; readback.fields.short_description_th.value = "สั้น"; readback.fields.description_th.value = "รายละเอียด"; readback.setDetailFailure({ code: "SERVER_ERROR" }); await readback.values.editor.fire("submit"); await readback.values.editor.fire("submit"); assert.equal(readback.writes.length, 1, "a confirmed write with failed readback cannot be submitted again"); assert.equal(readback.storage.has("takhun-routes-uncertain-create"), false, "confirmed create clears uncertainty marker"); assert.equal(readback.values.reconcile.hidden, false, "failed readback offers read-only reconciliation");
   const persisted = harness("editor", { route_id: "ROUTE-2" }); await persisted.window.TakhunAdminRoutes.init(); assert.equal(persisted.values.create.disabled, true); assert.ok(persisted.storage.has("takhun-routes-uncertain-create")); await persisted.values.uncertainReconcile.fire("click"); assert.equal(persisted.calls.at(-1)[0], "detail"); assert.ok(persisted.storage.has("takhun-routes-uncertain-create"), "read alone does not clear marker"); await persisted.values.uncertainComplete.fire("click"); assert.equal(persisted.storage.has("takhun-routes-uncertain-create"), false);
   const dirty = harness(); await dirty.window.TakhunAdminRoutes.init(); await byText(dirty.values.list, "แก้ไข").fire("click"); dirty.fields.name_th.value = "ค้าง"; await dirty.values.editor.fire("input"); const unload = { preventDefaultCalled: false, preventDefault() { this.preventDefaultCalled = true; }, returnValue: undefined }; dirty.listeners.beforeunload(unload); assert.equal(unload.preventDefaultCalled, true); const before = dirty.writes.length; await byText(dirty.values.lifecycle, "เปลี่ยนเป็น เผยแพร่").fire("click"); assert.equal(dirty.writes.length, before, "dirty lifecycle is blocked");
+  const lifecycleRecorded = harness(); await lifecycleRecorded.window.TakhunAdminRoutes.init(); await byText(lifecycleRecorded.values.list, "แก้ไข").fire("click"); await byText(lifecycleRecorded.values.lifecycle, "เปลี่ยนเป็น เผยแพร่").fire("click"); assert.match(lifecycleRecorded.values.editorStatus.textContent, /เปลี่ยนสถานะเป็น เผยแพร่ แล้ว/); assert.doesNotMatch(lifecycleRecorded.values.editorStatus.textContent, /ยืนยันบันทึกตรวจสอบไม่ได้/); assert.equal(lifecycleRecorded.writes.length, 1);
+  const lifecycleUnconfirmed = harness(); lifecycleUnconfirmed.setAuditStatus("unconfirmed"); await lifecycleUnconfirmed.window.TakhunAdminRoutes.init(); await byText(lifecycleUnconfirmed.values.list, "แก้ไข").fire("click"); await byText(lifecycleUnconfirmed.values.lifecycle, "เปลี่ยนเป็น เผยแพร่").fire("click"); assert.match(lifecycleUnconfirmed.values.editorStatus.textContent, /ยืนยันบันทึกตรวจสอบไม่ได้/, "unconfirmed lifecycle audit is visible"); assert.equal(lifecycleUnconfirmed.writes.length, 1, "audit warning never retries lifecycle mutation");
+  const lifecycleAuditReadback = harness(); lifecycleAuditReadback.setAuditStatus("unconfirmed");
+  await lifecycleAuditReadback.window.TakhunAdminRoutes.init(); await byText(lifecycleAuditReadback.values.list, "แก้ไข").fire("click");
+  lifecycleAuditReadback.setDetailFailure({ code: "SERVER_ERROR" });
+  const publishAfterAudit = byText(lifecycleAuditReadback.values.lifecycle, "เปลี่ยนเป็น เผยแพร่");
+  await publishAfterAudit.fire("click");
+  assert.match(lifecycleAuditReadback.values.editorStatus.textContent, /เปลี่ยนสถานะได้รับการยืนยันแล้ว/);
+  assert.match(lifecycleAuditReadback.values.editorStatus.textContent, /โหลดข้อมูลล่าสุดไม่สำเร็จ/);
+  assert.match(lifecycleAuditReadback.values.editorStatus.textContent, /ยืนยันบันทึกตรวจสอบไม่ได้/, "readback failure preserves the known unconfirmed audit warning");
+  assert.equal(lifecycleAuditReadback.values.reconcile.hidden, false);
+  await publishAfterAudit.fire("click"); await lifecycleAuditReadback.values.editor.fire("submit");
+  assert.equal(lifecycleAuditReadback.writes.length, 1, "audit plus readback failure cannot resend the confirmed lifecycle mutation");
   const deleting = harness(); await deleting.window.TakhunAdminRoutes.init(); await byText(deleting.values.list, "แก้ไข").fire("click"); await deleting.values.remove.fire("click"); assert.equal(deleting.writes[0][0], "delete");
+  assert.doesNotMatch(deleting.values.listStatus.textContent, /ยืนยันบันทึกตรวจสอบไม่ได้/);
+  const deleteUnconfirmed = harness(); deleteUnconfirmed.setAuditStatus("unconfirmed"); await deleteUnconfirmed.window.TakhunAdminRoutes.init(); await byText(deleteUnconfirmed.values.list, "แก้ไข").fire("click"); await deleteUnconfirmed.values.remove.fire("click"); assert.equal(deleteUnconfirmed.values.editorView.hidden, true); assert.match(deleteUnconfirmed.values.listStatus.textContent, /ยืนยันบันทึกตรวจสอบไม่ได้/, "unconfirmed Delete warning survives list refresh"); assert.equal(deleteUnconfirmed.writes.length, 1, "audit warning never retries Delete mutation");
+  const overlappingDeleteAudit = harness(); overlappingDeleteAudit.setAuditStatus("unconfirmed");
+  await overlappingDeleteAudit.window.TakhunAdminRoutes.init(); await byText(overlappingDeleteAudit.values.list, "แก้ไข").fire("click");
+  let releaseOverlappingList;
+  overlappingDeleteAudit.setListPending(new Promise(resolve => { releaseOverlappingList = resolve; }));
+  const overlappingList = overlappingDeleteAudit.values.refresh.fire("click");
+  await flushUntil(() => overlappingDeleteAudit.calls.filter(call => call[0] === "list").length === 2);
+  await overlappingDeleteAudit.values.remove.fire("click");
+  assert.match(overlappingDeleteAudit.values.listStatus.textContent, /ยืนยันบันทึกตรวจสอบไม่ได้/);
+  await overlappingDeleteAudit.values.create.fire("click");
+  releaseOverlappingList(); await overlappingList;
+  assert.match(overlappingDeleteAudit.values.listStatus.textContent, /ยืนยันบันทึกตรวจสอบไม่ได้/, "an already-pending list refresh cannot erase the Delete audit warning");
+  assert.match(overlappingDeleteAudit.values.identity.textContent, /เส้นทางใหม่/);
+  assert.equal(overlappingDeleteAudit.values.editorView.hidden, false, "late list status cannot replace the newer editor");
+  assert.equal(overlappingDeleteAudit.writes.length, 1, "overlapping list refresh never retries Delete");
+  const supersededDeleteAudit = harness(); supersededDeleteAudit.setAuditStatus("unconfirmed");
+  await supersededDeleteAudit.window.TakhunAdminRoutes.init(); await byText(supersededDeleteAudit.values.list, "แก้ไข").fire("click");
+  let releaseDeleteAuditList;
+  supersededDeleteAudit.setListPending(new Promise(resolve => { releaseDeleteAuditList = resolve; }));
+  const earlierDelete = supersededDeleteAudit.values.remove.fire("click");
+  await flushUntil(() => supersededDeleteAudit.calls.filter(call => call[0] === "list").length === 2);
+  assert.match(supersededDeleteAudit.values.listStatus.textContent, /ยืนยันบันทึกตรวจสอบไม่ได้/, "Delete audit warning survives its pending refresh");
+  await supersededDeleteAudit.values.create.fire("click");
+  supersededDeleteAudit.fields.name_th.value = "รายการใหม่"; supersededDeleteAudit.fields.short_description_th.value = "สั้น"; supersededDeleteAudit.fields.description_th.value = "รายละเอียด";
+  let releaseRecordedCreate;
+  supersededDeleteAudit.setAuditStatus("recorded"); supersededDeleteAudit.setPending(new Promise(resolve => { releaseRecordedCreate = resolve; }));
+  const recordedCreate = supersededDeleteAudit.values.editor.fire("submit");
+  await flushUntil(() => supersededDeleteAudit.writes.length === 2);
+  releaseDeleteAuditList(); await earlierDelete;
+  assert.equal(supersededDeleteAudit.values.editorView.hidden, false);
+  assert.equal(supersededDeleteAudit.values.save.disabled, true, "old Delete refresh cannot release the unrelated pending Create");
+  assert.doesNotMatch(supersededDeleteAudit.values.listStatus.textContent, /ยืนยันบันทึกตรวจสอบไม่ได้/, "an unrelated mutation supersedes the old Delete notice");
+  await supersededDeleteAudit.values.editor.fire("submit");
+  assert.equal(supersededDeleteAudit.writes.length, 2, "old refresh cannot enable duplicate Create");
+  releaseRecordedCreate(); await recordedCreate;
+  assert.match(supersededDeleteAudit.values.editorStatus.textContent, /บันทึกแล้ว/);
+  assert.doesNotMatch(supersededDeleteAudit.values.editorStatus.textContent, /ยืนยันบันทึกตรวจสอบไม่ได้/);
+  assert.equal(supersededDeleteAudit.values.save.disabled, false);
+  supersededDeleteAudit.setListPending(null); await supersededDeleteAudit.values.back.fire("click");
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(supersededDeleteAudit.values.listView.hidden, false);
+  assert.doesNotMatch(supersededDeleteAudit.values.listStatus.textContent, /ยืนยันบันทึกตรวจสอบไม่ได้/, "returning to list after recorded Create cannot resurrect Delete's old notice");
+  assert.deepEqual(supersededDeleteAudit.writes.map(item => item[0]), ["delete", "create"]);
   const deleted = harness(); deleted.setCurrent(route("deleted")); await deleted.window.TakhunAdminRoutes.init(); await byText(deleted.values.list, "แก้ไข").fire("click"); assert.equal(deleted.values.remove.hidden, true, "delete action is absent when transition is invalid"); assert.ok(byText(deleted.values.lifecycle, "เปลี่ยนเป็น ฉบับร่าง"));
   const navigation = harness(); await navigation.window.TakhunAdminRoutes.init(); let releaseDetail; navigation.setDetailPending(new Promise(resolve => { releaseDetail = resolve; })); const pendingEdit = byText(navigation.values.list, "แก้ไข").fire("click"); await Promise.resolve(); await navigation.values.create.fire("click"); releaseDetail(); await pendingEdit; assert.match(navigation.values.identity.textContent, /เส้นทางใหม่/, "stale detail cannot overwrite a newer Create editor");
   const reconcileBack = harness(); await reconcileBack.window.TakhunAdminRoutes.init(); await byText(reconcileBack.values.list, "แก้ไข").fire("click"); reconcileBack.setFailure({ code: "CONFLICT" }); reconcileBack.fields.name_th.value = "ขัดแย้ง"; await reconcileBack.values.editor.fire("input"); await reconcileBack.values.editor.fire("submit"); reconcileBack.setFailure(null); let resolveReconcileBack; reconcileBack.setDetailHandler(() => new Promise(resolve => { resolveReconcileBack = resolve; })); const pendingReconcileBack = reconcileBack.values.reconcile.fire("click"); await Promise.resolve(); await reconcileBack.values.back.fire("click"); resolveReconcileBack(route()); await pendingReconcileBack; assert.equal(reconcileBack.values.editorView.hidden, true, "stale reconciliation cannot reopen editor after Back"); assert.equal(reconcileBack.values.listView.hidden, false);

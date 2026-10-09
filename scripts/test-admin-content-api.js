@@ -191,6 +191,13 @@ async function rejects(fn, code) { await assert.rejects(async () => fn(), error 
     await rejects(() => h.api.createRoute(token, { content: routeContent }), failure.name === "AbortError" ? "TIMEOUT" : "NETWORK_ERROR");
     assert.equal(h.calls.length, 1, "uncertain Route mutations never retry");
   }
+  for (const [stored, expected] of [["", false], [false, false], [true, true]]) {
+    const detail = await harness({ ...routeDetail, content: { ...routeContent, is_featured: stored } }).api.getRouteDetail(token, { route_id: "ROUTE-1" });
+    assert.equal(detail.content.is_featured, expected, `legacy is_featured ${JSON.stringify(stored)} normalizes safely`);
+  }
+  for (const malformed of ["false", 0, null]) {
+    await rejects(() => harness({ ...routeDetail, content: { ...routeContent, is_featured: malformed } }).api.getRouteDetail(token, { route_id: "ROUTE-1" }), "MALFORMED_RESPONSE");
+  }
   const legacyRoute = { ...routeDetail, created_at: "2026-07-11 10:00:00", updated_at: "2024-02-29 23:59:59", content: { ...routeContent, description_th: "=legacy", cover_image_url: "javascript:legacy", travel_style: "Legacy Value", map_focus_lat: 999, sort_order: -1 } };
   assert.equal((await harness(legacyRoute).api.getRouteDetail(token, { route_id: "ROUTE-1" })).content.description_th, "=legacy");
   const admin = { admin_id: "ADM-123e4567-e89b-12d3-a456-426614174000", username: "operator", display_name: "Operator", role: "super_admin" };
