@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="../css/components.css">
   <link rel="stylesheet" href="../css/mobile.css">
   <link rel="stylesheet" href="../css/admin.css">
+  <link rel="stylesheet" href="../css/admin-content.css">
 </head>
 <body class="admin-body admin-auth-pending" data-admin-page="gallery">
   <a class="admin-skip-link" href="#admin-main" data-admin-skip hidden>ข้ามไปยังเนื้อหาหลัก</a>
@@ -53,8 +54,51 @@
     <div class="admin-shell__backdrop" data-admin-backdrop hidden></div>
 
     <main class="admin-main" id="admin-main" data-admin-main tabindex="-1" aria-labelledby="page-title">
-      <section class="placeholder" data-admin-content hidden aria-hidden="true">
-        <p>หน้านี้อยู่ระหว่างการจัดเตรียม</p>
+      <section class="admin-content-manager admin-gallery" data-admin-content data-admin-gallery hidden aria-hidden="true">
+        <div data-gallery-list-view>
+          <div class="content-toolbar"><h2>รายการแกลเลอรี</h2><button class="button" type="button" data-gallery-create>เพิ่มภาพ</button></div>
+          <form class="content-filters admin-gallery__filters" data-gallery-filters aria-label="ค้นหาและกรองแกลเลอรี">
+            <label class="content-field">ค้นหา <input name="keyword" type="search" maxlength="200" autocomplete="off"></label>
+            <label class="content-field">สถานะ <select name="status"><option value="">ทุกสถานะ</option><option value="draft">ฉบับร่าง</option><option value="published">เผยแพร่</option><option value="hidden">ซ่อน</option><option value="archived">เก็บถาวร</option><option value="deleted">ลบแบบซอฟต์</option></select></label>
+            <label class="content-field">ประเภทสื่อ <select name="media_type"><option value="">ทุกประเภท</option><option value="image">ภาพ</option><option value="video">วิดีโอเดิม</option></select></label>
+            <label class="content-field">หมวดหมู่ <select name="category"><option value="">ทุกหมวดหมู่</option><option value="dam_lake">เขื่อนและทะเลสาบ</option><option value="mountain_nature">ภูเขาและธรรมชาติ</option><option value="community_life">ชุมชนและวิถีชีวิต</option><option value="food_fruit">อาหารและผลไม้</option><option value="activity_tradition">กิจกรรมและประเพณี</option></select></label>
+            <button class="button" type="submit">ค้นหา</button><button class="button" type="button" data-gallery-refresh>โหลดใหม่</button>
+          </form>
+          <p class="content-notice" data-gallery-list-status role="status" aria-live="polite" aria-atomic="true"></p>
+          <div class="content-list admin-gallery__list" data-gallery-list aria-busy="false"></div>
+          <nav class="content-toolbar" data-gallery-pagination aria-label="แบ่งหน้ารายการแกลเลอรี"></nav>
+          <section class="admin-gallery__uncertain" data-gallery-uncertain hidden aria-labelledby="gallery-uncertain-title">
+            <h3 id="gallery-uncertain-title">ต้องกระทบยอดการสร้างครั้งก่อน</h3><p data-gallery-uncertain-message></p>
+            <div class="content-toolbar"><button class="button" type="button" data-gallery-uncertain-reconcile>ตรวจสอบรายการแบบอ่านอย่างเดียว</button><button class="button" type="button" data-gallery-uncertain-complete hidden>เสร็จสิ้นการกระทบยอด</button></div>
+          </section>
+        </div>
+        <div data-gallery-editor-view hidden>
+          <div class="content-toolbar"><h2 data-gallery-editor-title tabindex="-1">รายละเอียดแกลเลอรี</h2><button class="button" type="button" data-gallery-back>กลับรายการ</button></div>
+          <p class="content-id" data-gallery-identity></p><p data-gallery-legacy-warning hidden></p>
+          <p class="content-notice" data-gallery-editor-status role="status" aria-live="assertive" aria-atomic="true" tabindex="-1"></p>
+          <div data-gallery-readonly></div>
+          <form class="content-editor" data-gallery-form novalidate>
+            <fieldset data-gallery-media-picker><legend>ภาพที่อนุมัติ</legend>
+              <div class="content-toolbar"><label class="content-field">ค้นหาภาพ <input type="search" data-gallery-media-keyword maxlength="200"></label><button class="button" type="button" data-gallery-media-search>ค้นหา</button></div>
+              <p data-gallery-media-status role="status" aria-live="polite" aria-atomic="true"></p><div class="admin-gallery__media-grid" data-gallery-media-results></div>
+              <div class="content-toolbar"><button class="button" type="button" data-gallery-media-previous>หน้าก่อน</button><span data-gallery-media-page></span><button class="button" type="button" data-gallery-media-next>หน้าถัดไป</button></div>
+              <div class="admin-gallery__selection" data-gallery-media-selected tabindex="-1"></div>
+            </fieldset>
+            <fieldset data-gallery-content-fields><legend>ข้อมูลแกลเลอรี</legend><div class="content-grid">
+              <label class="content-field">ชื่อภาษาไทย * <input name="title_th" required maxlength="20000" aria-describedby="gallery-error-title_th"><span class="content-field-error" id="gallery-error-title_th"></span></label>
+              <label class="content-field">ชื่อภาษาอังกฤษ <input name="title_en" maxlength="20000" aria-describedby="gallery-error-title_en"><span class="content-field-error" id="gallery-error-title_en"></span></label>
+              <label class="content-field">หมวดหมู่ * <select name="category" required aria-describedby="gallery-error-category"><option value="">เลือกหมวดหมู่เพื่อสร้างหรือซ่อมแซม</option><option value="dam_lake">เขื่อนและทะเลสาบ</option><option value="mountain_nature">ภูเขาและธรรมชาติ</option><option value="community_life">ชุมชนและวิถีชีวิต</option><option value="food_fruit">อาหารและผลไม้</option><option value="activity_tradition">กิจกรรมและประเพณี</option></select><span class="content-field-error" id="gallery-error-category"></span></label>
+              <label class="content-field">คำบรรยายภาษาไทย <textarea name="caption_th" maxlength="20000"></textarea></label><label class="content-field">คำบรรยายภาษาอังกฤษ <textarea name="caption_en" maxlength="20000"></textarea></label>
+              <label class="content-field">เครดิต <input name="credit" maxlength="500"></label><label class="content-field">ลำดับ <input name="sort_order" type="number" min="0" step="1"></label>
+            </div></fieldset>
+            <fieldset data-gallery-place-picker><legend>สถานที่เกี่ยวข้อง</legend><p>ค่าปัจจุบัน: <strong data-gallery-place-current></strong></p>
+              <label class="content-field">การเลือก <select name="related_place_id"><option value="">ไม่เชื่อมโยงสถานที่</option></select></label>
+              <div class="content-toolbar"><label class="content-field">ค้นหาสถานที่ <input type="search" data-gallery-place-keyword maxlength="200"></label><button class="button" type="button" data-gallery-place-search>ค้นหา</button></div>
+              <p data-gallery-place-status role="status" aria-live="polite"></p><div class="content-toolbar"><button class="button" type="button" data-gallery-place-previous>หน้าก่อน</button><span data-gallery-place-page></span><button class="button" type="button" data-gallery-place-next>หน้าถัดไป</button></div>
+            </fieldset>
+            <div class="content-toolbar"><button class="button" type="submit" data-gallery-save>บันทึก</button><div data-gallery-lifecycle></div><button class="button" type="button" data-gallery-delete>ลบแบบซอฟต์ (เก็บข้อมูลไว้)</button><button class="button" type="button" data-gallery-reconcile hidden>โหลดข้อมูลล่าสุดเพื่อกระทบยอด</button></div>
+          </form>
+        </div>
       </section>
     </main>
   </div>
@@ -63,9 +107,10 @@
   <script src="js/admin-api.js" defer></script>
   <script src="js/admin-auth.js" defer></script>
   <script src="js/admin-shell.js" defer></script>
+  <script src="js/admin-gallery.js" defer></script>
   <script>
     window.addEventListener("DOMContentLoaded", function () {
-      window.TakhunAdminShell.init();
+      window.TakhunAdminGallery.init();
     });
   </script>
 </body>
