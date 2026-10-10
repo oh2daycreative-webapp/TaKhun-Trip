@@ -1313,6 +1313,20 @@ The editor has a semantic validation summary and moves focus to the first invali
 
 Tasks 1–18 are implemented locally with automated tests/build. No remote release operation is implied: deployment, Script Property changes, Sheet schema setup, backup, legacy migration dry-run/execution/verification/rollback, staging/production manual QA, production release, branch push, PR, and merge remain human-only and pending.
 
+## 30A. M8 Gallery Admin authoritative UI override
+
+This section is the implemented Phase B authority for `public/admin/gallery.html` and supersedes the older Gallery URL/video-authoring guidance in section 14. The page uses an in-page list/editor backed by the protected Phase A Gallery APIs. `super_admin` and `editor` are writers; `reviewer` and `viewer` are read-only, with controller-level mutation guards in addition to absent controls.
+
+Create is manifest-only image Create. A writer selects one sanitized option with `entity_type = gallery` and `role = gallery`; its `media_id` becomes immutable identity. Create is always an image draft. There is no manual identity, media-type choice, upload, arbitrary image/video/thumbnail URL, source/filesystem/generated-output path input, or raw HTML authoring.
+
+The five canonical categories are `dam_lake`, `mountain_nature`, `community_life`, `food_fruit`, and `activity_tradition`. A legacy image category is displayed verbatim and begins in an explicit repair-required state; content Save and Publish require deliberate canonical repair. Legacy videos are readable as inert text and lifecycle-only: no editor, media picker, Save, URL link/embed, duplicate, Create-from-video, or Publish/re-publish control is available.
+
+Related Place selection reuses paginated `adminGetPlaces` with `status:"all"` only as a selectable search source. A stored `related_place_id` remains visible even when absent from current results. An untouched value is omitted from Update; explicit clear sends `""`; replacement sends a selected `place_id`. Backend validation remains authoritative, and stale-relation rejection preserves the form/value without clearing or retrying.
+
+Mutations are revision-aware, single-flight, and never retried automatically. Dirty content blocks lifecycle and guarded navigation. Create persists and verifies `takhun-gallery-uncertain-create-v1` before dispatch; unresolved Create blocks all new Gallery Create operations and reconciles only through `adminGetGalleryDetail`. `CONFLICT`, `OUTCOME_UNKNOWN`, confirmed-write/readback failure, and `audit_status:"unconfirmed"` have distinct UI states. Audit uncertainty is a successful entity mutation with a warning. Delete is retained soft deletion only.
+
+The inline approved-media picker uses native controls, safe generated outputs/fallback, live status, keyboard focus, semantic errors, and no drag-only interaction. The layout uses the existing `48rem` Admin breakpoint, 44px controls, visible focus, reduced motion, wrapping long IDs, and narrow-screen reflow without forced page overflow.
+
 ## 31. Final Admin CMS Direction
 
 Admin / CMS ของ **Takhun Trip** ต้องเป็นระบบที่:

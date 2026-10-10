@@ -363,7 +363,7 @@ function test(name, run) {
 
 test("exports exactly the frozen auth and explicit Place facade surface", async () => {
   const { api } = loadAdminApi();
-  assert.deepEqual(Object.keys(api).sort(), ["login", "logout", "validateSession", ...Object.keys(PLACE_METHODS), "getProducts", "getProductDetail", "createProduct", "updateProduct", "deleteProduct", "getEvents", "getEventDetail", "createEvent", "updateEvent", "deleteEvent", "getRoutes", "getRouteDetail", "createRoute", "updateRoute", "deleteRoute"].sort());
+  assert.deepEqual(Object.keys(api).sort(), ["login", "logout", "validateSession", ...Object.keys(PLACE_METHODS), "getProducts", "getProductDetail", "createProduct", "updateProduct", "deleteProduct", "getEvents", "getEventDetail", "createEvent", "updateEvent", "deleteEvent", "getRoutes", "getRouteDetail", "createRoute", "updateRoute", "deleteRoute", "getGallery", "getGalleryDetail", "getGalleryMediaOptions", "createGalleryItem", "updateGalleryItem", "deleteGalleryItem"].sort());
   assert.equal(Object.isFrozen(api), true);
   for (const name of Object.keys(api)) assert.equal(typeof api[name], "function");
   for (const forbidden of ["request", "call", "rawFetch", "dispatch"]) assert.equal(forbidden in api, false);

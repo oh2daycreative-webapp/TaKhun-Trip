@@ -18,6 +18,15 @@ All outputs use WebP quality 82, alpha quality 100, smart chroma subsampling,
 effort 4, `fit: cover`, and the declared focal position. EXIF, GPS, IPTC, XMP,
 and other metadata must not be copied to outputs.
 
+## Gallery Admin authoring (M8 Phase A)
+
+Gallery Admin selects only an existing manifest item with
+`entity_type=gallery` and `role=gallery`; its `media_id` becomes the immutable
+Gallery row `media_id`. The authoring API never accepts arbitrary image,
+thumbnail, or video URLs; raw HTML; or original/source/filesystem paths.
+Legacy video rows remain readable and lifecycle-only. Video creation, upload,
+storage, registry, and content editing are outside M8 Phase A.
+
 ## Required photographs
 
 Every row below has `required=true`. Alt text must be corrected if the selected

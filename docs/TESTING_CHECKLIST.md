@@ -618,11 +618,19 @@ Level 6: Deployment Test
 ## 11.8 Admin Gallery
 
 - [ ] โหลดแกลเลอรีได้
-- [ ] เพิ่มรูปจาก URL ได้
-- [ ] เพิ่มวิดีโอ URL ได้
-- [ ] Preview รูปทำงาน
-- [ ] แก้ไขข้อมูลสื่อได้
-- [ ] ซ่อน/เผยแพร่ได้
+- [ ] manifest-approved image Create ใช้ `media_id` ที่เลือกและสร้างเป็น draft เท่านั้น
+- [ ] ไม่มี arbitrary image/thumbnail/video URL, path, upload, media-type หรือ manual media ID authoring
+- [ ] Preview ใช้เฉพาะ sanitized generated output/fallback และไม่ใช้ legacy URL columns
+- [ ] Legacy video อ่านได้และ lifecycle-only โดยไม่มี editor, URL link/embed, duplicate หรือ Publish
+- [ ] Legacy image category แสดงค่าเดิมและต้องเลือกหนึ่งในห้าหมวด canonical เพื่อซ่อมก่อน Save/Publish
+- [ ] Related Place ใช้ paginated Admin Place search; ค่าเดิมที่ไม่อยู่ในผลค้นหายังคงแสดงและไม่ถูกล้างอัตโนมัติ
+- [ ] Untouched related Place ไม่ถูกส่งใน Update; explicit clear/replacement ส่งค่า exact และ stale relation error ไม่ retry
+- [ ] `super_admin`/`editor` เขียนได้; `reviewer`/`viewer` เรียก mutation จาก controller ไม่ได้
+- [ ] uncertain Create reconciliation ใช้ marker `media_id` และ read-only Detail โดยไม่ส่ง Create ซ้ำ
+- [ ] revision conflict รักษาฟอร์มและใช้ fresh read reconciliation โดยไม่มี force save/retry
+- [ ] `audit_status:"unconfirmed"` แสดงเป็น successful write พร้อมคำเตือน
+- [ ] label/error/live region/focus/keyboard picker/44px target/reduced motion ทำงาน
+- [ ] list, filters, editor, picker, Place search, long IDs, badges และ pagination ใช้งานได้ที่ mobile width
 - [ ] ลบแบบ soft delete ได้
 - [ ] Public แสดงเฉพาะ published
 

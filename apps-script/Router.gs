@@ -73,6 +73,12 @@ function routeRequest_(method, event) {
         if (action === "createRoute") return createJsonResponse_(createRoute_(body.token, body.payload));
         if (action === "updateRoute") return createJsonResponse_(updateRoute_(body.token, body.payload));
         if (action === "deleteRoute") return createJsonResponse_(deleteRoute_(body.token, body.payload));
+        if (action === "adminGetGallery") return createJsonResponse_(adminGetGallery_(body.token, body.payload));
+        if (action === "adminGetGalleryDetail") return createJsonResponse_(adminGetGalleryDetail_(body.token, body.payload));
+        if (action === "adminGetGalleryMediaOptions") return createJsonResponse_(adminGetGalleryMediaOptions_(body.token, body.payload));
+        if (action === "createGalleryItem") return createJsonResponse_(createGalleryItem_(body.token, body.payload));
+        if (action === "updateGalleryItem") return createJsonResponse_(updateGalleryItem_(body.token, body.payload));
+        if (action === "deleteGalleryItem") return createJsonResponse_(deleteGalleryItem_(body.token, body.payload));
         if (action === "adminGetPlaces") return createJsonResponse_(adminGetPlaces_(body.token, body.payload));
         if (action === "adminGetPlaceDetail") return createJsonResponse_(adminGetPlaceDetail_(body.token, body.payload));
         if (action === "adminCreatePlace") return createJsonResponse_(adminCreatePlace_(body.token, body.payload));

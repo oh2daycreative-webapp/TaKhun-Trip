@@ -1415,8 +1415,11 @@ public/admin/gallery.html
 
 ```text
 admin/gallery.html
-admin/gallery.html?edit={media_id}
 ```
+
+Gallery Admin uses an **in-page list/editor**. Selecting a list item replaces
+the list region with the same-page Detail/Edit region; returning restores the
+list. Phase B does not define or accept a `?edit=` Gallery editor route.
 
 ### Purpose
 

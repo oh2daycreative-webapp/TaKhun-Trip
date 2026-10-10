@@ -1,6 +1,7 @@
 var GalleryService_CACHE_SECONDS_ = 600;
 var GalleryService_MEDIA_TYPES_ = ["image", "video"];
-var GalleryService_CATEGORIES_ = ["place", "route", "event", "product", "community", "hero", "other"];
+var GalleryService_CATEGORIES_ = ["dam_lake", "mountain_nature", "community_life", "food_fruit", "activity_tradition"];
+var GalleryService_LEGACY_CATEGORIES_ = ["place", "route", "event", "product", "community", "hero", "other"];
 
 function getGallery_(parameters) {
   var normalized = GalleryService_normalizeParameters_(parameters);
@@ -17,7 +18,7 @@ function GalleryService_buildGalleryResponse_(sourceRows, parameters) {
   var rows = GalleryService_publishedCopies_(sourceRows).filter(function (row) {
     var mediaType = GalleryService_lower_(row.media_type);
     var category = GalleryService_lower_(row.category);
-    if (GalleryService_MEDIA_TYPES_.indexOf(mediaType) === -1 || GalleryService_CATEGORIES_.indexOf(category) === -1) return false;
+    if (GalleryService_MEDIA_TYPES_.indexOf(mediaType) === -1 || GalleryService_CATEGORIES_.concat(GalleryService_LEGACY_CATEGORIES_).indexOf(category) === -1) return false;
     if (params.media_type && mediaType !== params.media_type) return false;
     if (params.category && category !== params.category) return false;
     if (params.related_place_id && GalleryService_trim_(row.related_place_id) !== params.related_place_id) return false;
@@ -74,7 +75,9 @@ function GalleryService_sort_(rows) {
 }
 
 function GalleryService_cached_(action, parameters, loader) {
-  var cache = null; var key = GalleryService_cacheKey_(action, parameters);
+  var cache = null; var key = "";
+  try { key = GalleryService_cacheKey_(action, parameters); }
+  catch (_galleryServiceGenerationError) { return loader(); }
   try { cache = CacheService.getScriptCache(); var cached = cache.get(key); if (cached) { var parsed = JSON.parse(cached); if (parsed && parsed.ok === true && parsed.data && typeof parsed.data === "object") return parsed; } }
   catch (_galleryServiceCacheReadError) { /* Cache failures must not prevent public reads. */ }
   var response = loader();
@@ -85,7 +88,7 @@ function GalleryService_cached_(action, parameters, loader) {
   return response;
 }
 
-function GalleryService_cacheKey_(action, parameters) { var parts = ["public", action]; Object.keys(parameters || {}).sort().forEach(function (key) { parts.push(key + "=" + encodeURIComponent(GalleryService_trim_(parameters[key]))); }); return parts.join(":"); }
+function GalleryService_cacheKey_(action, parameters) { var parts = ["public", action, ContentCacheService_key_()]; Object.keys(parameters || {}).sort().forEach(function (key) { parts.push(key + "=" + encodeURIComponent(GalleryService_trim_(parameters[key]))); }); return parts.join(":"); }
 function GalleryService_localized_(row, field, lang) { return GalleryService_trim_(row[field + "_" + lang]) || GalleryService_trim_(row[field + "_th"]); }
 function GalleryService_language_(value) { return GalleryService_lower_(value) === "en" ? "en" : "th"; }
 function GalleryService_validId_(value) { return /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(value); }

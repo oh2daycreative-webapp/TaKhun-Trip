@@ -420,7 +420,7 @@
     const action = body.action;
     const domain = contentDomain(action);
     if (domain) {
-      const validated = domain === ROUTE_DOMAIN ? safeRouteResponse(data, body) : safeContentResponse(data, body, domain);
+      const validated = domain === ROUTE_DOMAIN ? safeRouteResponse(data, body) : domain === GALLERY_DOMAIN ? safeGalleryResponse(data, body) : safeContentResponse(data, body, domain);
       if (!validated) throw safeError("MALFORMED_RESPONSE");
       return validated;
     }
@@ -443,6 +443,7 @@
     if (action === "adminGetPlaces") validated = safeList(data);
     else if (action === "adminGetPlaceDetail") validated = safeDetail(data);
     else if (action === "adminGetPlaceMediaOptions") validated = safeMediaList(data, body.payload.place_id, body.payload.role);
+    else if (action === "adminGetGalleryMediaOptions") validated = safeGalleryMediaList(data);
     else if (action === "adminInspectPlaceDependencies") validated = safeDependencies(data);
     else if (action === "adminArchivePlace") validated = safeArchiveWrite(data);
     else if (["adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace", "adminUnpublishPlace", "adminRestorePlace"].includes(action)) {
@@ -552,11 +553,13 @@
     fields: "title_th title_en event_type event_date start_time end_time location_th location_en related_place_id description_th description_en image_url contact_name contact_phone register_url google_maps_url latitude longitude is_featured".split(" "),
     required: ["title_th", "description_th", "location_th", "event_type", "event_date"], categories: "launch festival community_market learning seasonal otop tourism other".split(" ") });
   const ROUTE_DOMAIN = Object.freeze({ id: "route_id" });
+  const GALLERY_DOMAIN = Object.freeze({ id: "media_id" });
   const CONTENT_STATUSES = ["draft", "published", "hidden", "archived", "deleted"];
   function contentDomain(action) {
     if (["adminGetProducts", "adminGetProductDetail", "createProduct", "updateProduct", "deleteProduct"].includes(action)) return PRODUCT_DOMAIN;
     if (["adminGetEvents", "adminGetEventDetail", "createEvent", "updateEvent", "deleteEvent"].includes(action)) return EVENT_DOMAIN;
     if (["adminGetRoutes", "adminGetRouteDetail", "createRoute", "updateRoute", "deleteRoute"].includes(action)) return ROUTE_DOMAIN;
+    if (["adminGetGallery", "adminGetGalleryDetail", "createGalleryItem", "updateGalleryItem", "deleteGalleryItem"].includes(action)) return GALLERY_DOMAIN;
     return null;
   }
   function validContentTimestamp(value) {
@@ -795,6 +798,77 @@
     if (body.action === "createRoute" && result.status !== (body.payload.status || "draft") || body.action === "deleteRoute" && result.status !== "deleted" || body.action === "updateRoute" && body.payload.status && result.status !== body.payload.status) return null;
     return result;
   }
+  const GALLERY_FIELDS = "title_th title_en category related_place_id caption_th caption_en credit sort_order".split(" ");
+  const GALLERY_STORED_FIELDS = [...GALLERY_FIELDS, "image_url", "thumbnail_url", "video_url", "media_type"];
+  const GALLERY_CATEGORIES = "dam_lake mountain_nature community_life food_fruit activity_tradition".split(" ");
+  function galleryText(value, maximum = 20000) {
+    const text = contentText(value, maximum);
+    if (/<\/?[A-Za-z][^>]*>/.test(text)) validationError();
+    return text;
+  }
+  function galleryRequestPayload(payload, operation) {
+    if (operation === "list") {
+      const source = requestObject(payload === undefined ? {} : payload, ["keyword", "category", "status", "media_type", "page", "page_size"], [], false), result = {};
+      for (const key of Object.keys(source)) {
+        if (["page", "page_size"].includes(key)) { if (!Number.isSafeInteger(source[key]) || source[key] < 1 || source[key] > (key === "page" ? 1000000 : 100)) validationError(); result[key] = source[key]; }
+        else { result[key] = galleryText(source[key], key === "keyword" ? 200 : 20000); if (key === "category" && result[key] && !GALLERY_CATEGORIES.includes(result[key]) || key === "status" && result[key] && !CONTENT_STATUSES.includes(result[key]) || key === "media_type" && result[key] && !["image", "video"].includes(result[key])) validationError(); }
+      }
+      return result;
+    }
+    const allowed = operation === "detail" ? ["media_id"] : operation === "delete" ? ["media_id", "expected_revision"] : operation === "create" ? ["media_id", ...GALLERY_FIELDS] : ["media_id", "expected_revision", "status", ...GALLERY_FIELDS];
+    const required = operation === "create" ? allowed : operation === "detail" ? ["media_id"] : ["media_id", "expected_revision"];
+    const source = requestObject(payload, allowed, required, false), result = {};
+    if (!validContentId(source.media_id) || operation === "create" && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(source.media_id)) validationError();
+    result.media_id = source.media_id;
+    if (["update", "delete"].includes(operation)) { if (!validRevision(source.expected_revision)) validationError(); result.expected_revision = source.expected_revision; }
+    if (operation === "update" && Object.keys(source).length < 3) validationError();
+    if (Object.prototype.hasOwnProperty.call(source, "status")) { if (!CONTENT_STATUSES.includes(source.status)) validationError(); result.status = source.status; }
+    for (const key of GALLERY_FIELDS) if (Object.prototype.hasOwnProperty.call(source, key)) {
+      if (key === "sort_order") { if (source[key] !== "" && (!Number.isSafeInteger(source[key]) || source[key] < 0)) validationError(); result[key] = source[key]; }
+      else { result[key] = galleryText(source[key]); if (key === "category" && !GALLERY_CATEGORIES.includes(result[key]) || key === "related_place_id" && result[key] && !validContentId(result[key])) validationError(); }
+    }
+    if (operation === "create" && (!result.title_th || !result.category)) validationError();
+    return result;
+  }
+  function galleryMediaPayload(payload) {
+    const source = requestObject(payload === undefined ? {} : payload, ["keyword", "page", "page_size"], [], false), result = {};
+    for (const key of Object.keys(source)) {
+      if (key === "page" || key === "page_size") { if (!Number.isSafeInteger(source[key]) || source[key] < 1 || source[key] > (key === "page" ? 1000000 : 100)) validationError(); result[key] = source[key]; }
+      else result.keyword = galleryText(source.keyword, 200);
+    }
+    return result;
+  }
+  function safeGalleryRecord(data, detail, mutation) {
+    const keys = ["media_id", "title_th", "media_type", "category", "status", "revision", "created_at", "updated_at", "media_state", ...(detail ? ["content"] : []), ...(mutation ? ["audit_status"] : [])];
+    if (!exactKeys(data, keys) || !validContentId(data.media_id) || !validPlaceText(data.title_th, 0, 20000) || !validPlaceText(data.category, 0, 20000) || !["image", "video"].includes(data.media_type) || !["approved_image", "legacy_video"].includes(data.media_state) || (data.media_type === "image") !== (data.media_state === "approved_image") || !CONTENT_STATUSES.includes(data.status) || !validRevision(data.revision) || ![data.created_at, data.updated_at].every(validContentTimestamp) || mutation && !["recorded", "unconfirmed"].includes(data.audit_status)) return null;
+    if (detail) {
+      if (!exactKeys(data.content, GALLERY_STORED_FIELDS)) return null;
+      for (const key of GALLERY_STORED_FIELDS) if (key === "sort_order" ? data.content[key] !== "" && !Number.isSafeInteger(data.content[key]) : !validPlaceText(data.content[key], 0, 20000)) return null;
+      if (data.title_th !== data.content.title_th || data.category !== data.content.category || data.media_type !== data.content.media_type) return null;
+      return { ...data, content: { ...data.content } };
+    }
+    return { ...data };
+  }
+  function safeGalleryResponse(data, body) {
+    if (body.action === "adminGetGallery") {
+      if (!exactKeys(data, ["items", "page", "page_size", "total", "total_pages"]) || !Array.isArray(data.items) || !validPagination(data)) return null;
+      const items = data.items.map(item => safeGalleryRecord(item, false, false));
+      return items.some(item => !item) || new Set(items.map(item => item.media_id)).size !== items.length ? null : { items, page: data.page, page_size: data.page_size, total: data.total, total_pages: data.total_pages };
+    }
+    const detail = body.action === "adminGetGalleryDetail", result = safeGalleryRecord(data, detail, !detail);
+    if (!result || body.payload.media_id && result.media_id !== body.payload.media_id || body.action === "createGalleryItem" && (result.status !== "draft" || result.media_type !== "image") || body.action === "deleteGalleryItem" && result.status !== "deleted" || body.action === "updateGalleryItem" && body.payload.status && result.status !== body.payload.status) return null;
+    return result;
+  }
+  function safeGalleryMediaItem(value) {
+    if (!exactKeys(value, ["media_id", "entity_type", "entity_id", "role", "alt_th", "alt_en", "fallback", "outputs"]) || !validContentId(value.media_id) || value.entity_type !== "gallery" || value.role !== "gallery" || !validContentId(value.entity_id) || !validPlaceText(value.alt_th, 0, 500) || !validPlaceText(value.alt_en, 0, 500) || !placeholderMediaPath(value.fallback) || !Array.isArray(value.outputs) || !value.outputs.length || value.outputs.length > 20) return null;
+    const outputs = value.outputs.map(output => exactKeys(output, ["width", "height", "path"]) && Number.isSafeInteger(output.width) && output.width > 0 && Number.isSafeInteger(output.height) && output.height > 0 && generatedMediaPath(output.path) ? { ...output } : null);
+    return outputs.some(output => !output) ? null : { ...value, outputs };
+  }
+  function safeGalleryMediaList(data) {
+    if (!exactKeys(data, ["items", "page", "page_size", "total", "total_pages"]) || !Array.isArray(data.items) || !validPagination(data)) return null;
+    const items = data.items.map(safeGalleryMediaItem);
+    return items.some(item => !item) ? null : { items, page: data.page, page_size: data.page_size, total: data.total, total_pages: data.total_pages };
+  }
   function getProducts(token, payload) { return placeRequest("adminGetProducts", token, contentRequestPayload(payload, PRODUCT_DOMAIN, "list")); }
   function getProductDetail(token, payload) { return placeRequest("adminGetProductDetail", token, contentRequestPayload(payload, PRODUCT_DOMAIN, "detail")); }
   function createProduct(token, payload) { return placeRequest("createProduct", token, contentRequestPayload(payload, PRODUCT_DOMAIN, "create")); }
@@ -810,12 +884,19 @@
   function createRoute(token, payload) { return placeRequest("createRoute", token, routeRequestPayload(payload, "create")); }
   function updateRoute(token, payload) { return placeRequest("updateRoute", token, routeRequestPayload(payload, "update")); }
   function deleteRoute(token, payload) { return placeRequest("deleteRoute", token, routeRequestPayload(payload, "delete")); }
+  function getGallery(token, payload) { return placeRequest("adminGetGallery", token, galleryRequestPayload(payload, "list")); }
+  function getGalleryDetail(token, payload) { return placeRequest("adminGetGalleryDetail", token, galleryRequestPayload(payload, "detail")); }
+  function getGalleryMediaOptions(token, payload) { return placeRequest("adminGetGalleryMediaOptions", token, galleryMediaPayload(payload)); }
+  function createGalleryItem(token, payload) { return placeRequest("createGalleryItem", token, galleryRequestPayload(payload, "create")); }
+  function updateGalleryItem(token, payload) { return placeRequest("updateGalleryItem", token, galleryRequestPayload(payload, "update")); }
+  function deleteGalleryItem(token, payload) { return placeRequest("deleteGalleryItem", token, galleryRequestPayload(payload, "delete")); }
 
   global.TakhunAdminApi = Object.freeze({
     login, validateSession, logout, getPlaces, getPlaceDetail, getPlaceMediaOptions, inspectPlaceDependencies,
     createPlace, savePlaceDraft, publishPlace, unpublishPlace, archivePlace, restorePlace,
     getProducts, getProductDetail, createProduct, updateProduct, deleteProduct,
     getEvents, getEventDetail, createEvent, updateEvent, deleteEvent,
-    getRoutes, getRouteDetail, createRoute, updateRoute, deleteRoute
+    getRoutes, getRouteDetail, createRoute, updateRoute, deleteRoute,
+    getGallery, getGalleryDetail, getGalleryMediaOptions, createGalleryItem, updateGalleryItem, deleteGalleryItem
   });
 })(window);

@@ -55,6 +55,7 @@ $required = @(
   "public/admin/js/admin-place-map.js",
   "public/admin/js/admin-place-media.js",
   "public/admin/js/admin-place-edit.js",
+  "public/admin/js/admin-gallery.js",
   "public/favicon.svg",
   "public/assets/media/placeholders/hero.svg",
   "public/assets/media/placeholders/cover.svg",
@@ -70,6 +71,8 @@ $required = @(
   "apps-script/SheetService.gs",
   "apps-script/AdminPlaceSchema.gs",
   "apps-script/AdminPlaceService.gs",
+  "apps-script/ApprovedMediaService.gs",
+  "apps-script/AdminGalleryService.gs",
   "apps-script/SettingsService.gs",
   "apps-script/CategoryService.gs",
   "apps-script/PlaceService.gs",
@@ -87,6 +90,7 @@ $required = @(
   "scripts/test-admin-route-service.js",
   "scripts/test-admin-places.js",
   "scripts/test-admin-place-regressions.js"
+  "scripts/test-admin-gallery-ui.js"
 )
 
 $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root $_)) })
@@ -190,6 +194,10 @@ if ($LASTEXITCODE -ne 0) { throw "Admin Place schema verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin Place service verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-content-service.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Product/Event contracts verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-gallery-service.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Gallery service verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-gallery-ui.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Gallery UI verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-route-service.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Route service verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-content-api.js")
