@@ -5,6 +5,37 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
+const galleryDocumentation = [
+  "docs/API_SPEC.md",
+  "docs/DATA_SCHEMA.md",
+  "docs/MEDIA_REQUIREMENTS.md",
+  "docs/ADMIN_CMS_SPEC.md",
+  "docs/TESTING_CHECKLIST.md",
+  "docs/ROUTES_AND_PAGES.md"
+];
+const commonMojibakeMarkers = [
+  String.fromCodePoint(0x00c3, 0x00a2),
+  String.fromCodePoint(0x00c3, 0x0192),
+  String.fromCodePoint(0x00ef, 0x00bf, 0x00bd),
+  String.fromCodePoint(0x00e2, 0x20ac)
+];
+
+function assertNoCommonMojibake(file, source) {
+  for (const marker of commonMojibakeMarkers) {
+    assert.equal(source.includes(marker), false, `${file} contains common mojibake marker ${JSON.stringify(marker)}`);
+  }
+}
+
+for (const file of galleryDocumentation) {
+  assertNoCommonMojibake(file, fs.readFileSync(path.join(__dirname, "..", file), "utf8"));
+}
+for (const marker of commonMojibakeMarkers) {
+  assert.throws(
+    () => assertNoCommonMojibake("fixture.md", `clean Thai text ภาษาไทย ${marker}`),
+    /fixture\.md contains common mojibake marker/
+  );
+}
+
 const directory = path.join(__dirname, "../apps-script");
 const sources = fs.readdirSync(directory)
   .filter((name) => name.endsWith(".gs"))

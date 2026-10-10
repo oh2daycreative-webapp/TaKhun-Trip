@@ -2469,7 +2469,7 @@ page=1&page_size=20
 
 ## M8 Phase A Gallery Admin authority
 
-This section supersedes the older Gallery authoring examples in 7.24â€“7.27.
+This section supersedes the older Gallery authoring examples in 7.24–7.27.
 The protected POST actions are `adminGetGallery`, `adminGetGalleryDetail`,
 `adminGetGalleryMediaOptions`, `createGalleryItem`, `updateGalleryItem`, and
 `deleteGalleryItem`. Reads allow all four Admin roles; mutations use the
