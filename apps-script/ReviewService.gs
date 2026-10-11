@@ -14,12 +14,14 @@ var ReviewService_REQUIRED_HEADERS_ = [
 function getReviews_(parameters) {
   var normalized = ReviewService_normalizeListParameters_(parameters);
   if (!normalized.ok) return normalized.response;
-  return ReviewService_cached_(normalized.params, function () {
-    return ReviewService_buildReviewsResponse_(
-      readSheetObjects_("reviews"),
-      readSheetObjects_("places"),
-      normalized.params
-    );
+  return ReviewService_withScriptLock_("Review read is temporarily unavailable.", function () {
+    return ReviewService_cached_(normalized.params, function () {
+      return ReviewService_buildReviewsResponse_(
+        readSheetObjects_("reviews"),
+        readSheetObjects_("places"),
+        normalized.params
+      );
+    });
   });
 }
 
@@ -27,15 +29,11 @@ function submitReview_(payload) {
   var normalized = ReviewService_normalizeSubmission_(payload);
   if (!normalized.ok) return normalized.response;
   var placeId = normalized.payload.place_id;
-  var publishedPlace = (readSheetObjects_("places") || []).some(function (row) {
-    return row && ReviewService_trim_(row.place_id) === placeId && ReviewService_trim_(row.status) === "published";
-  });
-  if (!publishedPlace) return ReviewService_error_("NOT_FOUND", "ไม่พบสถานที่นี้");
-
-  var lock = LockService.getScriptLock();
-  var acquired = lock.tryLock(10000);
-  if (!acquired) throw new Error("Review write is temporarily unavailable.");
-  try {
+  return ReviewService_withScriptLock_("Review write is temporarily unavailable.", function () {
+    var publishedPlace = (readSheetObjects_("places") || []).some(function (row) {
+      return row && ReviewService_trim_(row.place_id) === placeId && ReviewService_trim_(row.status) === "published";
+    });
+    if (!publishedPlace) return ReviewService_error_("NOT_FOUND", "ไม่พบสถานที่นี้");
     var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
     var reviewId = "REV-" + Utilities.getUuid();
     var record = {
@@ -58,9 +56,15 @@ function submitReview_(payload) {
       data: { review_id: reviewId, status: "pending" },
       message: "ส่งรีวิวแล้ว รอตรวจสอบก่อนเผยแพร่"
     };
-  } finally {
-    lock.releaseLock();
-  }
+  });
+}
+
+function ReviewService_withScriptLock_(failureMessage, operation) {
+  var lock = LockService.getScriptLock();
+  var acquired = lock.tryLock(10000);
+  if (!acquired) throw new Error(failureMessage);
+  try { return operation(); }
+  finally { lock.releaseLock(); }
 }
 
 function ReviewService_buildReviewsResponse_(reviewRows, placeRows, parameters) {

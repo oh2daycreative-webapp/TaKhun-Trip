@@ -28,7 +28,7 @@ function load(options = {}) {
     audits: [], epoch: 7, writes: 0, bumps: 0, authCalls: [], flushes: 0
   };
   const role = options.role || "super_admin";
-  const lock = { held:false, releases:0, tryLock(ms){ assert.equal(ms,10000); if(options.lockFail)return false; this.held=true; return true; }, releaseLock(){this.releases++;this.held=false;} };
+  const lock = { held:false, acquisitions:0, releases:0, tryLock(ms){ assert.equal(ms,10000);assert.equal(this.held,false,"nested script-lock acquisition");this.acquisitions++;if(options.lockFail)return false;this.held=true;return true; }, releaseLock(){assert.equal(this.held,true);this.releases++;this.held=false;} };
   function table(name) {
     const source = name === "reviews" ? state.reviews : name === "places" ? state.places : state.audits;
     const headers = name === "reviews" ? REVIEW_HEADERS : name === "places" ? ["place_id","name_th","status"] : AUDIT_HEADERS;
@@ -110,8 +110,44 @@ test("revision conflict lock reauthentication and strict payloads write nothing"
   const busy=load({role:"editor",lockFail:true});const rev=detail(busy).data.revision;assert.equal(call(busy,"hideReview_",{review_id:"REV-P",expected_revision:rev}).error.code,"CONTENT_LOCK");
 });
 
+test("revisions and updated_at advance through ABA cycles within one wall-clock second",()=>{
+  const approvedRows=baseRows();
+  approvedRows[1].approved_at="2026-10-11 12:34:56";
+  approvedRows[1].approved_by="ADM-SUPER_ADMIN";
+  approvedRows[1].updated_at="2026-10-11 12:34:56";
+  const moderation=load({reviews:approvedRows});
+  const initial=detail(moderation,"REV-A").data;
+  const hidden=call(moderation,"hideReview_",{review_id:"REV-A",expected_revision:initial.revision}).data;
+  const approved=call(moderation,"approveReview_",{review_id:"REV-A",expected_revision:hidden.revision}).data;
+  assert.notEqual(hidden.revision,initial.revision);
+  assert.notEqual(approved.revision,initial.revision);
+  assert.equal(hidden.updated_at,"2026-10-11 12:34:57");
+  assert.equal(approved.updated_at,"2026-10-11 12:34:58");
+  assert.equal(call(moderation,"hideReview_",{review_id:"REV-A",expected_revision:initial.revision}).error.code,"CONFLICT");
+
+  const replies=load({role:"editor"});
+  const empty=detail(replies,"REV-P").data;
+  const replied=call(replies,"replyReview_",{review_id:"REV-P",expected_revision:empty.revision,admin_reply:"answer"}).data;
+  const cleared=call(replies,"clearReviewReply_",{review_id:"REV-P",expected_revision:replied.revision}).data;
+  assert.notEqual(cleared.revision,empty.revision);
+  assert.equal(replied.updated_at,"2026-10-11 12:34:56");
+  assert.equal(cleared.updated_at,"2026-10-11 12:34:57");
+  assert.equal(call(replies,"replyReview_",{review_id:"REV-P",expected_revision:empty.revision,admin_reply:"stale"}).error.code,"CONFLICT");
+});
+
+test("Date and equivalent string timestamps have one canonical revision",()=>{
+  const asString=load();
+  asString.state.reviews[0].updated_at="2026-10-11 12:34:56";
+  const stringDetail=detail(asString,"REV-P").data;
+  const asDate=load();
+  asDate.state.reviews[0].updated_at=new Date("2026-10-11T05:34:56.000Z");
+  const dateDetail=detail(asDate,"REV-P").data;
+  assert.equal(dateDetail.updated_at,stringDetail.updated_at);
+  assert.equal(dateDetail.revision,stringDetail.revision);
+});
+
 test("verified entity uncertainty audit warning and cache freshness remain distinct",()=>{
-  for(const option of ["failWrite","corruptWrite","flushFail"]){const env=load({role:"editor",[option]:true});const rev=detail(env,"REV-A").data.revision;const result=call(env,"hideReview_",{review_id:"REV-A",expected_revision:rev});assert.equal(result.error.code,"OUTCOME_UNKNOWN",option);assert.equal(result.error.retryable,false);}
+  for(const option of ["failWrite","corruptWrite","flushFail"]){const env=load({role:"editor",[option]:true});const rev=detail(env,"REV-A").data.revision;const result=call(env,"hideReview_",{review_id:"REV-A",expected_revision:rev});assert.equal(result.error.code,"OUTCOME_UNKNOWN",option);assert.equal(result.error.retryable,false);assert.equal(env.state.bumps,1,option+" invalidates before the attempted public change");}
   const audit=load({role:"editor",auditFail:true});let rev=detail(audit,"REV-A").data.revision;let result=call(audit,"hideReview_",{review_id:"REV-A",expected_revision:rev});assert.equal(result.ok,true);assert.equal(result.data.audit_status,"unconfirmed");
   const cache=load({role:"editor"});rev=detail(cache,"REV-A").data.revision;call(cache,"replyReview_",{review_id:"REV-A",expected_revision:rev,admin_reply:"fresh"});assert.equal(cache.state.bumps,1);rev=detail(cache,"REV-P").data.revision;call(cache,"replyReview_",{review_id:"REV-P",expected_revision:rev,admin_reply:"not public yet"});assert.equal(cache.state.bumps,1);rev=detail(cache,"REV-P").data.revision;call(cache,"approveReview_",{review_id:"REV-P",expected_revision:rev});assert.equal(cache.state.bumps,2);
   const cacheFailure=load({role:"editor",cacheFail:true});rev=detail(cacheFailure,"REV-A").data.revision;assert.equal(call(cacheFailure,"hideReview_",{review_id:"REV-A",expected_revision:rev}).error.code,"SERVER_ERROR");assert.equal(cacheFailure.state.writes,0);

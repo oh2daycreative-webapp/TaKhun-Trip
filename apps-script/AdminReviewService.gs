@@ -185,11 +185,30 @@ function AdminReviewService_find_(table, reviewId) {
 
 function AdminReviewService_revision_(row) {
   var canonical = ["review", 1];
-  AdminReviewService_HEADERS_.filter(function (field) { return field !== "updated_at"; }).forEach(function (field) {
+  AdminReviewService_HEADERS_.forEach(function (field) {
     var value = row[field] instanceof Date ? AdminReviewService_timestamp_(row[field], field === "approved_at") : row[field];
     canonical.push([field, typeof value, value]);
   });
   return "r1-" + CryptoService_sha256_(CryptoService_utf8Bytes_(JSON.stringify(canonical))).map(function (byte) { return ("0" + (byte & 255).toString(16)).slice(-2); }).join("");
+}
+
+function AdminReviewService_timestampMillis_(value) {
+  var canonical = AdminReviewService_timestamp_(value, false);
+  var parts = canonical.match(/\d+/g).map(Number);
+  return Date.UTC(parts[0], parts[1] - 1, parts[2], parts[3], parts[4], parts[5]);
+}
+
+function AdminReviewService_timestampFromMillis_(value) {
+  var date = new Date(value);
+  function two(number) { return ("0" + number).slice(-2); }
+  return date.getUTCFullYear() + "-" + two(date.getUTCMonth() + 1) + "-" + two(date.getUTCDate()) + " " +
+    two(date.getUTCHours()) + ":" + two(date.getUTCMinutes()) + ":" + two(date.getUTCSeconds());
+}
+
+function AdminReviewService_nextTimestamp_(current) {
+  var now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
+  var next = Math.max(AdminReviewService_timestampMillis_(now), AdminReviewService_timestampMillis_(current) + 1000);
+  return AdminReviewService_timestampFromMillis_(next);
 }
 
 function AdminReviewService_projection_(row) {
@@ -328,7 +347,7 @@ function AdminReviewService_mutate_(token, roles, action, payload, reply, transf
     var p = AdminReviewService_mutationPayload_(payload, reply);
     return AdminReviewService_write_(admin, action, p, function (record, current) {
       transform(record, current, p, admin);
-      record.updated_at = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
+      record.updated_at = AdminReviewService_nextTimestamp_(current.updated_at);
     });
   });
 }

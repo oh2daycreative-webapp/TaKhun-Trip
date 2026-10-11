@@ -44,7 +44,7 @@ function load(options = {}) {
   const properties = options.properties || makeProperties();
   const appended = [];
   const reads = [];
-  const lock = options.lock || { acquired: false, released: 0, tryLock(ms) { assert.equal(ms, 10000); this.acquired = true; return true; }, releaseLock() { this.released += 1; } };
+  const lock = options.lock || { acquired: false, acquisitions: 0, released: 0, held: false, tryLock(ms) { assert.equal(ms, 10000); assert.equal(this.held, false, "nested script-lock acquisition"); this.acquired = true; this.acquisitions += 1; this.held = true; return true; }, releaseLock() { assert.equal(this.held, true); this.released += 1; this.held = false; } };
   const context = {
     JSON, Object, Math, Number, String, Array, Date, RegExp, encodeURIComponent, isFinite,
     CacheService: { getScriptCache: () => cache },
@@ -182,6 +182,53 @@ test("Review visibility cache changes namespace with the Place epoch but submitR
   const submit = load({ properties: submitProperties });
   assert.equal(plain(submit.context.submitReview_({ place_id: "P-1", rating: 5, comment: "safe" })).ok, true);
   assert.deepEqual(submitProperties.calls, []);
+});
+
+test("public cache reads use one bounded lock and never fall back unlocked under contention", () => {
+  const busyLock = { attempts: 0, releases: 0, tryLock(ms) { assert.equal(ms, 10000); this.attempts += 1; return false; }, releaseLock() { this.releases += 1; } };
+  const busy = load({ lock: busyLock });
+  assert.throws(() => busy.context.getReviews_({ place_id: "P-1" }), /Review read is temporarily unavailable/);
+  assert.equal(busyLock.attempts, 1);
+  assert.equal(busyLock.releases, 0);
+  assert.deepEqual(busy.reads, []);
+  assert.equal(busy.cache.puts.length, 0);
+
+  const env = load();
+  assert.equal(plain(env.context.getReviews_({ place_id: "P-1" })).ok, true);
+  assert.equal(env.lock.acquisitions, 1);
+  assert.equal(env.lock.released, 1);
+  assert.equal(plain(env.context.getReviews_({ place_id: "P-1" })).ok, true);
+  assert.equal(env.lock.acquisitions, 2, "cache hits remain inside the same lock boundary");
+  assert.equal(env.lock.released, 2);
+
+  const readFailureCache = { get() { throw new Error("cache read"); }, put() {} };
+  const readFailure = load({ cache: readFailureCache });
+  assert.equal(plain(readFailure.context.getReviews_({ place_id: "P-1" })).ok, true);
+  assert.equal(readFailure.lock.acquisitions, 1);
+  assert.equal(readFailure.lock.released, 1);
+
+  const writeFailureCache = { get() { return null; }, put() { throw new Error("cache write"); } };
+  const writeFailure = load({ cache: writeFailureCache });
+  assert.equal(plain(writeFailure.context.getReviews_({ place_id: "P-1" })).ok, true);
+  assert.equal(writeFailure.lock.acquisitions, 1);
+  assert.equal(writeFailure.lock.released, 1);
+});
+
+test("public submission performs its authoritative Place check only after winning the shared lock", () => {
+  const contendedLock = { attempts: 0, releases: 0, tryLock(ms) { assert.equal(ms, 10000); this.attempts += 1; return false; }, releaseLock() { this.releases += 1; } };
+  const contended = load({ lock: contendedLock });
+  assert.throws(() => contended.context.submitReview_({ place_id: "P-1", rating: 5, comment: "safe" }), /Review write is temporarily unavailable/);
+  assert.deepEqual(contended.reads, []);
+  assert.equal(contended.appended.length, 0);
+
+  const places = [{ place_id: "P-1", status: "published" }];
+  const changingLock = { held: false, acquisitions: 0, released: 0, tryLock() { assert.equal(this.held, false, "nested script-lock acquisition"); this.held = true; this.acquisitions += 1; places[0].status = "draft"; return true; }, releaseLock() { this.held = false; this.released += 1; } };
+  const changed = load({ places, lock: changingLock });
+  const result = plain(changed.context.submitReview_({ place_id: "P-1", rating: 5, comment: "safe" }));
+  assert.equal(result.error.code, "NOT_FOUND");
+  assert.equal(changed.appended.length, 0);
+  assert.equal(changingLock.acquisitions, 1);
+  assert.equal(changingLock.released, 1);
 });
 
 if (process.exitCode) process.exit(process.exitCode);
