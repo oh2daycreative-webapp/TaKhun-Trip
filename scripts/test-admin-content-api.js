@@ -54,7 +54,7 @@ async function rejects(fn, code) { await assert.rejects(async () => fn(), error 
       await rejects(() => harness({}).api[`update${entity}`](token, bad), "VALIDATION_ERROR");
     }
     for (const code of ["CONFLICT", "INVALID_TRANSITION", "DUPLICATE_ID"]) await rejects(() => harness(null, { code, message: "private" }).api[`create${entity}`](token, content), code);
-    await rejects(() => harness(null, { code: "CONTENT_LOCK", message: "private" }).api[`create${entity}`](token, content), "SERVER_ERROR");
+    await rejects(() => harness(null, { code: "CONTENT_LOCK", message: "private" }).api[`create${entity}`](token, content), "CONTENT_LOCK");
     const unknown = harness(null, { code: "OUTCOME_UNKNOWN", message: "private", retryable: false, [idKey]: "ID-1" });
     await assert.rejects(unknown.api[`create${entity}`](token, content), e => e.code === "OUTCOME_UNKNOWN" && e[idKey] === "ID-1" && e.retryable === false && !JSON.stringify(e).includes("private"));
     assert.equal(unknown.calls.length, 1);
@@ -177,7 +177,7 @@ async function rejects(fn, code) { await assert.rejects(async () => fn(), error 
   await rejects(() => harness({ ...routeDetail, stops: [{ ...routeStops[0], status: "published" }] }).api.getRouteDetail(token, { route_id: "ROUTE-1" }), "MALFORMED_RESPONSE");
   await rejects(() => harness({ ...routeDetail, content: { ...routeContent, private: "secret" } }).api.getRouteDetail(token, { route_id: "ROUTE-1" }), "MALFORMED_RESPONSE");
   for (const code of ["CONFLICT", "INVALID_TRANSITION"]) await rejects(() => harness(null, { code, message: "private" }).api.updateRoute(token, { route_id: "ROUTE-1", expected_revision: revision, status: "published" }), code);
-  await rejects(() => harness(null, { code: "CONTENT_LOCK", message: "private" }).api.updateRoute(token, { route_id: "ROUTE-1", expected_revision: revision, status: "published" }), "SERVER_ERROR");
+  await rejects(() => harness(null, { code: "CONTENT_LOCK", message: "private" }).api.updateRoute(token, { route_id: "ROUTE-1", expected_revision: revision, status: "published" }), "CONTENT_LOCK");
   const uncertainRoute = harness(null, { code: "OUTCOME_UNKNOWN", message: "private", retryable: false, route_id: "ROUTE-1" });
   await assert.rejects(uncertainRoute.api.updateRoute(token, { route_id: "ROUTE-1", expected_revision: revision, status: "published" }), error => error.code === "OUTCOME_UNKNOWN" && error.route_id === "ROUTE-1" && error.retryable === false && !JSON.stringify(error).includes("private"));
   assert.equal(uncertainRoute.calls.length, 1);
