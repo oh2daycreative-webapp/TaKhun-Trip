@@ -605,6 +605,22 @@ Level 6: Deployment Test
 
 ## 11.7 Admin Reviews
 
+- [ ] ทุก role อ่าน list/detail ได้; viewer ไม่มี mutation path
+- [ ] super_admin/editor/reviewer approve และ hide ได้ แต่ role อื่นถูก server ปฏิเสธ
+- [ ] super_admin/editor reply และ clear reply ได้; reviewer/viewer ถูก server ปฏิเสธ
+- [ ] เฉพาะ super_admin soft delete ได้ และ deleted เป็น terminal
+- [ ] stale revision, post-lock re-authentication, partial failure และ OUTCOME_UNKNOWN ไม่ retry mutation
+- [ ] NUL, malformed Unicode, oversized reply และ formula-leading reply ผ่านกฎ preserve-or-reject ก่อน write
+- [ ] stale list/detail response และ detail reload ไม่ทับ reply draft
+- [ ] Public NUL/lone surrogate/oversized/ambiguous-formula input ถูก reject ก่อน lock และ append; reviewer name ว่างอ่านได้
+- [ ] invalid/duplicate legacy rows ถูกข้ามก่อน pagination พร้อม safe warning; target เสีย fail closed โดยไม่แก้ Sheet
+- [ ] hide→approve และ reply→clear ภายในวินาทีเดียวทำให้ `updated_at`/revision เพิ่มและ stale revision ถูกปฏิเสธ
+- [ ] public cache read/submission/moderation contention ใช้ bounded lock เดียว ไม่มี nested acquisition หรือ unlocked fallback
+- [ ] dirty draft เปลี่ยน review ต้องยืนยัน; pending mutation เปลี่ยน target ไม่ได้; reload authoritative detail ปลด blocked
+- [ ] CONTENT_LOCK คง exact code และ mutation transport ส่งครั้งเดียว
+- [ ] behavioral DOM test ครอบคลุม safe text, pending disabled controls และ focus transfer/restoration
+- [ ] native Edge/Chrome runner timeout เป็น failure และ cleanup เฉพาะ spawned PID tree/profile
+
 - [ ] โหลดรีวิว pending ได้
 - [ ] อนุมัติรีวิวได้
 - [ ] ซ่อนรีวิวได้

@@ -53,8 +53,24 @@
     <div class="admin-shell__backdrop" data-admin-backdrop hidden></div>
 
     <main class="admin-main" id="admin-main" data-admin-main tabindex="-1" aria-labelledby="page-title">
-      <section class="placeholder" data-admin-content hidden aria-hidden="true">
-        <p>หน้านี้อยู่ระหว่างการจัดเตรียม</p>
+      <section data-admin-content data-admin-reviews hidden aria-hidden="true">
+        <form class="content-toolbar admin-review-filters" data-review-filters>
+          <label>ค้นหา <input name="keyword" maxlength="200" autocomplete="off"></label>
+          <label>สถานะ <select name="status"><option value="">ทั้งหมด</option><option value="pending">รอตรวจสอบ</option><option value="approved">เผยแพร่แล้ว</option><option value="hidden">ซ่อน</option><option value="deleted">ลบแล้ว</option></select></label>
+          <label>รหัสสถานที่ <input name="place_id" maxlength="100" autocomplete="off"></label>
+          <button class="button" type="submit">ค้นหา</button>
+        </form>
+        <p class="content-notice" data-review-status role="status" aria-live="polite" aria-atomic="true"></p>
+        <div class="admin-review-list" data-review-list aria-label="รายการรีวิว"></div>
+        <nav class="content-toolbar" aria-label="แบ่งหน้ารีวิว"><button class="button" type="button" data-review-prev>หน้าก่อน</button><span data-review-page></span><button class="button" type="button" data-review-next>หน้าถัดไป</button></nav>
+        <section class="admin-review-detail" data-review-detail hidden aria-labelledby="review-detail-title">
+          <button class="button" type="button" data-review-back>กลับรายการ</button>
+          <h2 id="review-detail-title" data-review-detail-title tabindex="-1"></h2><p data-review-detail-meta></p>
+          <h3>ความคิดเห็น</h3><p class="admin-review-text" data-review-comment></p>
+          <h3>คำตอบจากผู้ดูแล</h3><p class="admin-review-text" data-review-current-reply></p>
+          <label class="content-field" data-review-reply-editor>แก้ไขคำตอบ<textarea data-review-reply maxlength="2000" rows="5"></textarea></label>
+          <div class="content-toolbar" data-review-actions></div>
+        </section>
       </section>
     </main>
   </div>
@@ -63,9 +79,10 @@
   <script src="js/admin-api.js" defer></script>
   <script src="js/admin-auth.js" defer></script>
   <script src="js/admin-shell.js" defer></script>
+  <script src="js/admin-reviews.js" defer></script>
   <script>
     window.addEventListener("DOMContentLoaded", function () {
-      window.TakhunAdminShell.init();
+      window.TakhunAdminReviews.init();
     });
   </script>
 </body>

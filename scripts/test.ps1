@@ -56,6 +56,7 @@ $required = @(
   "public/admin/js/admin-place-media.js",
   "public/admin/js/admin-place-edit.js",
   "public/admin/js/admin-gallery.js",
+  "public/admin/js/admin-reviews.js",
   "public/favicon.svg",
   "public/assets/media/placeholders/hero.svg",
   "public/assets/media/placeholders/cover.svg",
@@ -73,6 +74,7 @@ $required = @(
   "apps-script/AdminPlaceService.gs",
   "apps-script/ApprovedMediaService.gs",
   "apps-script/AdminGalleryService.gs",
+  "apps-script/AdminReviewService.gs",
   "apps-script/SettingsService.gs",
   "apps-script/CategoryService.gs",
   "apps-script/PlaceService.gs",
@@ -91,6 +93,14 @@ $required = @(
   "scripts/test-admin-places.js",
   "scripts/test-admin-place-regressions.js"
   "scripts/test-admin-gallery-ui.js"
+  "scripts/test-admin-review-service.js"
+  "scripts/test-admin-reviews-api.js"
+  "scripts/test-admin-reviews-ui.js"
+  "scripts/test-admin-reviews-cdp.js"
+  "scripts/test-admin-reviews-cdp-helper.js"
+  "scripts/test-admin-reviews-browser.js"
+  "scripts/test-admin-content-browser-runner-tests.js"
+  "scripts/test-admin-content-browser-runner.js"
 )
 
 $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root $_)) })
@@ -170,6 +180,18 @@ if ($LASTEXITCODE -ne 0) { throw "Admin API transport verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin browser auth verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-shell.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin shell verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-review-service.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Review service verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-reviews-api.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Reviews API verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-reviews-ui.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Reviews UI verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-reviews-cdp-helper.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Reviews CDP helper verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-reviews-browser.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Reviews native browser verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-content-browser-runner-tests.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin native browser runner verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-places.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Places list verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-places-accessibility.js")

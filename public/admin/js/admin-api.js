@@ -11,7 +11,8 @@
     "SERVER_ERROR",
     "FORBIDDEN",
     "NOT_FOUND",
-    "CONFLICT"
+    "CONFLICT",
+    "CONTENT_LOCK"
   ]);
   const ADMIN_ROLES = Object.freeze(["super_admin", "editor", "reviewer", "viewer"]);
   const ADMIN_ID_PATTERN = /^ADM-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -39,6 +40,8 @@
   const DEPENDENCY_GROUP_KEYS = Object.freeze([
     "routes", "nearby_places", "products", "events", "gallery", "trip_templates", "reviews"
   ]);
+  const REVIEW_STATUSES = Object.freeze(["pending", "approved", "hidden", "deleted"]);
+  const REVIEW_ACTIONS = Object.freeze(["adminGetReviews", "adminGetReviewDetail", "approveReview", "hideReview", "replyReview", "clearReviewReply", "deleteReview"]);
 
   class AdminApiError extends Error {
     constructor(code) {
@@ -418,6 +421,11 @@
 
   function validateSuccess(body, data) {
     const action = body.action;
+    if (REVIEW_ACTIONS.includes(action)) {
+      const reviewed = safeReviewResponse(data, body);
+      if (!reviewed) throw safeError("MALFORMED_RESPONSE");
+      return reviewed;
+    }
     const domain = contentDomain(action);
     if (domain) {
       const validated = domain === ROUTE_DOMAIN ? safeRouteResponse(data, body) : domain === GALLERY_DOMAIN ? safeGalleryResponse(data, body) : safeContentResponse(data, body, domain);
@@ -470,6 +478,16 @@
       return validateSuccess(body, result.data);
     }
     const domain = contentDomain(body.action);
+    const reviewAction = REVIEW_ACTIONS.includes(body.action);
+    if (reviewAction && result.error && result.error.code === "OUTCOME_UNKNOWN") {
+      if (!exactKeys(result, ["ok", "error"]) || !exactKeys(result.error, ["code", "message", "retryable", "review_id"]) ||
+          typeof result.error.message !== "string" || result.error.retryable !== false || !validContentId(result.error.review_id) ||
+          body.action.startsWith("adminGet") || body.payload.review_id !== result.error.review_id) throw safeError("MALFORMED_RESPONSE");
+      const error = safeError("OUTCOME_UNKNOWN");
+      error.retryable = false;
+      error.review_id = result.error.review_id;
+      throw error;
+    }
     if (domain && result.error && result.error.code === "OUTCOME_UNKNOWN") {
       if (!exactKeys(result, ["ok", "error"]) || !exactKeys(result.error, ["code", "message", "retryable", domain.id]) ||
           typeof result.error.message !== "string" || result.error.retryable !== false || !validContentId(result.error[domain.id]) ||
@@ -483,6 +501,7 @@
         typeof result.error.code !== "string" || !result.error.code || typeof result.error.message !== "string") {
       throw safeError("MALFORMED_RESPONSE");
     }
+    if (reviewAction && result.error.code === "INVALID_TRANSITION") throw safeError("INVALID_TRANSITION");
     const code = BACKEND_ERROR_CODES.includes(result.error.code) || domain && ["INVALID_TRANSITION", "DUPLICATE_ID"].includes(result.error.code) ? result.error.code : "SERVER_ERROR";
     throw safeError(code);
   }
@@ -869,6 +888,42 @@
     const items = data.items.map(safeGalleryMediaItem);
     return items.some(item => !item) ? null : { items, page: data.page, page_size: data.page_size, total: data.total, total_pages: data.total_pages };
   }
+  function reviewListPayload(payload) {
+    const source = requestObject(payload === undefined ? {} : payload, ["keyword", "status", "place_id", "page", "page_size"], [], false), result = {};
+    for (const key of Object.keys(source)) {
+      if (key === "keyword") result.keyword = safeRequestText(source.keyword, 200);
+      else if (key === "status") { if (source.status !== "" && !REVIEW_STATUSES.includes(source.status)) validationError(); result.status = source.status; }
+      else if (key === "place_id") { if (source.place_id !== "" && !validContentId(source.place_id)) validationError(); result.place_id = source.place_id; }
+      else { if (!Number.isSafeInteger(source[key]) || source[key] < 1 || source[key] > (key === "page" ? 1000000 : 100)) validationError(); result[key] = source[key]; }
+    }
+    return result;
+  }
+  function reviewMutationPayload(payload, operation) {
+    const allowed = ["review_id", "expected_revision", ...(operation === "reply" ? ["admin_reply"] : [])];
+    const source = requestObject(payload, allowed, allowed, false);
+    if (!validContentId(source.review_id) || !validRevision(source.expected_revision)) validationError();
+    const result = { review_id: source.review_id, expected_revision: source.expected_revision };
+    if (operation === "reply") { if (!validUnicodeLength(source.admin_reply, 1, 2000) || /^'[=+\-@]/.test(source.admin_reply)) validationError(); result.admin_reply = source.admin_reply; }
+    return result;
+  }
+  function safeReviewRecord(data, mutation) {
+    const keys = ["review_id", "place_id", "reviewer_name", "is_anonymous", "rating", "comment", "admin_reply", "status", "created_at", "updated_at", "approved_at", "approved_by", "revision", ...(mutation ? ["audit_status"] : [])];
+    if (!exactKeys(data, keys) || !validContentId(data.review_id) || !validContentId(data.place_id) || !validUnicodeLength(data.reviewer_name, 0, 20000) || typeof data.is_anonymous !== "boolean" || !Number.isSafeInteger(data.rating) || data.rating < 1 || data.rating > 5 || !validUnicodeLength(data.comment, 1, 20000) || !validUnicodeLength(data.admin_reply, 0, 2000) || !REVIEW_STATUSES.includes(data.status) || !validContentTimestamp(data.created_at) || !validContentTimestamp(data.updated_at) || !validContentTimestamp(data.approved_at) || !validUnicodeLength(data.approved_by, 0, 200) || !validRevision(data.revision) || mutation && !["recorded", "unconfirmed"].includes(data.audit_status)) return null;
+    return { ...data };
+  }
+  function safeReviewResponse(data, body) {
+    if (body.action === "adminGetReviews") {
+      if (!exactKeys(data, ["items", "page", "page_size", "total", "total_pages", "warning"]) || !Array.isArray(data.items) || !validPagination(data)) return null;
+      const items = data.items.map(item => safeReviewRecord(item, false));
+      const warning = data.warning === null ? null : exactKeys(data.warning, ["code", "skipped_count"]) && data.warning.code === "SKIPPED_INVALID_REVIEWS" && Number.isSafeInteger(data.warning.skipped_count) && data.warning.skipped_count > 0 ? { ...data.warning } : undefined;
+      return items.some(item => !item) || new Set(items.map(item => item.review_id)).size !== items.length || warning === undefined ? null : { items, page:data.page, page_size:data.page_size, total:data.total, total_pages:data.total_pages, warning };
+    }
+    const mutation = !body.action.startsWith("adminGet"), result = safeReviewRecord(data, mutation);
+    if (!result || result.review_id !== body.payload.review_id) return null;
+    const expected = { approveReview:"approved", hideReview:"hidden", deleteReview:"deleted" }[body.action];
+    if (expected && result.status !== expected || body.action === "replyReview" && result.admin_reply !== body.payload.admin_reply || body.action === "clearReviewReply" && result.admin_reply !== "") return null;
+    return result;
+  }
   function getProducts(token, payload) { return placeRequest("adminGetProducts", token, contentRequestPayload(payload, PRODUCT_DOMAIN, "list")); }
   function getProductDetail(token, payload) { return placeRequest("adminGetProductDetail", token, contentRequestPayload(payload, PRODUCT_DOMAIN, "detail")); }
   function createProduct(token, payload) { return placeRequest("createProduct", token, contentRequestPayload(payload, PRODUCT_DOMAIN, "create")); }
@@ -890,6 +945,13 @@
   function createGalleryItem(token, payload) { return placeRequest("createGalleryItem", token, galleryRequestPayload(payload, "create")); }
   function updateGalleryItem(token, payload) { return placeRequest("updateGalleryItem", token, galleryRequestPayload(payload, "update")); }
   function deleteGalleryItem(token, payload) { return placeRequest("deleteGalleryItem", token, galleryRequestPayload(payload, "delete")); }
+  function getReviews(token, payload) { return placeRequest("adminGetReviews", token, reviewListPayload(payload)); }
+  function getReviewDetail(token, payload) { const source=requestObject(payload,["review_id"],["review_id"],false);if(!validContentId(source.review_id))validationError();return placeRequest("adminGetReviewDetail",token,{review_id:source.review_id}); }
+  function approveReview(token, payload) { return placeRequest("approveReview", token, reviewMutationPayload(payload, "moderate")); }
+  function hideReview(token, payload) { return placeRequest("hideReview", token, reviewMutationPayload(payload, "moderate")); }
+  function replyReview(token, payload) { return placeRequest("replyReview", token, reviewMutationPayload(payload, "reply")); }
+  function clearReviewReply(token, payload) { return placeRequest("clearReviewReply", token, reviewMutationPayload(payload, "clear")); }
+  function deleteReview(token, payload) { return placeRequest("deleteReview", token, reviewMutationPayload(payload, "delete")); }
 
   global.TakhunAdminApi = Object.freeze({
     login, validateSession, logout, getPlaces, getPlaceDetail, getPlaceMediaOptions, inspectPlaceDependencies,
@@ -897,6 +959,7 @@
     getProducts, getProductDetail, createProduct, updateProduct, deleteProduct,
     getEvents, getEventDetail, createEvent, updateEvent, deleteEvent,
     getRoutes, getRouteDetail, createRoute, updateRoute, deleteRoute,
-    getGallery, getGalleryDetail, getGalleryMediaOptions, createGalleryItem, updateGalleryItem, deleteGalleryItem
+    getGallery, getGalleryDetail, getGalleryMediaOptions, createGalleryItem, updateGalleryItem, deleteGalleryItem,
+    getReviews, getReviewDetail, approveReview, hideReview, replyReview, clearReviewReply, deleteReview
   });
 })(window);

@@ -994,11 +994,21 @@ POST
 
 | Field | Rule |
 |---|---|
-| `place_id` | required |
-| `rating` | required, number 1–5 |
-| `comment` | required, max 1000 characters |
-| `reviewer_name` | optional |
-| `is_anonymous` | boolean |
+| `place_id` | required; converted to text, trimmed, then must match `^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$` |
+| `rating` | required JSON number; integer 1–5 (numeric strings and booleans are rejected) |
+| `comment` | required JSON string; trimmed value must contain 1–1,000 Unicode code points and at most 4,000 UTF-8 bytes |
+| `reviewer_name` | optional JSON string; omission defaults to `""`; an explicit empty string is valid; trimmed value may contain 0–20,000 Unicode code points and at most 80,000 UTF-8 bytes; a present non-string including `null` is rejected |
+| `is_anonymous` | optional JSON boolean; omission defaults to `false`; strings/numbers are rejected |
+
+`comment` and `reviewer_name` reject NUL and malformed UTF-16. Direct leading
+`=`, `+`, `-`, and `@` are accepted, encoded for the Sheet, and read back as
+the original text. Inputs beginning `'=`, `'+`, `'-`, or `'@` are rejected as
+ambiguous before acquiring the write lock. Validation failures return
+`VALIDATION_ERROR` and perform no entity write. A valid request whose
+authoritative Place is absent or not `published` returns `NOT_FOUND` without
+writing. Lock/dependency/write exceptions are exposed only through the
+Router's safe server-error envelope; submission is never retried
+automatically.
 
 ### Response
 
@@ -1865,98 +1875,117 @@ Except for the M7 Place replacement in section 21, sections 7.3 through 7.29 des
 
 ---
 
-## 7.20 `adminGetReviews`
+## 7.20–7.23 Admin Reviews API
 
-โหลดรีวิวสำหรับ Admin
+Admin Reviews uses literal body-only `POST` requests. Every request is exactly
+`{"action", "token", "payload"}`; session authority is checked server-side.
+The client sends each mutation once and never retries automatically.
 
-### Request
+### Permissions and lifecycle
+
+| Action | super_admin | editor | reviewer | viewer |
+|---|---:|---:|---:|---:|
+| `adminGetReviews`, `adminGetReviewDetail` | yes | yes | yes | yes |
+| `approveReview`, `hideReview` | yes | yes | yes | no |
+| `replyReview`, `clearReviewReply` | yes | yes | no | no |
+| `deleteReview` | yes | no | no | no |
+
+- approve: `pending`/`hidden` → `approved`; related Place must be `published`
+- hide: `pending`/`approved` → `hidden`
+- reply/clear/delete: any non-`deleted` review; clear requires an existing reply
+- `deleted` is readable and terminal
+
+### List request and response
+
+`payload` accepts only `keyword`, `status`, `place_id`, `page`, and
+`page_size`. Defaults are page 1 and page size 20; maximum page size is 100.
 
 ```json
 {
   "action": "adminGetReviews",
   "token": "session-token",
-  "payload": {
-    "status": "pending",
-    "place_id": "",
-    "page": 1,
-    "page_size": 20
-  }
+  "payload": { "keyword": "lake", "status": "pending", "place_id": "", "page": 1, "page_size": 20 }
 }
 ```
-
-### Response
 
 ```json
 {
   "ok": true,
   "data": {
     "items": [],
-    "total": 0
+    "page": 1,
+    "page_size": 20,
+    "total": 0,
+    "total_pages": 0,
+    "warning": null
   },
   "message": "success"
 }
 ```
 
----
+Invalid legacy rows and every row sharing a duplicate `review_id` are excluded
+before filtering and pagination. `total` and `total_pages` count only valid,
+unambiguous rows. When anything is excluded, `warning` is exactly:
 
-## 7.21 `approveReview`
+```json
+{ "code": "SKIPPED_INVALID_REVIEWS", "skipped_count": 3 }
+```
 
-อนุมัติรีวิว
+Rows are never repaired or deleted automatically.
+
+### Detail request
 
 ```json
 {
-  "action": "approveReview",
+  "action": "adminGetReviewDetail",
   "token": "session-token",
-  "payload": {
-    "review_id": "REV-001"
-  }
+  "payload": { "review_id": "REV-001" }
 }
 ```
 
-### Response
+List items and detail responses contain exactly `review_id`, `place_id`,
+`reviewer_name` (which may be empty), `is_anonymous`, `rating`, `comment`,
+`admin_reply`, `status`, `created_at`, `updated_at`, `approved_at`,
+`approved_by`, and `revision`. A missing target is `NOT_FOUND`; an invalid or
+duplicate target fails closed as `SERVER_ERROR` and is never mutated.
+
+### Mutation requests and response
+
+All mutation payloads contain exactly `review_id` and `expected_revision`.
+`replyReview` additionally requires `admin_reply`; clear uses its own endpoint
+and accepts no reply value.
 
 ```json
-{
-  "ok": true,
-  "data": {
-    "review_id": "REV-001",
-    "status": "approved"
-  },
-  "message": "อนุมัติรีวิวเรียบร้อย"
-}
+{ "action": "approveReview", "token": "session-token", "payload": { "review_id": "REV-001", "expected_revision": "r1-<64 lowercase hex>" } }
 ```
-
----
-
-## 7.22 `hideReview`
-
-ซ่อนรีวิว
 
 ```json
-{
-  "action": "hideReview",
-  "token": "session-token",
-  "payload": {
-    "review_id": "REV-001"
-  }
-}
+{ "action": "replyReview", "token": "session-token", "payload": { "review_id": "REV-001", "expected_revision": "r1-<64 lowercase hex>", "admin_reply": "ขอบคุณ" } }
 ```
 
----
+A mutation response contains the exact detail projection plus `audit_status`,
+which is `recorded` or `unconfirmed`. `unconfirmed` means the entity write was
+verified but the audit append was not confirmed; it remains successful and
+must not be resent automatically.
 
-## 7.23 `deleteReview`
+### Revision, reply, and error contract
 
-ลบรีวิวแบบ soft delete
+`revision` hashes every persisted Review field after Date/string timestamp
+canonicalization. Under the script lock, each successful mutation sets
+`updated_at` to the later of the wall-clock second or one second after the
+stored value. It increases strictly across same-second and ABA cycles without
+adding a schema column.
 
-```json
-{
-  "action": "deleteReview",
-  "token": "session-token",
-  "payload": {
-    "review_id": "REV-001"
-  }
-}
-```
+Replies contain 1–2,000 Unicode code points and at most 8,000 UTF-8 bytes.
+NUL, malformed UTF-16, and `'=`, `'+`, `'-`, `'@` are rejected before write.
+Direct `=`, `+`, `-`, and `@` prefixes round-trip exactly.
+
+Normal errors are exactly `{"ok":false,"error":{"code","message"}}`.
+Applicable codes are `UNAUTHORIZED`, `FORBIDDEN`, `VALIDATION_ERROR`,
+`NOT_FOUND`, `CONFLICT`, `INVALID_TRANSITION`, `CONTENT_LOCK`, and
+`SERVER_ERROR`. `CONTENT_LOCK` is not automatically retried. An unverified
+write is instead exact `OUTCOME_UNKNOWN` with `retryable:false` and the
+requested `review_id`; clients reload and reconcile without resending.
 
 ---
 

@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { Buffer } = require("node:buffer");
 
 const root = path.join(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
@@ -43,7 +44,7 @@ function load(options = {}) {
   const properties = options.properties || makeProperties();
   const appended = [];
   const reads = [];
-  const lock = options.lock || { acquired: false, released: 0, tryLock(ms) { assert.equal(ms, 10000); this.acquired = true; return true; }, releaseLock() { this.released += 1; } };
+  const lock = options.lock || { acquired: false, acquisitions: 0, released: 0, held: false, tryLock(ms) { assert.equal(ms, 10000); assert.equal(this.held, false, "nested script-lock acquisition"); this.acquired = true; this.acquisitions += 1; this.held = true; return true; }, releaseLock() { assert.equal(this.held, true); this.released += 1; this.held = false; } };
   const context = {
     JSON, Object, Math, Number, String, Array, Date, RegExp, encodeURIComponent, isFinite,
     CacheService: { getScriptCache: () => cache },
@@ -51,6 +52,7 @@ function load(options = {}) {
     LockService: { getScriptLock: () => lock },
     Utilities: { getUuid: () => "123e4567-e89b-12d3-a456-426614174000", formatDate: (_date, zone, pattern) => { assert.equal(zone, "Asia/Bangkok"); assert.equal(pattern, "yyyy-MM-dd HH:mm:ss"); return "2026-07-15 14:30:00"; } },
     Session: { getScriptTimeZone: () => "Asia/Bangkok" },
+    CryptoService_utf8Bytes_: (value) => [...Buffer.from(value, "utf8")],
     readSheetObjects_(name) { reads.push(name); if (name === "reviews") return reviewRows; if (name === "places") return placeRows; throw new Error("unexpected sheet"); },
     appendSheetObject_(name, required, record) { appended.push({ name, required: [...required], record: { ...record } }); if (options.appendError) throw new Error("sheet secret"); }
   };
@@ -118,6 +120,61 @@ test("submitReview rejects invalid input unpublished places and releases after a
   const failed = load({ appendError: true }); assert.throws(() => required(failed.context, "submitReview_")({ place_id: "P-1", rating: 5, comment: "x" })); assert.equal(failed.lock.released, 1);
 });
 
+test("submitReview accepts an empty name but rejects Admin-incompatible text before lock or append", () => {
+  const accepted = load();
+  const response = plain(required(accepted.context, "submitReview_")({ place_id: "P-1", reviewer_name: "", rating: 5, comment: "safe" }));
+  assert.equal(response.ok, true);
+  assert.equal(accepted.appended[0].record.reviewer_name, "");
+
+  const invalid = [
+    { reviewer_name: "nul\0name", comment: "safe" },
+    { reviewer_name: "\ud800", comment: "safe" },
+    { reviewer_name: "x".repeat(20001), comment: "safe" },
+    { reviewer_name: "safe", comment: "nul\0comment" },
+    { reviewer_name: "safe", comment: "\udfff" },
+    { reviewer_name: "safe", comment: "x".repeat(1001) },
+    { reviewer_name: "'=ambiguous", comment: "safe" },
+    { reviewer_name: "safe", comment: "'+ambiguous" },
+    { reviewer_name: "safe", comment: "'-ambiguous" },
+    { reviewer_name: "safe", comment: "'@ambiguous" }
+  ];
+  for (const fields of invalid) {
+    const env = load();
+    const result = plain(required(env.context, "submitReview_")({ place_id: "P-1", rating: 5, ...fields }));
+    assert.equal(result.error.code, "VALIDATION_ERROR", JSON.stringify(fields));
+    assert.equal(env.lock.acquired, false, JSON.stringify(fields));
+    assert.equal(env.appended.length, 0, JSON.stringify(fields));
+  }
+});
+
+test("submitReview distinguishes an omitted reviewer name from non-string public text", () => {
+  for (const reviewerName of [{}, [], 123, true, null]) {
+    const env = load();
+    const result = plain(required(env.context, "submitReview_")({ place_id: "P-1", reviewer_name: reviewerName, rating: 5, comment: "safe" }));
+    assert.equal(result.ok, false, `reviewer_name ${String(reviewerName)} must be rejected`);
+    assert.equal(result.error.code, "VALIDATION_ERROR");
+    assert.equal(env.lock.acquired, false);
+    assert.equal(env.appended.length, 0);
+  }
+  for (const comment of [{}, [], 123, true, null]) {
+    const env = load();
+    const result = plain(required(env.context, "submitReview_")({ place_id: "P-1", rating: 5, comment }));
+    assert.equal(result.ok, false, `comment ${String(comment)} must be rejected`);
+    assert.equal(result.error.code, "VALIDATION_ERROR");
+    assert.equal(env.lock.acquired, false);
+    assert.equal(env.appended.length, 0);
+  }
+  for (const payload of [
+    { place_id: "P-1", rating: 5, comment: "safe" },
+    { place_id: "P-1", reviewer_name: "", rating: 5, comment: "safe" },
+    { place_id: "P-1", reviewer_name: "Alice", rating: 5, comment: "safe" }
+  ]) {
+    const env = load();
+    assert.equal(plain(required(env.context, "submitReview_")(payload)).ok, true);
+    assert.equal(env.appended.length, 1);
+  }
+});
+
 test("formula defense round-trips every approved dangerous prefix and preserves normal apostrophes", () => {
   const { context } = load(); const escape = required(context, "ReviewService_escapeSheetText_"); const unescape = required(context, "ReviewService_unescapeSheetText_");
   for (const prefix of ["=", "+", "-", "@"]) {
@@ -153,6 +210,53 @@ test("Review visibility cache changes namespace with the Place epoch but submitR
   const submit = load({ properties: submitProperties });
   assert.equal(plain(submit.context.submitReview_({ place_id: "P-1", rating: 5, comment: "safe" })).ok, true);
   assert.deepEqual(submitProperties.calls, []);
+});
+
+test("public cache reads use one bounded lock and never fall back unlocked under contention", () => {
+  const busyLock = { attempts: 0, releases: 0, tryLock(ms) { assert.equal(ms, 10000); this.attempts += 1; return false; }, releaseLock() { this.releases += 1; } };
+  const busy = load({ lock: busyLock });
+  assert.throws(() => busy.context.getReviews_({ place_id: "P-1" }), /Review read is temporarily unavailable/);
+  assert.equal(busyLock.attempts, 1);
+  assert.equal(busyLock.releases, 0);
+  assert.deepEqual(busy.reads, []);
+  assert.equal(busy.cache.puts.length, 0);
+
+  const env = load();
+  assert.equal(plain(env.context.getReviews_({ place_id: "P-1" })).ok, true);
+  assert.equal(env.lock.acquisitions, 1);
+  assert.equal(env.lock.released, 1);
+  assert.equal(plain(env.context.getReviews_({ place_id: "P-1" })).ok, true);
+  assert.equal(env.lock.acquisitions, 2, "cache hits remain inside the same lock boundary");
+  assert.equal(env.lock.released, 2);
+
+  const readFailureCache = { get() { throw new Error("cache read"); }, put() {} };
+  const readFailure = load({ cache: readFailureCache });
+  assert.equal(plain(readFailure.context.getReviews_({ place_id: "P-1" })).ok, true);
+  assert.equal(readFailure.lock.acquisitions, 1);
+  assert.equal(readFailure.lock.released, 1);
+
+  const writeFailureCache = { get() { return null; }, put() { throw new Error("cache write"); } };
+  const writeFailure = load({ cache: writeFailureCache });
+  assert.equal(plain(writeFailure.context.getReviews_({ place_id: "P-1" })).ok, true);
+  assert.equal(writeFailure.lock.acquisitions, 1);
+  assert.equal(writeFailure.lock.released, 1);
+});
+
+test("public submission performs its authoritative Place check only after winning the shared lock", () => {
+  const contendedLock = { attempts: 0, releases: 0, tryLock(ms) { assert.equal(ms, 10000); this.attempts += 1; return false; }, releaseLock() { this.releases += 1; } };
+  const contended = load({ lock: contendedLock });
+  assert.throws(() => contended.context.submitReview_({ place_id: "P-1", rating: 5, comment: "safe" }), /Review write is temporarily unavailable/);
+  assert.deepEqual(contended.reads, []);
+  assert.equal(contended.appended.length, 0);
+
+  const places = [{ place_id: "P-1", status: "published" }];
+  const changingLock = { held: false, acquisitions: 0, released: 0, tryLock() { assert.equal(this.held, false, "nested script-lock acquisition"); this.held = true; this.acquisitions += 1; places[0].status = "draft"; return true; }, releaseLock() { this.held = false; this.released += 1; } };
+  const changed = load({ places, lock: changingLock });
+  const result = plain(changed.context.submitReview_({ place_id: "P-1", rating: 5, comment: "safe" }));
+  assert.equal(result.error.code, "NOT_FOUND");
+  assert.equal(changed.appended.length, 0);
+  assert.equal(changingLock.acquisitions, 1);
+  assert.equal(changingLock.released, 1);
 });
 
 if (process.exitCode) process.exit(process.exitCode);

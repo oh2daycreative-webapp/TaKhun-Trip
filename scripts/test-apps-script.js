@@ -72,6 +72,7 @@ const postActions = [
   "adminGetEvents", "adminGetEventDetail", "createEvent", "updateEvent", "deleteEvent",
   "adminGetRoutes", "adminGetRouteDetail", "createRoute", "updateRoute", "deleteRoute",
   "adminGetGallery", "adminGetGalleryDetail", "adminGetGalleryMediaOptions", "createGalleryItem", "updateGalleryItem", "deleteGalleryItem",
+  "adminGetReviews", "adminGetReviewDetail", "approveReview", "hideReview", "replyReview", "clearReviewReply", "deleteReview",
   "submitReview", "adminLogin", "adminValidateSession", "adminLogout",
   "adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace",
   "adminInspectPlaceDependencies", "adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace",

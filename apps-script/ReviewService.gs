@@ -3,6 +3,9 @@ var ReviewService_DEFAULT_PAGE_ = 1;
 var ReviewService_DEFAULT_PAGE_SIZE_ = 20;
 var ReviewService_MAX_PAGE_SIZE_ = 100;
 var ReviewService_MAX_COMMENT_LENGTH_ = 1000;
+var ReviewService_MAX_COMMENT_BYTES_ = 4000;
+var ReviewService_MAX_REVIEWER_NAME_LENGTH_ = 20000;
+var ReviewService_MAX_REVIEWER_NAME_BYTES_ = 80000;
 var ReviewService_REQUIRED_HEADERS_ = [
   "review_id", "place_id", "reviewer_name", "is_anonymous", "rating", "comment",
   "admin_reply", "status", "created_at", "updated_at", "approved_at", "approved_by"
@@ -11,12 +14,14 @@ var ReviewService_REQUIRED_HEADERS_ = [
 function getReviews_(parameters) {
   var normalized = ReviewService_normalizeListParameters_(parameters);
   if (!normalized.ok) return normalized.response;
-  return ReviewService_cached_(normalized.params, function () {
-    return ReviewService_buildReviewsResponse_(
-      readSheetObjects_("reviews"),
-      readSheetObjects_("places"),
-      normalized.params
-    );
+  return ReviewService_withScriptLock_("Review read is temporarily unavailable.", function () {
+    return ReviewService_cached_(normalized.params, function () {
+      return ReviewService_buildReviewsResponse_(
+        readSheetObjects_("reviews"),
+        readSheetObjects_("places"),
+        normalized.params
+      );
+    });
   });
 }
 
@@ -24,15 +29,11 @@ function submitReview_(payload) {
   var normalized = ReviewService_normalizeSubmission_(payload);
   if (!normalized.ok) return normalized.response;
   var placeId = normalized.payload.place_id;
-  var publishedPlace = (readSheetObjects_("places") || []).some(function (row) {
-    return row && ReviewService_trim_(row.place_id) === placeId && ReviewService_trim_(row.status) === "published";
-  });
-  if (!publishedPlace) return ReviewService_error_("NOT_FOUND", "ไม่พบสถานที่นี้");
-
-  var lock = LockService.getScriptLock();
-  var acquired = lock.tryLock(10000);
-  if (!acquired) throw new Error("Review write is temporarily unavailable.");
-  try {
+  return ReviewService_withScriptLock_("Review write is temporarily unavailable.", function () {
+    var publishedPlace = (readSheetObjects_("places") || []).some(function (row) {
+      return row && ReviewService_trim_(row.place_id) === placeId && ReviewService_trim_(row.status) === "published";
+    });
+    if (!publishedPlace) return ReviewService_error_("NOT_FOUND", "ไม่พบสถานที่นี้");
     var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
     var reviewId = "REV-" + Utilities.getUuid();
     var record = {
@@ -55,9 +56,15 @@ function submitReview_(payload) {
       data: { review_id: reviewId, status: "pending" },
       message: "ส่งรีวิวแล้ว รอตรวจสอบก่อนเผยแพร่"
     };
-  } finally {
-    lock.releaseLock();
-  }
+  });
+}
+
+function ReviewService_withScriptLock_(failureMessage, operation) {
+  var lock = LockService.getScriptLock();
+  var acquired = lock.tryLock(10000);
+  if (!acquired) throw new Error(failureMessage);
+  try { return operation(); }
+  finally { lock.releaseLock(); }
 }
 
 function ReviewService_buildReviewsResponse_(reviewRows, placeRows, parameters) {
@@ -112,14 +119,41 @@ function ReviewService_normalizeListParameters_(parameters) {
 function ReviewService_normalizeSubmission_(payload) {
   var source = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
   var placeId = ReviewService_trim_(source.place_id);
-  var reviewerName = ReviewService_trim_(source.reviewer_name);
-  var comment = ReviewService_trim_(source.comment);
+  var hasReviewerName = Object.prototype.hasOwnProperty.call(source, "reviewer_name");
+  var reviewerNameValue = hasReviewerName ? source.reviewer_name : "";
+  var commentValue = source.comment;
+  if (typeof reviewerNameValue !== "string" || typeof commentValue !== "string") {
+    return { ok: false, response: ReviewService_validationError_("ข้อมูลรีวิวไม่ถูกต้อง") };
+  }
+  var reviewerName = reviewerNameValue.trim();
+  var comment = commentValue.trim();
   var rating = source.rating;
   var anonymous = source.is_anonymous === undefined ? false : source.is_anonymous;
-  if (!ReviewService_validId_(placeId) || typeof rating !== "number" || !Number.isInteger(rating) || rating < 1 || rating > 5 || !comment || comment.length > ReviewService_MAX_COMMENT_LENGTH_ || typeof anonymous !== "boolean") {
+  if (!ReviewService_validId_(placeId) || typeof rating !== "number" || !Number.isInteger(rating) || rating < 1 || rating > 5 ||
+      !ReviewService_validSubmissionText_(reviewerName, true, ReviewService_MAX_REVIEWER_NAME_LENGTH_, ReviewService_MAX_REVIEWER_NAME_BYTES_) ||
+      !ReviewService_validSubmissionText_(comment, false, ReviewService_MAX_COMMENT_LENGTH_, ReviewService_MAX_COMMENT_BYTES_) ||
+      typeof anonymous !== "boolean") {
     return { ok: false, response: ReviewService_validationError_("ข้อมูลรีวิวไม่ถูกต้อง") };
   }
   return { ok: true, payload: { place_id: placeId, reviewer_name: reviewerName, is_anonymous: anonymous, rating: rating, comment: comment } };
+}
+
+function ReviewService_validSubmissionText_(value, allowEmpty, maximumPoints, maximumBytes) {
+  if (typeof value !== "string" || !allowEmpty && value === "" || value.indexOf("\u0000") >= 0 || /^'[=+\-@]/.test(value)) return false;
+  var points = 0;
+  for (var index = 0; index < value.length; index += 1) {
+    var code = value.charCodeAt(index);
+    if (code >= 0xD800 && code <= 0xDBFF) {
+      if (index + 1 >= value.length) return false;
+      var next = value.charCodeAt(index + 1);
+      if (next < 0xDC00 || next > 0xDFFF) return false;
+      index += 1;
+    } else if (code >= 0xDC00 && code <= 0xDFFF) return false;
+    points += 1;
+    if (points > maximumPoints) return false;
+  }
+  try { return CryptoService_utf8Bytes_(value).length <= maximumBytes; }
+  catch (_unicodeError) { return false; }
 }
 
 function ReviewService_publicProjection_(row) {
