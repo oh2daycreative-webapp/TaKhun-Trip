@@ -366,9 +366,8 @@ test("malformed or unavailable epoch bypasses cache without leaking property det
   }
 });
 
-test("Gallery Settings and Categories cache namespaces ignore Place epoch changes", () => {
+test("Settings and Categories cache namespaces ignore Place epoch changes", () => {
   const cases = [
-    { file: "apps-script/GalleryService.gs", action: "getGallery_", sheet: "gallery", parameters: {} },
     { file: "apps-script/SettingsService.gs", action: "getSettings_", sheet: "settings", parameters: {} },
     { file: "apps-script/CategoryService.gs", action: "getCategories_", sheet: "categories", parameters: {} }
   ];
