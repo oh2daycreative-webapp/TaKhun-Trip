@@ -215,6 +215,25 @@ function killOwnedPid(pid) {
     );
   });
 
+  await test("spawn plus cleanup failure exits a real wrapper with status 125", async () => {
+    const runnerPath = path.join(__dirname, "test-admin-content-browser-runner.js");
+    const wrapperSource = `(async () => {
+      const { runBoundedProcess } = require(${JSON.stringify(runnerPath)});
+      await runBoundedProcess("fake", [], {
+        timeoutMs: 100,
+        spawn() { throw new Error("simulated synchronous spawn failure"); },
+        cleanup() { throw new Error("simulated profile cleanup failure"); }
+      });
+    })().catch(error => {
+      process.stderr.write(error.message + "\\n");
+      process.exitCode = Number.isSafeInteger(error && error.exitCode) ? error.exitCode : 1;
+    });`;
+    const result = cp.spawnSync(process.execPath, ["--input-type=commonjs", "-e", wrapperSource], { windowsHide: true, encoding: "utf8", timeout: 1000 });
+    assert.equal(result.status, 125, `${result.stdout}\n${result.stderr}`);
+    assert.match(result.stderr, /Process spawn failed/);
+    assert.match(result.stderr, /Profile cleanup failed/);
+  });
+
   if (process.exitCode) process.exit(process.exitCode);
   process.stdout.write("Admin native browser runner verification passed.\n");
 })();
