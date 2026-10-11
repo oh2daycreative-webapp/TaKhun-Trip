@@ -53,12 +53,29 @@ function spawnFailure(primaryError, cleanupError) {
   return error;
 }
 
+async function runProcessEntrypoint(operation, validate, writeError = message => process.stderr.write(message)) {
+  try {
+    const result = await operation();
+    if (!result || !Number.isSafeInteger(result.code)) throw new Error("Browser runner returned an invalid result.");
+    if (result.code !== 0) {
+      if (result.stderr) writeError(`${result.stderr}\n`);
+      return result.code;
+    }
+    validate(result);
+    return 0;
+  } catch (error) {
+    writeError(`${error && (error.stack || error.message) || error}\n`);
+    return Number.isSafeInteger(error && error.exitCode) ? error.exitCode : 1;
+  }
+}
+
 function terminateProcessTree(child, options = {}) {
   if (!child || !Number.isSafeInteger(child.pid) || child.pid < 1 || child.exitCode !== null) return Promise.resolve({ ok: true });
   const spawn = options.spawn || cp.spawn;
   const timeoutMs = Number.isSafeInteger(options.timeoutMs) && options.timeoutMs > 0 ? options.timeoutMs : DEFAULT_TERMINATION_TIMEOUT_MS;
   return new Promise((resolve) => {
     let settled = false, killer = null, deadline = null;
+    let targetClosed = child.exitCode !== null, helperClosed = false, helperKillAttempted = false;
     const settle = (ok, error) => {
       if (settled) return;
       settled = true;
@@ -67,11 +84,23 @@ function terminateProcessTree(child, options = {}) {
       if (killer) {
         killer.removeListener("error", onKillerError);
         killer.removeListener("close", onKillerClose);
-        if (!ok) releaseOwnedProcessHandles(killer);
+        releaseOwnedProcessHandles(killer);
       }
       resolve({ ok, error });
     };
-    const onChildClose = () => settle(true);
+    const stopHelper = () => {
+      if (!killer || helperClosed || helperKillAttempted || killer.exitCode !== null) return;
+      helperKillAttempted = true;
+      try { killer.kill("SIGKILL"); } catch (_killerError) { /* The deadline reports unconfirmed cleanup. */ }
+    };
+    const maybeSettle = () => {
+      if (targetClosed && (!killer || helperClosed)) settle(true);
+    };
+    const onChildClose = () => {
+      targetClosed = true;
+      stopHelper();
+      maybeSettle();
+    };
     const directKill = () => {
       if (child.exitCode === null) {
         try {
@@ -79,14 +108,30 @@ function terminateProcessTree(child, options = {}) {
           else child.kill("SIGKILL");
         } catch (_killError) { /* Reported by the caller if close never follows. */ }
       }
-      if (child.exitCode !== null) settle(true);
+      if (child.exitCode !== null) {
+        targetClosed = true;
+        stopHelper();
+        maybeSettle();
+      }
     };
-    const onKillerError = () => directKill();
-    const onKillerClose = code => { if (code !== 0) directKill(); else if (child.exitCode !== null) settle(true); };
-    deadline = setTimeout(() => {
-      if (killer && killer.exitCode === null) { try { killer.kill("SIGKILL"); } catch (_killerError) { /* Deadline result remains authoritative. */ } }
+    const onKillerError = () => {
+      if (!Number.isSafeInteger(killer && killer.pid)) helperClosed = true;
       directKill();
-      settle(false, `Process termination did not complete within ${timeoutMs} ms.`);
+      maybeSettle();
+    };
+    const onKillerClose = code => {
+      helperClosed = true;
+      if (code !== 0) directKill();
+      if (child.exitCode !== null) targetClosed = true;
+      maybeSettle();
+    };
+    deadline = setTimeout(() => {
+      stopHelper();
+      directKill();
+      const error = targetClosed && killer && !helperClosed
+        ? `Termination helper cleanup did not complete within ${timeoutMs} ms.`
+        : `Process termination did not complete within ${timeoutMs} ms.`;
+      settle(false, error);
     }, timeoutMs);
     child.once("close", onChildClose);
     if (process.platform !== "win32") { directKill(); return; }
@@ -167,4 +212,4 @@ function runBoundedProcess(command, args, options = {}) {
   });
 }
 
-module.exports = { runBoundedProcess, terminateProcessTree };
+module.exports = { runBoundedProcess, runProcessEntrypoint, terminateProcessTree };

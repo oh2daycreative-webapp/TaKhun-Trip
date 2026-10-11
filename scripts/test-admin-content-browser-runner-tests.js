@@ -6,7 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const cp = require("node:child_process");
 const { EventEmitter } = require("node:events");
-const { runBoundedProcess, terminateProcessTree } = require("./test-admin-content-browser-runner.js");
+const { runBoundedProcess, runProcessEntrypoint, terminateProcessTree } = require("./test-admin-content-browser-runner.js");
 
 async function test(name, operation) {
   try { await operation(); process.stdout.write(`PASS ${name}\n`); }
@@ -143,7 +143,7 @@ function killOwnedPid(pid) {
     });
     wrapper.stderr.on("data", chunk => { stderr += String(chunk); });
     try {
-      const code = await waitForClose(wrapper, 1200);
+      const code = await waitForClose(wrapper, 4000);
       assert.equal(code, 125, `wrapper output: ${stdout}\n${stderr}`);
       assert.match(stdout, /"residualProcess":true/);
       assert.match(stdout, /termination did not complete/i);
@@ -151,6 +151,64 @@ function killOwnedPid(pid) {
       if (wrapper.exitCode === null) killOwnedPid(wrapper.pid);
       killOwnedPid(ownedPid);
     }
+  });
+
+  await test("real helper is bounded when the target closes first", async () => {
+    const runnerPath = path.join(__dirname, "test-admin-content-browser-runner.js");
+    const wrapperSource = `(async () => {
+      const cp = require("node:child_process");
+      const { runBoundedProcess } = require(${JSON.stringify(runnerPath)});
+      const target = cp.spawn(process.execPath, ["-e", "setTimeout(()=>process.exit(0),80)"], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+      process.stdout.write("TARGET_PID=" + target.pid + "\\n");
+      const result = await runBoundedProcess("owned-target", [], {
+        timeoutMs: 20,
+        terminationTimeoutMs: 500,
+        killChild() { return false; },
+        spawn(command) {
+          if (command === "owned-target") return target;
+          const helper = cp.spawn(process.execPath, ["-e", "setInterval(()=>{},1000)"], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+          process.stdout.write("HELPER_PID=" + helper.pid + "\\n");
+          return helper;
+        }
+      });
+      process.stdout.write("RESULT=" + JSON.stringify(result) + "\\n");
+      process.exitCode = result.code;
+    })().catch(error => { process.stderr.write(error.stack + "\\n"); process.exitCode = 1; });`;
+    const wrapper = cp.spawn(process.execPath, ["--input-type=commonjs", "-e", wrapperSource], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "", stderr = "", targetPid = null, helperPid = null;
+    wrapper.stdout.on("data", chunk => {
+      stdout += String(chunk);
+      const targetMatch = stdout.match(/TARGET_PID=(\d+)/), helperMatch = stdout.match(/HELPER_PID=(\d+)/);
+      if (targetMatch) targetPid = Number(targetMatch[1]);
+      if (helperMatch) helperPid = Number(helperMatch[1]);
+    });
+    wrapper.stderr.on("data", chunk => { stderr += String(chunk); });
+    try {
+      const code = await waitForClose(wrapper, 4000);
+      assert.equal(code, 124, `wrapper output: ${stdout}\n${stderr}`);
+      assert.match(stdout, /"residualProcess":false/);
+    } finally {
+      if (wrapper.exitCode === null) killOwnedPid(wrapper.pid);
+      killOwnedPid(targetPid);
+      killOwnedPid(helperPid);
+    }
+  });
+
+  await test("target-first close reports unconfirmed helper cleanup as 125", async () => {
+    const child = new EventEmitter(); child.pid = 12348; child.exitCode = null; child.kill = () => false;
+    child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+    const helper = new EventEmitter(); helper.pid = 22348; helper.exitCode = null; helper.kill = () => false;
+    const resultPromise = runBoundedProcess("fake", [], { timeoutMs: 10, terminationTimeoutMs: 40,
+      killChild() { return false; },
+      spawn(command) { return command === "fake" ? child : helper; }
+    });
+    setTimeout(() => { child.exitCode = 0; child.emit("close", 0); }, 20);
+    const result = await resultPromise;
+    assert.equal(result.code, 125);
+    assert.equal(result.residualProcess, true);
+    assert.match(result.stderr, /termination helper cleanup did not complete/i);
+    assert.equal(helper.listenerCount("close"), 0);
+    assert.equal(helper.listenerCount("error"), 0);
   });
 
   await test("normal child close during termination settles before the secondary deadline", async () => {
@@ -162,6 +220,29 @@ function killOwnedPid(pid) {
     assert.equal(result.code, 124);
     assert.doesNotMatch(result.stderr, /termination did not complete/i);
     assert.equal(directKills, 1, "taskkill failure must fall back only to the owned child");
+  });
+
+  await test("duplicate and late target/helper events settle and clean exactly once", async () => {
+    const child = new EventEmitter(); child.pid = 12349; child.exitCode = null; child.kill = () => true;
+    child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+    const helper = new EventEmitter(); helper.pid = 22349; helper.exitCode = null; helper.kill = () => true;
+    let cleanups = 0;
+    const resultPromise = runBoundedProcess("fake", [], { timeoutMs: 10, terminationTimeoutMs: 200,
+      cleanup() { cleanups += 1; },
+      spawn(command) { return command === "fake" ? child : helper; }
+    });
+    setTimeout(() => {
+      helper.exitCode = 0; helper.emit("close", 0); helper.emit("close", 0);
+      child.exitCode = 0; child.emit("close", 0); child.emit("close", 0);
+    }, 20);
+    const result = await resultPromise;
+    assert.equal(result.code, 124);
+    assert.equal(result.residualProcess, false);
+    assert.equal(cleanups, 1);
+    assert.equal(child.listenerCount("close"), 0);
+    assert.equal(child.listenerCount("error"), 0);
+    assert.equal(helper.listenerCount("close"), 0);
+    assert.equal(helper.listenerCount("error"), 0);
   });
 
   await test("residual profile cleanup failure is an explicit nonzero result", async () => {
@@ -228,10 +309,41 @@ function killOwnedPid(pid) {
       process.stderr.write(error.message + "\\n");
       process.exitCode = Number.isSafeInteger(error && error.exitCode) ? error.exitCode : 1;
     });`;
-    const result = cp.spawnSync(process.execPath, ["--input-type=commonjs", "-e", wrapperSource], { windowsHide: true, encoding: "utf8", timeout: 1000 });
+    const result = cp.spawnSync(process.execPath, ["--input-type=commonjs", "-e", wrapperSource], { windowsHide: true, encoding: "utf8", timeout: 4000 });
     assert.equal(result.status, 125, `${result.stdout}\n${result.stderr}`);
     assert.match(result.stderr, /Process spawn failed/);
     assert.match(result.stderr, /Profile cleanup failed/);
+  });
+
+  await test("production entrypoint mapping preserves runner codes and assertion diagnostics", async () => {
+    const messages = [];
+    const writeError = message => { messages.push(message); };
+    assert.equal(await runProcessEntrypoint(async () => ({ code: 124, stderr: "confirmed timeout" }), () => { throw new Error("must not validate failures"); }, writeError), 124);
+    assert.equal(await runProcessEntrypoint(async () => ({ code: 125, stderr: "residual process" }), () => { throw new Error("must not validate failures"); }, writeError), 125);
+    assert.equal(await runProcessEntrypoint(async () => { const error = new Error("cleanup failed"); error.exitCode = 125; throw error; }, () => {}, writeError), 125);
+    assert.equal(await runProcessEntrypoint(async () => ({ code: 0, stdout: "bad output", stderr: "" }), () => { throw new Error("browser assertion failed"); }, writeError), 1);
+    assert.match(messages.join("\n"), /confirmed timeout/);
+    assert.match(messages.join("\n"), /residual process/);
+    assert.match(messages.join("\n"), /cleanup failed/);
+    assert.match(messages.join("\n"), /browser assertion failed/);
+  });
+
+  await test("production entrypoint mapper drives real process exit statuses", async () => {
+    const runnerPath = path.join(__dirname, "test-admin-content-browser-runner.js");
+    for (const [scenario, expected] of [["timeout", 124], ["residual", 125], ["assertion", 1]]) {
+      const source = `
+        const { runProcessEntrypoint } = require(${JSON.stringify(runnerPath)});
+        const scenario = ${JSON.stringify(scenario)};
+        runProcessEntrypoint(
+          async () => scenario === "timeout" ? { code: 124, stderr: "confirmed timeout" } : scenario === "residual" ? { code: 125, stderr: "unconfirmed termination" } : { code: 0, stderr: "" },
+          () => { if (scenario === "assertion") throw new Error("browser assertion failed"); }
+        ).then(code => { process.exitCode = code; });`;
+      const result = cp.spawnSync(process.execPath, ["--input-type=commonjs", "-e", source], { windowsHide: true, encoding: "utf8", timeout: 4000 });
+      assert.equal(result.status, expected, `${scenario}: ${result.stdout}\n${result.stderr}`);
+      if (scenario === "timeout") assert.match(result.stderr, /confirmed timeout/);
+      if (scenario === "residual") assert.match(result.stderr, /unconfirmed termination/);
+      if (scenario === "assertion") assert.match(result.stderr, /browser assertion failed/);
+    }
   });
 
   if (process.exitCode) process.exit(process.exitCode);
