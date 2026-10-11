@@ -19,6 +19,33 @@ function temporaryProfile(label) {
   return directory;
 }
 
+function waitForClose(child, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.removeListener("error", onError);
+      child.removeListener("close", onClose);
+      if (error) reject(error); else resolve(value);
+    };
+    const onError = error => finish(error);
+    const onClose = code => finish(null, code);
+    const timer = setTimeout(() => finish(new Error(`Subprocess did not close within ${timeoutMs} ms.`)), timeoutMs);
+    child.once("error", onError);
+    child.once("close", onClose);
+  });
+}
+
+function killOwnedPid(pid) {
+  if (!Number.isSafeInteger(pid) || pid < 1) return;
+  try {
+    if (process.platform === "win32") cp.spawnSync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore", timeout: 2000 });
+    else process.kill(pid, "SIGKILL");
+  } catch (_cleanupError) { /* The process may already have exited. */ }
+}
+
 (async () => {
   await test("bounded runner returns captured success and cleans only its profile", async () => {
     const profile = temporaryProfile("runner-success");
@@ -82,6 +109,50 @@ function temporaryProfile(label) {
     assert.equal(killerKills, 1, "runner must terminate its own hanging taskkill helper");
   });
 
+  await test("real wrapper exits after an unconfirmed termination releases only its owned handles", async () => {
+    const runnerPath = path.join(__dirname, "test-admin-content-browser-runner.js");
+    const wrapperSource = `(async () => {
+      const cp = require("node:child_process");
+      const { EventEmitter } = require("node:events");
+      const { runBoundedProcess } = require(${JSON.stringify(runnerPath)});
+      const owned = cp.spawn(process.execPath, ["-e", "process.stdout.write('held');setInterval(()=>{},1000)"], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+      process.stdout.write("OWNED_PID=" + owned.pid + "\\n");
+      owned.kill = () => false;
+      const result = await runBoundedProcess("owned-target", [], {
+        timeoutMs: 20,
+        terminationTimeoutMs: 40,
+        killChild() { return false; },
+        spawn(command) {
+          if (command === "owned-target") return owned;
+          const taskkill = new EventEmitter();
+          taskkill.exitCode = 0;
+          taskkill.kill = () => false;
+          setImmediate(() => taskkill.emit("close", 0));
+          return taskkill;
+        }
+      });
+      process.stdout.write("RESULT=" + JSON.stringify(result) + "\\n");
+      process.exitCode = result.code;
+    })().catch(error => { process.stderr.write(error.stack + "\\n"); process.exitCode = 1; });`;
+    const wrapper = cp.spawn(process.execPath, ["--input-type=commonjs", "-e", wrapperSource], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "", stderr = "", ownedPid = null;
+    wrapper.stdout.on("data", chunk => {
+      stdout += String(chunk);
+      const match = stdout.match(/OWNED_PID=(\d+)/);
+      if (match) ownedPid = Number(match[1]);
+    });
+    wrapper.stderr.on("data", chunk => { stderr += String(chunk); });
+    try {
+      const code = await waitForClose(wrapper, 1200);
+      assert.equal(code, 125, `wrapper output: ${stdout}\n${stderr}`);
+      assert.match(stdout, /"residualProcess":true/);
+      assert.match(stdout, /termination did not complete/i);
+    } finally {
+      if (wrapper.exitCode === null) killOwnedPid(wrapper.pid);
+      killOwnedPid(ownedPid);
+    }
+  });
+
   await test("normal child close during termination settles before the secondary deadline", async () => {
     let directKills = 0; const child = new EventEmitter(); child.pid = 12347; child.exitCode = null; child.kill = () => { directKills += 1; return true; };
     const killer = new EventEmitter();
@@ -101,6 +172,47 @@ function temporaryProfile(label) {
     assert.equal(result.code, 125);
     assert.equal(result.cleanupFailed, true);
     assert.match(result.stderr, /Profile cleanup failed: profile remains/);
+  });
+
+  await test("synchronous spawn and cleanup failures are both reported", async () => {
+    await assert.rejects(
+      runBoundedProcess("fake", [], {
+        timeoutMs: 100,
+        spawn() { throw new Error("simulated synchronous spawn failure"); },
+        cleanup() { throw new Error("simulated profile cleanup failure"); }
+      }),
+      error => {
+        assert.equal(error.exitCode, 125);
+        assert.equal(error.spawnFailed, true);
+        assert.equal(error.cleanupFailed, true);
+        assert.deepEqual(error.failures, ["SPAWN_ERROR", "PROFILE_CLEANUP_FAILED"]);
+        assert.match(error.message, /spawn failed/i);
+        assert.match(error.message, /profile cleanup failed/i);
+        return true;
+      }
+    );
+  });
+
+  await test("asynchronous child error and cleanup failures are both reported", async () => {
+    const child = new EventEmitter();
+    child.pid = undefined; child.exitCode = null;
+    child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+    await assert.rejects(
+      runBoundedProcess("fake", [], {
+        timeoutMs: 100,
+        spawn() { setImmediate(() => child.emit("error", new Error("simulated asynchronous spawn failure"))); return child; },
+        cleanup() { throw new Error("simulated profile cleanup failure"); }
+      }),
+      error => {
+        assert.equal(error.exitCode, 125);
+        assert.equal(error.spawnFailed, true);
+        assert.equal(error.cleanupFailed, true);
+        assert.deepEqual(error.failures, ["SPAWN_ERROR", "PROFILE_CLEANUP_FAILED"]);
+        assert.match(error.message, /spawn failed/i);
+        assert.match(error.message, /profile cleanup failed/i);
+        return true;
+      }
+    );
   });
 
   if (process.exitCode) process.exit(process.exitCode);
