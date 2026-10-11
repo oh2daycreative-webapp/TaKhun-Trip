@@ -96,6 +96,7 @@
   .admin-shell__sidebar { position: sticky; z-index: 1; top: 0; display: flex !important; width: auto; height: 100vh; grid-row: 1 / span 2; transform: none; visibility: visible; box-shadow: none; }
   .admin-shell__backdrop { display: none !important; }
   .admin-main { width: min(calc(100% - 3rem), 72rem); }
+  .admin-body[data-admin-page="reviews"] .admin-main { grid-column: 2; grid-row: 2; }
 }
 
 @media (prefers-reduced-motion: reduce) {
