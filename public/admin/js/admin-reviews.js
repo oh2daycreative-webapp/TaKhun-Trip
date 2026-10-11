@@ -32,15 +32,17 @@
       }catch(error){if(generation===detailGeneration)view.status(error&&error.code||"SERVER_ERROR",true);throw error;}
     }
     function setReplyDraft(value){if(!selected)return;const draft=draftFor(selected.review_id,selected.admin_reply);draft.value=String(value);draft.dirty=true;}
-    function mutate(action){
+    function mutate(action,options={}){
       if(pendingMutation)return pendingMutation;
       if(blocked||!selected||!allowed.includes(action))return Promise.reject(forbidden());
       const method=API_METHODS[action];if(!method||typeof api[method]!=="function")return Promise.reject(forbidden());
       const target=selected,draft=draftFor(target.review_id,target.admin_reply),payload={review_id:target.review_id,expected_revision:target.revision};
+      if(action==="delete"&&draft.dirty&&!options.discardDraft)return Promise.reject(codedError("UNSAVED_DRAFT"));
       if(action==="reply")payload.admin_reply=draft.value;
       let request;try{request=api[method](token,payload);}catch(error){request=Promise.reject(error);}
       pendingMutation=Promise.resolve(request).then(result=>{
-        selected=result;blocked=false;drafts[result.review_id]={value:result.admin_reply,dirty:false};
+        const preserveDraft=draft.dirty&&(action==="approve"||action==="hide");
+        selected=result;blocked=false;drafts[result.review_id]=preserveDraft?{value:draft.value,dirty:true}:{value:result.admin_reply,dirty:false};
         view.status(result.audit_status==="unconfirmed"?"AUDIT_UNCONFIRMED":"SUCCESS",false);return result;
       },error=>{if(error&&(["CONFLICT"].concat(UNCERTAIN)).includes(error.code))blocked=true;view.status(error&&error.code||"SERVER_ERROR",true);throw error;}).finally(()=>{pendingMutation=null;render(false);});
       render(false);
@@ -66,7 +68,7 @@
       detail(record,draft,options){
         e.detail.hidden=false;const title=e.detail.querySelector("[data-review-detail-title]");title.textContent=`${record.rating} ดาว · ${record.reviewer_name}`;e.detail.querySelector("[data-review-detail-meta]").textContent=`${record.place_id} · ${record.status} · ${record.created_at}`;e.detail.querySelector("[data-review-comment]").textContent=record.comment;e.currentReply.textContent=record.admin_reply||"ยังไม่มีคำตอบ";e.reply.value=draft;e.reply.disabled=!!options.pending;e.actions.replaceChildren();
         const transitions={approve:["pending","hidden"],hide:["pending","approved"],reply:["pending","approved","hidden"],clearReply:["pending","approved","hidden"],delete:["pending","approved","hidden"]};const labels={approve:"อนุมัติ",hide:"ซ่อน",reply:"ตอบกลับ",clearReply:"ล้างคำตอบ",delete:"ลบแบบซอฟต์"};
-        options.actions.forEach(action=>{if(!transitions[action].includes(record.status)||action==="clearReply"&&!record.admin_reply)return;const button=node("button",labels[action],action==="delete"?"button button--danger":"button");button.type="button";button.disabled=options.blocked||options.pending;button.addEventListener("click",()=>{if((action==="hide"||action==="delete")&&!global.confirm(`${labels[action]}รีวิวนี้หรือไม่?`))return;controller.mutate(action).catch(()=>{});});e.actions.appendChild(button);});
+        options.actions.forEach(action=>{if(!transitions[action].includes(record.status)||action==="clearReply"&&!record.admin_reply)return;const button=node("button",labels[action],action==="delete"?"button button--danger":"button");button.type="button";button.disabled=options.blocked||options.pending;button.addEventListener("click",()=>{const state=controller.state(),mutationOptions={};if(action==="delete"&&state.draftDirty){if(!global.confirm("ลบรีวิวนี้และละทิ้งคำตอบที่ยังไม่ได้บันทึกหรือไม่?"))return;mutationOptions.discardDraft=true;}else if(action==="hide"&&!global.confirm(`${labels[action]}รีวิวนี้หรือไม่?`))return;controller.mutate(action,mutationOptions).catch(()=>{});});e.actions.appendChild(button);});
         e.replyEditor.hidden=!options.actions.includes("reply");if(options.focus&&typeof title.focus==="function")title.focus();
       }
     };
