@@ -7,6 +7,34 @@ const html=fs.readFileSync(path.join(__dirname,"../public/admin/reviews.html"),"
 function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return{promise,resolve,reject};}
 function load(){const window={document:{},setTimeout,clearTimeout};window.window=window;const context={window,JSON,Object,Array,String,Number,Boolean,Date,Math,RegExp,Set,Map,Error,Promise};vm.createContext(context);vm.runInContext(source,context,{filename:"public/admin/js/admin-reviews.js"});return window.TakhunAdminReviews;}
 function review(id,status="pending",reply=""){return{review_id:id,place_id:"P-1",reviewer_name:"ชื่อ <img>",is_anonymous:false,rating:5,comment:"ความเห็น <script>",admin_reply:reply,status,created_at:"2026-10-01 10:00:00",updated_at:"2026-10-01 10:00:00",approved_at:"",approved_by:"",revision:"r1-"+id.slice(-1).padStart(64,"a")};}
+function browserHarness(){
+  class Element{
+    constructor(tag="div"){this.tagName=tag.toUpperCase();this.textContent="";this.className="";this.children=[];this.hidden=false;this.value="";this.disabled=false;this.attributes={};this.listeners={};this.selectorMap={};this.dataset={};}
+    set innerHTML(_value){throw new Error("unsafe innerHTML sink");}
+    get innerHTML(){return "";}
+    setAttribute(name,value){this.attributes[name]=String(value);if(name.startsWith("data-"))this.dataset[name.slice(5).replace(/-([a-z])/g,(_m,c)=>c.toUpperCase())]=String(value);}
+    getAttribute(name){return this.attributes[name]??null;}
+    addEventListener(type,listener){(this.listeners[type]||(this.listeners[type]=[])).push(listener);}
+    dispatch(type,event={}){for(const listener of this.listeners[type]||[])listener({preventDefault(){},...event});}
+    click(){this.dispatch("click");}
+    focus(){document.activeElement=this;}
+    appendChild(child){this.children.push(child);return child;}
+    replaceChildren(...children){this.children=[...children];}
+    querySelector(selector){return this.selectorMap[selector]||this.children.find(child=>child.getAttribute&&selector===`[data-review-id="${child.getAttribute("data-review-id")}"]`)||null;}
+  }
+  const selectors="filters status list detail currentReply replyEditor reply actions back prev next page".split(" "),elements={};for(const key of selectors)elements[key]=new Element();
+  elements.title=new Element("h2");elements.meta=new Element("p");elements.comment=new Element("p");
+  const root=new Element();const rootSelectors={filters:"[data-review-filters]",status:"[data-review-status]",list:"[data-review-list]",detail:"[data-review-detail]",currentReply:"[data-review-current-reply]",replyEditor:"[data-review-reply-editor]",reply:"[data-review-reply]",actions:"[data-review-actions]",back:"[data-review-back]",prev:"[data-review-prev]",next:"[data-review-next]",page:"[data-review-page]"};for(const [key,selector] of Object.entries(rootSelectors))root.selectorMap[selector]=elements[key];
+  elements.detail.selectorMap["[data-review-detail-title]"]=elements.title;elements.detail.selectorMap["[data-review-detail-meta]"]=elements.meta;elements.detail.selectorMap["[data-review-comment]"]=elements.comment;
+  elements.filters.formValues={keyword:"",status:"",place_id:""};
+  const document={activeElement:null,querySelector:selector=>selector==="[data-admin-reviews]"?root:null,createElement:tag=>new Element(tag)};
+  const record=review("REV-A","approved","");
+  const api={getReviews:async()=>({items:[record],page:1,page_size:20,total:1,total_pages:1,warning:null}),getReviewDetail:async()=>record,hideReview:async()=>({...record,status:"hidden",audit_status:"recorded"})};
+  const FakeFormData=class{constructor(form){this.form=form;}get(name){return this.form.formValues[name]||"";}};
+  const window={document,FormData:FakeFormData,setTimeout,clearTimeout,confirm:()=>true,TakhunAdminApi:api,TakhunAdminShell:{init:async()=>({status:"authenticated",admin:{role:"editor"}})},TakhunAdminAuth:{readSession:()=>({token:"TOKEN",role:"editor"})}};window.window=window;
+  const context={window,document,FormData:FakeFormData,JSON,Object,Array,String,Number,Boolean,Date,Math,RegExp,Set,Map,Error,Promise};vm.createContext(context);vm.runInContext(source,context,{filename:"public/admin/js/admin-reviews.js"});
+  return{app:window.TakhunAdminReviews,elements,document,record};
+}
 async function test(name,fn){try{await fn();process.stdout.write(`PASS ${name}\n`);}catch(error){process.stderr.write(`FAIL ${name}\n${error.stack}\n`);process.exitCode=1;}}
 
 (async()=>{
@@ -16,9 +44,17 @@ await test("newest list and detail responses win while stale results are ignored
 
 await test("pending detail reload never overwrites a locally edited reply draft",async()=>{const app=load(),pending=deferred(),renders=[];let calls=0;const api={getReviewDetail:()=>calls++?pending.promise:Promise.resolve(review("REV-1","approved","old"))};const c=app.createController("TOKEN","editor",api,{list:()=>{},detail:(record,draft)=>renders.push([record.admin_reply,draft]),status:()=>{}});await c.loadDetail("REV-1");c.setReplyDraft("ฉบับที่กำลังพิมพ์");const reload=c.loadDetail("REV-1");pending.resolve(review("REV-1","approved","server newer"));await reload;assert.deepEqual(renders.at(-1),["server newer","ฉบับที่กำลังพิมพ์"]);});
 
+await test("dirty drafts are review-owned and cross-selection requires explicit discard",async()=>{const app=load(),calls=[];const api={getReviewDetail:async(_token,payload)=>{calls.push(payload.review_id);return review(payload.review_id,"approved",payload.review_id+" server");}};const renders=[];const c=app.createController("TOKEN","editor",api,{list:()=>{},detail:(record,draft)=>renders.push([record.review_id,draft]),status:()=>{}});await c.loadDetail("REV-A");c.setReplyDraft("A draft");await assert.rejects(()=>c.loadDetail("REV-B"),error=>error.code==="UNSAVED_DRAFT");assert.deepEqual(calls,["REV-A"]);assert.equal(c.state().selected.review_id,"REV-A");await c.loadDetail("REV-B",{discardDraft:true});assert.deepEqual(calls,["REV-A","REV-B"]);assert.deepEqual(renders.at(-1),["REV-B","REV-B server"]);assert.equal(c.state().replyDraft,"REV-B server");});
+
+await test("pending mutation captures one target blocks selection and disables controls immediately",async()=>{const app=load(),pending=deferred(),payloads=[],renders=[];const api={getReviewDetail:async(_token,payload)=>review(payload.review_id,"approved","old"),replyReview:(_token,payload)=>{payloads.push(payload);return pending.promise;}};const c=app.createController("TOKEN","editor",api,{list:()=>{},detail:(record,draft,options)=>renders.push({id:record.review_id,draft,pending:options.pending,blocked:options.blocked}),status:()=>{}});await c.loadDetail("REV-A");c.setReplyDraft("A answer");const mutation=c.mutate("reply");assert.equal(renders.at(-1).pending,true);await assert.rejects(()=>c.loadDetail("REV-B"),error=>error.code==="CONTENT_LOCK");assert.deepEqual(JSON.parse(JSON.stringify(payloads)),[{review_id:"REV-A",expected_revision:review("REV-A","approved","old").revision,admin_reply:"A answer"}]);pending.resolve({...review("REV-A","approved","A answer"),audit_status:"recorded"});await mutation;assert.equal(c.state().selected.review_id,"REV-A");assert.equal(renders.at(-1).pending,false);});
+
+await test("authoritative same-review reload clears blocked state and preserves only its draft",async()=>{const app=load();let calls=0;const api={getReviewDetail:async()=>review("REV-A","approved",calls++?"fresh server":"old"),approveReview:async()=>{throw Object.assign(new Error("conflict"),{code:"CONFLICT"});}};const renders=[];const c=app.createController("TOKEN","editor",api,{list:()=>{},detail:(record,draft,options)=>renders.push({record,draft,options}),status:()=>{}});await c.loadDetail("REV-A");c.setReplyDraft("A draft");await assert.rejects(()=>c.mutate("approve"),error=>error.code==="CONFLICT");assert.equal(c.state().blocked,true);await c.loadDetail("REV-A");assert.equal(c.state().blocked,false);assert.equal(c.state().replyDraft,"A draft");assert.equal(c.state().selected.admin_reply,"fresh server");assert.equal(renders.at(-1).options.blocked,false);});
+
 await test("mutations are single-flight role-guarded and uncertain results are never retried",async()=>{const app=load(),pending=deferred(),calls=[];const api={getReviewDetail:async()=>review("REV-1"),approveReview:(t,p)=>{calls.push([t,p]);return pending.promise;}};const statuses=[];const c=app.createController("TOKEN","reviewer",api,{list:()=>{},detail:()=>{},status:value=>statuses.push(value)});await c.loadDetail("REV-1");const first=c.mutate("approve"),second=c.mutate("approve");assert.equal(first,second);assert.equal(calls.length,1);const error=Object.assign(new Error("safe"),{code:"OUTCOME_UNKNOWN",retryable:false});pending.reject(error);await assert.rejects(first);assert.equal(calls.length,1);assert.equal(c.state().blocked,true);const viewer=app.createController("TOKEN","viewer",api,{list:()=>{},detail:()=>{},status:()=>{}});await viewer.loadDetail("REV-1");await assert.rejects(()=>viewer.mutate("approve"),error=>error.code==="FORBIDDEN");assert.equal(calls.length,1);});
 
 await test("source uses safe text rendering and excludes automatic mutation retry",()=>{assert.doesNotMatch(source,/\.innerHTML\s*=/);assert.match(source,/\.textContent\s*=/);assert.doesNotMatch(source,/retryMutation|setInterval/);});
+
+await test("DOM rendering treats review text as text and transfers focus into and out of detail",async()=>{const h=browserHarness();await h.app.init();await new Promise(resolve=>setTimeout(resolve,0));const first=h.elements.list.children[0];assert.ok(first);assert.match(first.textContent,/<script>/);first.click();await new Promise(resolve=>setTimeout(resolve,0));assert.equal(h.elements.comment.textContent,"ความเห็น <script>");assert.equal(h.document.activeElement,h.elements.title);h.elements.back.click();await new Promise(resolve=>setTimeout(resolve,0));await new Promise(resolve=>setTimeout(resolve,0));assert.equal(h.document.activeElement,h.elements.list.children[0]);});
 
 await test("full runner invokes the exact three Admin Reviews suites",()=>{for(const name of ["test-admin-review-service.js","test-admin-reviews-api.js","test-admin-reviews-ui.js"])assert.match(runner,new RegExp(name.replace(".","\\.")));});
 

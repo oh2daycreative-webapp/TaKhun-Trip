@@ -31,4 +31,10 @@ test("accepts empty reviewer names and exact safe skipped-row warnings",async()=
 test("strictly validates Review responses and preserves OUTCOME_UNKNOWN without retry",async()=>{const malformed=load(()=>response({...record,secret:"leak"}));await assert.rejects(malformed.api.getReviewDetail(TOKEN,{review_id:"REV-1"}),error=>error.code==="MALFORMED_RESPONSE");const uncertain=load(()=>({ok:true,status:200,text:async()=>JSON.stringify({ok:false,error:{code:"OUTCOME_UNKNOWN",message:"safe",retryable:false,review_id:"REV-1"}})}));await assert.rejects(uncertain.api.hideReview(TOKEN,{review_id:"REV-1",expected_revision:REVISION}),error=>error.code==="OUTCOME_UNKNOWN"&&error.retryable===false&&error.review_id==="REV-1");assert.equal(uncertain.calls.length,1);}
 );
 
+test("preserves CONTENT_LOCK exactly and never retries the mutation",async()=>{
+  const busy=load(()=>({ok:true,status:200,text:async()=>JSON.stringify({ok:false,error:{code:"CONTENT_LOCK",message:"busy"}})}));
+  await rejectsCode(()=>busy.api.hideReview(TOKEN,{review_id:"REV-1",expected_revision:REVISION}),"CONTENT_LOCK");
+  assert.equal(busy.calls.length,1);
+});
+
 process.on("beforeExit",()=>{if(process.exitCode)process.exit(process.exitCode);else process.stdout.write("Admin Reviews API verification passed.\n");});

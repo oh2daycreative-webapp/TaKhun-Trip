@@ -132,6 +132,7 @@
 .admin-review-filters input, .admin-review-filters select, .admin-review-detail textarea { box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; padding: .65rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); font: inherit; }
 .admin-review-list { display: grid; gap: .75rem; margin-block: 1rem; }
 .admin-review-card { width: 100%; min-height: 44px; padding: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: inherit; text-align: left; white-space: pre-line; overflow-wrap: anywhere; }
+.admin-review-detail .content-toolbar .button { min-width: 44px; min-height: 44px; }
 .admin-review-card:focus-visible, .admin-review-detail :focus-visible { outline: 3px solid var(--color-primary-dark); outline-offset: 3px; }
 .admin-review-detail { margin-top: 1rem; padding: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); }
 .admin-review-detail textarea { min-height: 8rem; resize: vertical; }

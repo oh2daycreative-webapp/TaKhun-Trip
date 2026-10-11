@@ -11,7 +11,8 @@
     "SERVER_ERROR",
     "FORBIDDEN",
     "NOT_FOUND",
-    "CONFLICT"
+    "CONFLICT",
+    "CONTENT_LOCK"
   ]);
   const ADMIN_ROLES = Object.freeze(["super_admin", "editor", "reviewer", "viewer"]);
   const ADMIN_ID_PATTERN = /^ADM-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
