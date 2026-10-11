@@ -96,6 +96,8 @@ $required = @(
   "scripts/test-admin-review-service.js"
   "scripts/test-admin-reviews-api.js"
   "scripts/test-admin-reviews-ui.js"
+  "scripts/test-admin-reviews-cdp.js"
+  "scripts/test-admin-reviews-cdp-helper.js"
   "scripts/test-admin-reviews-browser.js"
   "scripts/test-admin-content-browser-runner-tests.js"
   "scripts/test-admin-content-browser-runner.js"
@@ -184,6 +186,8 @@ if ($LASTEXITCODE -ne 0) { throw "Admin Review service verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin Reviews API verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-reviews-ui.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Reviews UI verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-reviews-cdp-helper.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Reviews CDP helper verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-reviews-browser.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Reviews native browser verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-content-browser-runner-tests.js")
