@@ -1867,6 +1867,8 @@ Except for the M7 Place replacement in section 21, sections 7.3 through 7.29 des
 
 ## 7.20 `adminGetReviews`
 
+> **M8 PR4 authority:** The exact protected Reviews action surface is `adminGetReviews`, `adminGetReviewDetail`, `approveReview`, `hideReview`, `replyReview`, `clearReviewReply`, and `deleteReview`. Requests, responses, permissions, revisions, and lifecycle follow `docs/superpowers/specs/2026-10-11-m8-pr4-reviews-admin-design.md`; this supersedes the older abbreviated examples below.
+
 โหลดรีวิวสำหรับ Admin
 
 ### Request

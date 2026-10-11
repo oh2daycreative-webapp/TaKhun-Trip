@@ -712,6 +712,8 @@ other
 
 ## 13. Manage Reviews
 
+> **M8 PR4 authority:** All four Admin roles may read. `super_admin`/`editor`/`reviewer` may approve and hide; `super_admin`/`editor` may reply and clear replies; only `super_admin` may soft-delete; `viewer` is read-only. The exact lifecycle and endpoint contract is `docs/superpowers/specs/2026-10-11-m8-pr4-reviews-admin-design.md` and supersedes older general role wording for Reviews.
+
 ### 13.1 File
 
 ```text

@@ -376,6 +376,8 @@ Google Sheets ควรมีชีตดังนี้
 
 ## 10. Sheet: `reviews`
 
+> **M8 PR4 authority:** This section is supplemented by the role, lifecycle, concurrency, reply-validation, and cache rules in `docs/superpowers/specs/2026-10-11-m8-pr4-reviews-admin-design.md`. That contract supersedes older general wording for Admin Review mutations without adding columns.
+
 ใช้เก็บรีวิวและคะแนนของสถานที่
 
 ### 10.1 Fields

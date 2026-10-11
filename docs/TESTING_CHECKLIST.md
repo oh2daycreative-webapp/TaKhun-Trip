@@ -605,6 +605,14 @@ Level 6: Deployment Test
 
 ## 11.7 Admin Reviews
 
+- [ ] ทุก role อ่าน list/detail ได้; viewer ไม่มี mutation path
+- [ ] super_admin/editor/reviewer approve และ hide ได้ แต่ role อื่นถูก server ปฏิเสธ
+- [ ] super_admin/editor reply และ clear reply ได้; reviewer/viewer ถูก server ปฏิเสธ
+- [ ] เฉพาะ super_admin soft delete ได้ และ deleted เป็น terminal
+- [ ] stale revision, post-lock re-authentication, partial failure และ OUTCOME_UNKNOWN ไม่ retry mutation
+- [ ] NUL, malformed Unicode, oversized reply และ formula-leading reply ผ่านกฎ preserve-or-reject ก่อน write
+- [ ] stale list/detail response และ detail reload ไม่ทับ reply draft
+
 - [ ] โหลดรีวิว pending ได้
 - [ ] อนุมัติรีวิวได้
 - [ ] ซ่อนรีวิวได้
