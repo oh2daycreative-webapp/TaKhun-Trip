@@ -60,7 +60,31 @@ function call(env,name,payload){assert.equal(typeof env.context[name],"function"
 function detail(env,id="REV-P"){return call(env,"adminGetReviewDetail_",{review_id:id});}
 
 test("all roles read strict safe list and detail projections",()=>{
-  for(const role of roles){const env=load({role});const list=call(env,"adminGetReviews_",{status:"",place_id:"P-1",page:1,page_size:20});assert.equal(list.ok,true);assert.deepEqual(Object.keys(list.data),["items","page","page_size","total","total_pages"]);assert.equal(list.data.items.length,4);const item=detail(env,"REV-A").data;assert.equal(item.reviewer_name,"นักท่องเที่ยว");assert.equal(item.comment,"=Safe");assert.equal(item.admin_reply,"+Thanks");assert.match(item.revision,/^r1-[a-f0-9]{64}$/);assert.equal("sourceRowNumber" in item,false);}
+  for(const role of roles){const env=load({role});const list=call(env,"adminGetReviews_",{status:"",place_id:"P-1",page:1,page_size:20});assert.equal(list.ok,true);assert.deepEqual(Object.keys(list.data),["items","page","page_size","total","total_pages","warning"]);assert.equal(list.data.warning,null);assert.equal(list.data.items.length,4);const item=detail(env,"REV-A").data;assert.equal(item.reviewer_name,"นักท่องเที่ยว");assert.equal(item.comment,"=Safe");assert.equal(item.admin_reply,"+Thanks");assert.match(item.revision,/^r1-[a-f0-9]{64}$/);assert.equal("sourceRowNumber" in item,false);}
+});
+
+test("list skips invalid and duplicate rows while targets fail closed independently",()=>{
+  const rows=baseRows();
+  rows[0].reviewer_name="";
+  rows.push({...rows[0],review_id:"REV-BAD",comment:"nul\0bad"});
+  rows.push({...rows[0],review_id:"REV-DUP",comment:"first"});
+  rows.push({...rows[0],review_id:"REV-DUP",comment:"second"});
+  const env=load({role:"super_admin",reviews:rows});
+  const list=call(env,"adminGetReviews_",{page:2,page_size:2});
+  assert.equal(list.ok,true);
+  assert.deepEqual(list.data.items.map(item=>item.review_id),["REV-H","REV-D"]);
+  assert.equal(list.data.total,4);
+  assert.equal(list.data.total_pages,2);
+  assert.deepEqual(list.data.warning,{code:"SKIPPED_INVALID_REVIEWS",skipped_count:3});
+  assert.equal(detail(env,"REV-P").data.reviewer_name,"");
+  assert.equal(detail(env,"REV-BAD").error.code,"SERVER_ERROR");
+  assert.equal(detail(env,"REV-DUP").error.code,"SERVER_ERROR");
+  const before=detail(env,"REV-H").data;
+  assert.equal(call(env,"deleteReview_",{review_id:"REV-H",expected_revision:before.revision}).ok,true);
+  const writes=env.state.writes;
+  assert.equal(call(env,"deleteReview_",{review_id:"REV-BAD",expected_revision:"r1-"+"0".repeat(64)}).ok,false);
+  assert.equal(call(env,"deleteReview_",{review_id:"REV-DUP",expected_revision:"r1-"+"0".repeat(64)}).ok,false);
+  assert.equal(env.state.writes,writes);
 });
 
 test("permissions are enforced independently for every action",()=>{
@@ -77,6 +101,7 @@ test("lifecycle transitions and deleted terminal behavior are exact",()=>{
 test("reply preserves formula-leading Unicode and rejects unsafe text before writes",()=>{
   for(const value of ["=SUM(A1)","+plus","-minus","@mention","'ordinary","ขอบคุณ 🧭"]){const env=load({role:"editor"});const rev=detail(env).data.revision;assert.equal(call(env,"replyReview_",{review_id:"REV-P",expected_revision:rev,admin_reply:value}).ok,true);assert.equal(detail(env).data.admin_reply,value);}
   for(const value of ["nul\0bad","\ud800","x".repeat(2001),"😀".repeat(2001)]){const env=load({role:"editor"});const rev=detail(env).data.revision;const result=call(env,"replyReview_",{review_id:"REV-P",expected_revision:rev,admin_reply:value});assert.equal(result.error.code,"VALIDATION_ERROR");assert.equal(env.state.writes,0);}
+  for(const value of ["'=ambiguous","'+ambiguous","'-ambiguous","'@ambiguous"]){const env=load({role:"editor"});const rev=detail(env).data.revision;const result=call(env,"replyReview_",{review_id:"REV-P",expected_revision:rev,admin_reply:value});assert.equal(result.error.code,"VALIDATION_ERROR");assert.equal(env.state.writes,0);}
 });
 
 test("revision conflict lock reauthentication and strict payloads write nothing",()=>{

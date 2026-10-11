@@ -125,7 +125,7 @@ function AdminReviewService_codePoints_(value) {
 }
 
 function AdminReviewService_reply_(value) {
-  if (typeof value !== "string" || value === "" || value.indexOf("\u0000") >= 0 || !AdminReviewService_validUnicode_(value)) throw new Error("VALIDATION_ERROR");
+  if (typeof value !== "string" || value === "" || value.indexOf("\u0000") >= 0 || !AdminReviewService_validUnicode_(value) || /^'[=+\-@]/.test(value)) throw new Error("VALIDATION_ERROR");
   var bytes;
   try { bytes = CryptoService_utf8Bytes_(value); } catch (_unicodeError) { throw new Error("VALIDATION_ERROR"); }
   if (AdminReviewService_codePoints_(value) > AdminReviewService_MAX_REPLY_POINTS_ || bytes.length > AdminReviewService_MAX_REPLY_BYTES_) throw new Error("VALIDATION_ERROR");
@@ -136,16 +136,28 @@ function AdminReviewService_escapeText_(value) { return /^[=+\-@]/.test(value) ?
 function AdminReviewService_unescapeText_(value) { return /^'[=+\-@]/.test(value) ? value.slice(1) : value; }
 
 function AdminReviewService_table_() {
-  var table = SheetService_readTable_(AdminReviewService_SHEET_, AdminReviewService_HEADERS_);
-  var seen = {};
+  return SheetService_readTable_(AdminReviewService_SHEET_, AdminReviewService_HEADERS_);
+}
+
+function AdminReviewService_validStoredId_(value) {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(value);
+}
+
+function AdminReviewService_classify_(table) {
+  var counts = Object.create(null);
   table.rows.forEach(function (entry) {
-    var row = entry.values;
-    var id = AdminReviewService_id_(row.review_id);
-    if (seen[id]) throw new Error("REVIEW_SCHEMA");
-    seen[id] = true;
-    AdminReviewService_validateStored_(row);
+    var id = entry.values.review_id;
+    if (AdminReviewService_validStoredId_(id)) counts[id] = (counts[id] || 0) + 1;
   });
-  return table;
+  var rows = [];
+  var skipped = 0;
+  table.rows.forEach(function (entry) {
+    var id = entry.values.review_id;
+    if (!AdminReviewService_validStoredId_(id) || counts[id] !== 1) { skipped += 1; return; }
+    try { AdminReviewService_validateStored_(entry.values); rows.push(entry); }
+    catch (_schemaError) { skipped += 1; }
+  });
+  return { rows: rows, skipped_count: skipped };
 }
 
 function AdminReviewService_validateStored_(row) {
@@ -166,6 +178,8 @@ function AdminReviewService_validateStored_(row) {
 function AdminReviewService_find_(table, reviewId) {
   var matches = table.rows.filter(function (entry) { return entry.values.review_id === reviewId; });
   if (matches.length !== 1) throw new Error(matches.length ? "REVIEW_SCHEMA" : "NOT_FOUND");
+  try { AdminReviewService_validateStored_(matches[0].values); }
+  catch (_schemaError) { throw new Error("REVIEW_SCHEMA"); }
   return matches[0];
 }
 
@@ -213,14 +227,22 @@ function AdminReviewService_list_(payload) {
   var placeId = p.place_id === undefined || p.place_id === "" ? "" : AdminReviewService_id_(p.place_id);
   var page = AdminReviewService_integer_(p.page, 1, 1000000);
   var pageSize = AdminReviewService_integer_(p.page_size, 20, 100);
-  var rows = AdminReviewService_table_().rows.filter(function (entry) {
+  var classified = AdminReviewService_classify_(AdminReviewService_table_());
+  var rows = classified.rows.filter(function (entry) {
     var row = entry.values;
     if (status && row.status !== status || placeId && row.place_id !== placeId) return false;
     if (!keyword) return true;
     return [row.review_id, row.place_id, row.reviewer_name, row.comment, row.admin_reply].some(function (value) { return String(value || "").toLowerCase().indexOf(keyword) >= 0; });
   });
   var start = (page - 1) * pageSize;
-  return { items: rows.slice(start, start + pageSize).map(function (entry) { return AdminReviewService_projection_(entry.values); }), page: page, page_size: pageSize, total: rows.length, total_pages: rows.length ? Math.ceil(rows.length / pageSize) : 0 };
+  return {
+    items: rows.slice(start, start + pageSize).map(function (entry) { return AdminReviewService_projection_(entry.values); }),
+    page: page,
+    page_size: pageSize,
+    total: rows.length,
+    total_pages: rows.length ? Math.ceil(rows.length / pageSize) : 0,
+    warning: classified.skipped_count ? { code: "SKIPPED_INVALID_REVIEWS", skipped_count: classified.skipped_count } : null
+  };
 }
 
 function AdminReviewService_detail_(payload) {

@@ -902,19 +902,20 @@
     const source = requestObject(payload, allowed, allowed, false);
     if (!validContentId(source.review_id) || !validRevision(source.expected_revision)) validationError();
     const result = { review_id: source.review_id, expected_revision: source.expected_revision };
-    if (operation === "reply") { if (!validUnicodeLength(source.admin_reply, 1, 2000)) validationError(); result.admin_reply = source.admin_reply; }
+    if (operation === "reply") { if (!validUnicodeLength(source.admin_reply, 1, 2000) || /^'[=+\-@]/.test(source.admin_reply)) validationError(); result.admin_reply = source.admin_reply; }
     return result;
   }
   function safeReviewRecord(data, mutation) {
     const keys = ["review_id", "place_id", "reviewer_name", "is_anonymous", "rating", "comment", "admin_reply", "status", "created_at", "updated_at", "approved_at", "approved_by", "revision", ...(mutation ? ["audit_status"] : [])];
-    if (!exactKeys(data, keys) || !validContentId(data.review_id) || !validContentId(data.place_id) || !validUnicodeLength(data.reviewer_name, 1, 20000) || typeof data.is_anonymous !== "boolean" || !Number.isSafeInteger(data.rating) || data.rating < 1 || data.rating > 5 || !validUnicodeLength(data.comment, 1, 20000) || !validUnicodeLength(data.admin_reply, 0, 2000) || !REVIEW_STATUSES.includes(data.status) || !validContentTimestamp(data.created_at) || !validContentTimestamp(data.updated_at) || !validContentTimestamp(data.approved_at) || !validUnicodeLength(data.approved_by, 0, 200) || !validRevision(data.revision) || mutation && !["recorded", "unconfirmed"].includes(data.audit_status)) return null;
+    if (!exactKeys(data, keys) || !validContentId(data.review_id) || !validContentId(data.place_id) || !validUnicodeLength(data.reviewer_name, 0, 20000) || typeof data.is_anonymous !== "boolean" || !Number.isSafeInteger(data.rating) || data.rating < 1 || data.rating > 5 || !validUnicodeLength(data.comment, 1, 20000) || !validUnicodeLength(data.admin_reply, 0, 2000) || !REVIEW_STATUSES.includes(data.status) || !validContentTimestamp(data.created_at) || !validContentTimestamp(data.updated_at) || !validContentTimestamp(data.approved_at) || !validUnicodeLength(data.approved_by, 0, 200) || !validRevision(data.revision) || mutation && !["recorded", "unconfirmed"].includes(data.audit_status)) return null;
     return { ...data };
   }
   function safeReviewResponse(data, body) {
     if (body.action === "adminGetReviews") {
-      if (!exactKeys(data, ["items", "page", "page_size", "total", "total_pages"]) || !Array.isArray(data.items) || !validPagination(data)) return null;
+      if (!exactKeys(data, ["items", "page", "page_size", "total", "total_pages", "warning"]) || !Array.isArray(data.items) || !validPagination(data)) return null;
       const items = data.items.map(item => safeReviewRecord(item, false));
-      return items.some(item => !item) || new Set(items.map(item => item.review_id)).size !== items.length ? null : { items, page:data.page, page_size:data.page_size, total:data.total, total_pages:data.total_pages };
+      const warning = data.warning === null ? null : exactKeys(data.warning, ["code", "skipped_count"]) && data.warning.code === "SKIPPED_INVALID_REVIEWS" && Number.isSafeInteger(data.warning.skipped_count) && data.warning.skipped_count > 0 ? { ...data.warning } : undefined;
+      return items.some(item => !item) || new Set(items.map(item => item.review_id)).size !== items.length || warning === undefined ? null : { items, page:data.page, page_size:data.page_size, total:data.total, total_pages:data.total_pages, warning };
     }
     const mutation = !body.action.startsWith("adminGet"), result = safeReviewRecord(data, mutation);
     if (!result || result.review_id !== body.payload.review_id) return null;

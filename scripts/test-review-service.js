@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { Buffer } = require("node:buffer");
 
 const root = path.join(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
@@ -51,6 +52,7 @@ function load(options = {}) {
     LockService: { getScriptLock: () => lock },
     Utilities: { getUuid: () => "123e4567-e89b-12d3-a456-426614174000", formatDate: (_date, zone, pattern) => { assert.equal(zone, "Asia/Bangkok"); assert.equal(pattern, "yyyy-MM-dd HH:mm:ss"); return "2026-07-15 14:30:00"; } },
     Session: { getScriptTimeZone: () => "Asia/Bangkok" },
+    CryptoService_utf8Bytes_: (value) => [...Buffer.from(value, "utf8")],
     readSheetObjects_(name) { reads.push(name); if (name === "reviews") return reviewRows; if (name === "places") return placeRows; throw new Error("unexpected sheet"); },
     appendSheetObject_(name, required, record) { appended.push({ name, required: [...required], record: { ...record } }); if (options.appendError) throw new Error("sheet secret"); }
   };
@@ -116,6 +118,33 @@ test("submitReview rejects invalid input unpublished places and releases after a
   assert.equal(plain(required(load().context, "submitReview_")({ place_id: "P-2", rating: 5, comment: "x" })).error.code, "NOT_FOUND");
   const timeout = load({ lock: { released: 0, tryLock() { return false; }, releaseLock() { this.released += 1; } } }); assert.throws(() => required(timeout.context, "submitReview_")({ place_id: "P-1", rating: 5, comment: "x" })); assert.equal(timeout.lock.released, 0);
   const failed = load({ appendError: true }); assert.throws(() => required(failed.context, "submitReview_")({ place_id: "P-1", rating: 5, comment: "x" })); assert.equal(failed.lock.released, 1);
+});
+
+test("submitReview accepts an empty name but rejects Admin-incompatible text before lock or append", () => {
+  const accepted = load();
+  const response = plain(required(accepted.context, "submitReview_")({ place_id: "P-1", reviewer_name: "", rating: 5, comment: "safe" }));
+  assert.equal(response.ok, true);
+  assert.equal(accepted.appended[0].record.reviewer_name, "");
+
+  const invalid = [
+    { reviewer_name: "nul\0name", comment: "safe" },
+    { reviewer_name: "\ud800", comment: "safe" },
+    { reviewer_name: "x".repeat(20001), comment: "safe" },
+    { reviewer_name: "safe", comment: "nul\0comment" },
+    { reviewer_name: "safe", comment: "\udfff" },
+    { reviewer_name: "safe", comment: "x".repeat(1001) },
+    { reviewer_name: "'=ambiguous", comment: "safe" },
+    { reviewer_name: "safe", comment: "'+ambiguous" },
+    { reviewer_name: "safe", comment: "'-ambiguous" },
+    { reviewer_name: "safe", comment: "'@ambiguous" }
+  ];
+  for (const fields of invalid) {
+    const env = load();
+    const result = plain(required(env.context, "submitReview_")({ place_id: "P-1", rating: 5, ...fields }));
+    assert.equal(result.error.code, "VALIDATION_ERROR", JSON.stringify(fields));
+    assert.equal(env.lock.acquired, false, JSON.stringify(fields));
+    assert.equal(env.appended.length, 0, JSON.stringify(fields));
+  }
 });
 
 test("formula defense round-trips every approved dangerous prefix and preserves normal apostrophes", () => {
