@@ -2,6 +2,8 @@
 const assert=require("node:assert/strict"),fs=require("node:fs"),path=require("node:path"),vm=require("node:vm");
 const file=path.join(__dirname,"../public/admin/js/admin-reviews.js");
 const source=fs.existsSync(file)?fs.readFileSync(file,"utf8"):"";
+const runner=fs.readFileSync(path.join(__dirname,"test.ps1"),"utf8");
+const html=fs.readFileSync(path.join(__dirname,"../public/admin/reviews.html"),"utf8");
 function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return{promise,resolve,reject};}
 function load(){const window={document:{},setTimeout,clearTimeout};window.window=window;const context={window,JSON,Object,Array,String,Number,Boolean,Date,Math,RegExp,Set,Map,Error,Promise};vm.createContext(context);vm.runInContext(source,context,{filename:"public/admin/js/admin-reviews.js"});return window.TakhunAdminReviews;}
 function review(id,status="pending",reply=""){return{review_id:id,place_id:"P-1",reviewer_name:"ชื่อ <img>",is_anonymous:false,rating:5,comment:"ความเห็น <script>",admin_reply:reply,status,created_at:"2026-10-01 10:00:00",updated_at:"2026-10-01 10:00:00",approved_at:"",approved_by:"",revision:"r1-"+id.slice(-1).padStart(64,"a")};}
@@ -17,6 +19,10 @@ await test("pending detail reload never overwrites a locally edited reply draft"
 await test("mutations are single-flight role-guarded and uncertain results are never retried",async()=>{const app=load(),pending=deferred(),calls=[];const api={getReviewDetail:async()=>review("REV-1"),approveReview:(t,p)=>{calls.push([t,p]);return pending.promise;}};const statuses=[];const c=app.createController("TOKEN","reviewer",api,{list:()=>{},detail:()=>{},status:value=>statuses.push(value)});await c.loadDetail("REV-1");const first=c.mutate("approve"),second=c.mutate("approve");assert.equal(first,second);assert.equal(calls.length,1);const error=Object.assign(new Error("safe"),{code:"OUTCOME_UNKNOWN",retryable:false});pending.reject(error);await assert.rejects(first);assert.equal(calls.length,1);assert.equal(c.state().blocked,true);const viewer=app.createController("TOKEN","viewer",api,{list:()=>{},detail:()=>{},status:()=>{}});await viewer.loadDetail("REV-1");await assert.rejects(()=>viewer.mutate("approve"),error=>error.code==="FORBIDDEN");assert.equal(calls.length,1);});
 
 await test("source uses safe text rendering and excludes automatic mutation retry",()=>{assert.doesNotMatch(source,/\.innerHTML\s*=/);assert.match(source,/\.textContent\s*=/);assert.doesNotMatch(source,/retryMutation|setInterval/);});
+
+await test("full runner invokes the exact three Admin Reviews suites",()=>{for(const name of ["test-admin-review-service.js","test-admin-reviews-api.js","test-admin-reviews-ui.js"])assert.match(runner,new RegExp(name.replace(".","\\.")));});
+
+await test("read-only roles receive a semantic current-reply surface",()=>{assert.match(html,/data-review-current-reply/);assert.match(source,/data-review-current-reply/);});
 
 if(process.exitCode)process.exit(process.exitCode);process.stdout.write("Admin Reviews UI verification passed.\n");
 })();

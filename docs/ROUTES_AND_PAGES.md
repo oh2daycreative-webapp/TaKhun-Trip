@@ -1396,8 +1396,11 @@ public/admin/js/admin-reviews.js
 
 ```text
 adminGetReviews
+adminGetReviewDetail
 approveReview
 hideReview
+replyReview
+clearReviewReply
 deleteReview
 ```
 

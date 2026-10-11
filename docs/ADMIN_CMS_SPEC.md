@@ -767,8 +767,11 @@ public/admin/reviews.html
 ### 13.7 Review APIs
 
 - `adminGetReviews`
+- `adminGetReviewDetail`
 - `approveReview`
 - `hideReview`
+- `replyReview`
+- `clearReviewReply`
 - `deleteReview`
 
 ---
@@ -1093,7 +1096,7 @@ Session หมดอายุ กรุณาเข้าสู่ระบบ�
 | routes.html | `adminGetRoutes`, `createRoute`, `updateRoute`, `deleteRoute` |
 | products.html | `adminGetProducts`, `createProduct`, `updateProduct`, `deleteProduct` |
 | events.html | `adminGetEvents`, `createEvent`, `updateEvent`, `deleteEvent` |
-| reviews.html | `adminGetReviews`, `approveReview`, `hideReview`, `deleteReview` |
+| reviews.html | `adminGetReviews`, `adminGetReviewDetail`, `approveReview`, `hideReview`, `replyReview`, `clearReviewReply`, `deleteReview` |
 | gallery.html | `adminGetGallery`, `createGalleryItem`, `updateGalleryItem`, `deleteGalleryItem` |
 | settings.html | `adminGetSettings`, `updateSettings` |
 
