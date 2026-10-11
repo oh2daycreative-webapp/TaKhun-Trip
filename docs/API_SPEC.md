@@ -994,11 +994,21 @@ POST
 
 | Field | Rule |
 |---|---|
-| `place_id` | required |
-| `rating` | required, number 1–5 |
-| `comment` | required, max 1000 characters |
-| `reviewer_name` | optional |
-| `is_anonymous` | boolean |
+| `place_id` | required; converted to text, trimmed, then must match `^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$` |
+| `rating` | required JSON number; integer 1–5 (numeric strings and booleans are rejected) |
+| `comment` | required JSON string; trimmed value must contain 1–1,000 Unicode code points and at most 4,000 UTF-8 bytes |
+| `reviewer_name` | optional JSON string; omission defaults to `""`; an explicit empty string is valid; trimmed value may contain 0–20,000 Unicode code points and at most 80,000 UTF-8 bytes; a present non-string including `null` is rejected |
+| `is_anonymous` | optional JSON boolean; omission defaults to `false`; strings/numbers are rejected |
+
+`comment` and `reviewer_name` reject NUL and malformed UTF-16. Direct leading
+`=`, `+`, `-`, and `@` are accepted, encoded for the Sheet, and read back as
+the original text. Inputs beginning `'=`, `'+`, `'-`, or `'@` are rejected as
+ambiguous before acquiring the write lock. Validation failures return
+`VALIDATION_ERROR` and perform no entity write. A valid request whose
+authoritative Place is absent or not `published` returns `NOT_FOUND` without
+writing. Lock/dependency/write exceptions are exposed only through the
+Router's safe server-error envelope; submission is never retried
+automatically.
 
 ### Response
 

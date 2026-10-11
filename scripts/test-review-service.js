@@ -147,6 +147,34 @@ test("submitReview accepts an empty name but rejects Admin-incompatible text bef
   }
 });
 
+test("submitReview distinguishes an omitted reviewer name from non-string public text", () => {
+  for (const reviewerName of [{}, [], 123, true, null]) {
+    const env = load();
+    const result = plain(required(env.context, "submitReview_")({ place_id: "P-1", reviewer_name: reviewerName, rating: 5, comment: "safe" }));
+    assert.equal(result.ok, false, `reviewer_name ${String(reviewerName)} must be rejected`);
+    assert.equal(result.error.code, "VALIDATION_ERROR");
+    assert.equal(env.lock.acquired, false);
+    assert.equal(env.appended.length, 0);
+  }
+  for (const comment of [{}, [], 123, true, null]) {
+    const env = load();
+    const result = plain(required(env.context, "submitReview_")({ place_id: "P-1", rating: 5, comment }));
+    assert.equal(result.ok, false, `comment ${String(comment)} must be rejected`);
+    assert.equal(result.error.code, "VALIDATION_ERROR");
+    assert.equal(env.lock.acquired, false);
+    assert.equal(env.appended.length, 0);
+  }
+  for (const payload of [
+    { place_id: "P-1", rating: 5, comment: "safe" },
+    { place_id: "P-1", reviewer_name: "", rating: 5, comment: "safe" },
+    { place_id: "P-1", reviewer_name: "Alice", rating: 5, comment: "safe" }
+  ]) {
+    const env = load();
+    assert.equal(plain(required(env.context, "submitReview_")(payload)).ok, true);
+    assert.equal(env.appended.length, 1);
+  }
+});
+
 test("formula defense round-trips every approved dangerous prefix and preserves normal apostrophes", () => {
   const { context } = load(); const escape = required(context, "ReviewService_escapeSheetText_"); const unescape = required(context, "ReviewService_unescapeSheetText_");
   for (const prefix of ["=", "+", "-", "@"]) {

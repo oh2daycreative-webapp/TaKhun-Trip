@@ -119,8 +119,14 @@ function ReviewService_normalizeListParameters_(parameters) {
 function ReviewService_normalizeSubmission_(payload) {
   var source = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
   var placeId = ReviewService_trim_(source.place_id);
-  var reviewerName = ReviewService_trim_(source.reviewer_name);
-  var comment = ReviewService_trim_(source.comment);
+  var hasReviewerName = Object.prototype.hasOwnProperty.call(source, "reviewer_name");
+  var reviewerNameValue = hasReviewerName ? source.reviewer_name : "";
+  var commentValue = source.comment;
+  if (typeof reviewerNameValue !== "string" || typeof commentValue !== "string") {
+    return { ok: false, response: ReviewService_validationError_("ข้อมูลรีวิวไม่ถูกต้อง") };
+  }
+  var reviewerName = reviewerNameValue.trim();
+  var comment = commentValue.trim();
   var rating = source.rating;
   var anonymous = source.is_anonymous === undefined ? false : source.is_anonymous;
   if (!ReviewService_validId_(placeId) || typeof rating !== "number" || !Number.isInteger(rating) || rating < 1 || rating > 5 ||
