@@ -20,12 +20,30 @@ function validateUrl(value, protocol, label) {
 function validateLoopbackHttpUrl(value) { return validateUrl(value, "http:", "CDP HTTP endpoint"); }
 function validateLoopbackWebSocketUrl(value) { return validateUrl(value, "ws:", "CDP WebSocket endpoint"); }
 
-function deadline(promise, timeoutMs, label, onTimeout) {
-  let timer;
-  return Promise.race([
-    promise.finally(() => { if (timer) clearTimeout(timer); }),
-    new Promise((_, reject) => { timer = setTimeout(() => { if (onTimeout) onTimeout(); reject(new Error(`${label} timed out after ${timeoutMs} ms.`)); }, timeoutMs); })
-  ]);
+function deadline(promise, timeoutMs, label, onTimeout, signal, onAbort) {
+  return new Promise((resolve, reject) => {
+    let timer, settled = false, abortListener;
+    const finish = (ok, value) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (signal && abortListener) signal.removeEventListener("abort", abortListener);
+      ok ? resolve(value) : reject(value);
+    };
+    Promise.resolve(promise).then(value => finish(true, value), error => finish(false, error));
+    abortListener = () => {
+      try { if (onAbort) onAbort(); } catch (_error) { /* The cancellation reason remains authoritative. */ }
+      finish(false, signal.reason || new Error(`${label} was cancelled.`));
+    };
+    if (signal) {
+      if (signal.aborted) { abortListener(); return; }
+      signal.addEventListener("abort", abortListener, { once: true });
+    }
+    timer = setTimeout(() => {
+      try { if (onTimeout) onTimeout(); } catch (_error) { /* The timeout remains authoritative. */ }
+      finish(false, new Error(`${label} timed out after ${timeoutMs} ms.`));
+    }, timeoutMs);
+  });
 }
 
 async function fetchLoopbackJson(endpoint, options = {}) {
@@ -33,22 +51,33 @@ async function fetchLoopbackJson(endpoint, options = {}) {
   const timeoutMs = options.timeoutMs || 2000;
   const controller = new AbortController();
   const externalSignal = options.signal;
-  const abortFromExternal = () => controller.abort(externalSignal.reason);
   const fetchImpl = options.fetchImpl || fetch;
   let response;
   if (externalSignal && externalSignal.aborted) throw externalSignal.reason || new Error("CDP discovery was cancelled.");
-  if (externalSignal) externalSignal.addEventListener("abort", abortFromExternal, { once: true });
   try {
-    response = await deadline(fetchImpl(url.href, { redirect: "manual", signal: controller.signal }), timeoutMs, "CDP discovery", () => controller.abort());
+    response = await deadline(
+      fetchImpl(url.href, { redirect: "manual", signal: controller.signal }),
+      timeoutMs,
+      "CDP discovery",
+      () => controller.abort(),
+      externalSignal,
+      () => controller.abort(externalSignal.reason)
+    );
   } catch (error) {
     if (error && /timed out/.test(error.message)) throw error;
     throw new Error(`CDP discovery failed: ${error && error.message || error}`);
-  } finally {
-    if (externalSignal) externalSignal.removeEventListener("abort", abortFromExternal);
   }
+  if (externalSignal && externalSignal.aborted) throw externalSignal.reason || new Error("CDP discovery was cancelled.");
   if (response.status >= 300 && response.status < 400) throw new Error("CDP discovery redirect was rejected.");
   if (!response.ok) throw new Error(`CDP discovery returned HTTP ${response.status}.`);
-  const value = await deadline(Promise.resolve(response.json()), timeoutMs, "CDP discovery JSON");
+  const value = await deadline(
+    Promise.resolve(response.json()),
+    timeoutMs,
+    "CDP discovery JSON",
+    () => controller.abort(),
+    externalSignal,
+    () => controller.abort(externalSignal.reason)
+  );
   if (!value || typeof value.webSocketDebuggerUrl !== "string") throw new Error("CDP discovery omitted its WebSocket endpoint.");
   validateLoopbackWebSocketUrl(value.webSocketDebuggerUrl);
   return value;
@@ -128,15 +157,35 @@ class CdpClient {
   }
 }
 
-async function connectWebSocket(url, timeoutMs) {
+async function connectWebSocket(url, timeoutMs, signal) {
   validateLoopbackWebSocketUrl(url);
+  if (signal && signal.aborted) throw signal.reason || new Error("CDP WebSocket connection was cancelled.");
   const socket = new WebSocket(url);
-  await deadline(new Promise((resolve, reject) => {
+  let cleanup = () => {};
+  const connection = new Promise((resolve, reject) => {
     const opened = () => { cleanup(); resolve(); };
     const failed = () => { cleanup(); reject(new Error("CDP WebSocket connection failed.")); };
-    const cleanup = () => { socket.removeEventListener("open", opened); socket.removeEventListener("error", failed); };
+    cleanup = () => { socket.removeEventListener("open", opened); socket.removeEventListener("error", failed); };
     socket.addEventListener("open", opened); socket.addEventListener("error", failed);
-  }), timeoutMs, "CDP WebSocket connection", () => { try { socket.close(); } catch (_error) {} });
+  });
+  try {
+    await deadline(
+      connection,
+      timeoutMs,
+      "CDP WebSocket connection",
+      () => { try { socket.close(); } catch (_error) {} },
+      signal,
+      () => { try { socket.close(); } catch (_error) {} }
+    );
+  } catch (error) {
+    cleanup();
+    try { socket.close(); } catch (_error) {}
+    throw error;
+  }
+  if (signal && signal.aborted) {
+    try { socket.close(); } catch (_error) {}
+    throw signal.reason || new Error("CDP WebSocket connection was cancelled.");
+  }
   return new CdpClient(socket, timeoutMs);
 }
 
@@ -200,7 +249,7 @@ async function withCdpBrowser(executable, options, callback) {
     });
     const sessionWork = (async () => {
       const discovery = await discover(profile, timeoutMs, launchAbort.signal);
-      client = await connectWebSocket(discovery.webSocketUrl, commandTimeoutMs);
+      client = await connectWebSocket(discovery.webSocketUrl, commandTimeoutMs, launchAbort.signal);
       const target = await client.send("Target.createTarget", { url: "about:blank" });
       const attached = await client.send("Target.attachToTarget", { targetId: target.targetId, flatten: true });
       const sessionId = attached.sessionId;

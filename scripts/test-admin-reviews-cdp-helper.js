@@ -37,6 +37,46 @@ async function test(name, fn) {
     }), /WebSocket.*loopback/i);
   });
 
+  await test("CDP discovery cancellation covers pending fetch and already-aborted transitions", async () => {
+    const alreadyAborted = new AbortController();
+    alreadyAborted.abort(new Error("already cancelled"));
+    let fetchCalls = 0;
+    await assert.rejects(() => fetchLoopbackJson("http://127.0.0.1:9222/json/version", {
+      timeoutMs: 1000,
+      signal: alreadyAborted.signal,
+      fetchImpl: async () => { fetchCalls++; }
+    }), /already cancelled/);
+    assert.equal(fetchCalls, 0);
+
+    const pending = new AbortController();
+    let underlyingAborted = false;
+    const pendingFetch = fetchLoopbackJson("http://127.0.0.1:9222/json/version", {
+      timeoutMs: 1000,
+      signal: pending.signal,
+      fetchImpl: async (_url, options) => new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => {
+          underlyingAborted = true;
+          reject(options.signal.reason || new Error("fetch aborted"));
+        }, { once: true });
+      })
+    });
+    pending.abort(new Error("cancel pending fetch"));
+    await assert.rejects(pendingFetch, /cancel pending fetch/);
+    assert.equal(underlyingAborted, true);
+
+    const betweenStages = new AbortController();
+    let jsonCalls = 0;
+    await assert.rejects(() => fetchLoopbackJson("http://127.0.0.1:9222/json/version", {
+      timeoutMs: 1000,
+      signal: betweenStages.signal,
+      fetchImpl: async () => {
+        betweenStages.abort(new Error("cancel between discovery stages"));
+        return { status: 200, ok: true, json: async () => { jsonCalls++; return {}; } };
+      }
+    }), /cancel between discovery stages/);
+    assert.equal(jsonCalls, 0);
+  });
+
   await test("closing CDP rejects pending commands and event waiters", async () => {
     class FakeSocket extends EventTarget {
       send() {}
@@ -82,6 +122,112 @@ async function test(name, fn) {
     assert.equal(result.error, undefined, result.error && result.error.message);
     assert.equal(result.status, 0, `subprocess status ${result.status}\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
     assert.match(result.stdout, /CONTROLLED_SPAWN_ERROR_CLEANUP_OK/);
+    assert.doesNotMatch(result.stderr, /Unhandled 'error' event|node:events/);
+  });
+
+  await test("delayed browser error cancels pending discovery JSON without retaining its deadline", () => {
+    const helperPath = path.join(__dirname, "test-admin-reviews-cdp.js");
+    const script = `
+      "use strict";
+      const cp = require("node:child_process");
+      const fs = require("node:fs");
+      const path = require("node:path");
+      const { EventEmitter } = require("node:events");
+      let profile = "", caughtAt = 0;
+      global.fetch = async (_url, options) => ({
+        status: 200,
+        ok: true,
+        json: () => {
+          process.stdout.write("JSON_PENDING\\n");
+          return new Promise((_resolve, reject) => options.signal.addEventListener("abort", () => reject(options.signal.reason || new Error("HTTP body aborted")), { once: true }));
+        }
+      });
+      cp.spawn = (_executable, args) => {
+        profile = args.find(value => value.startsWith("--user-data-dir=")).slice("--user-data-dir=".length);
+        fs.writeFileSync(path.join(profile, "DevToolsActivePort"), "9222\\n");
+        const child = new EventEmitter();
+        child.pid = undefined;
+        child.exitCode = null;
+        setTimeout(() => child.emit("error", new Error("simulated delayed child error during JSON")), 150);
+        return child;
+      };
+      const { withCdpBrowser } = require(${JSON.stringify(helperPath)});
+      (async () => {
+        try {
+          await withCdpBrowser("suite-browser.exe", { timeoutMs: 1400, commandTimeoutMs: 100 }, async () => {});
+          throw new Error("delayed spawn failure unexpectedly succeeded");
+        } catch (error) {
+          caughtAt = Date.now();
+          if (!/simulated delayed child error during JSON/.test(String(error && error.message))) throw error;
+          if (!profile || fs.existsSync(profile)) throw new Error("suite-owned profile was not removed");
+          process.stdout.write("CONTROLLED_DELAYED_ERROR_CLEANUP_OK\\n");
+        }
+      })().catch(error => { process.stderr.write(String(error && error.stack || error)); process.exitCode = 2; });
+      process.on("beforeExit", () => {
+        if (!caughtAt) return;
+        const afterErrorMs = Date.now() - caughtAt;
+        process.stdout.write("ERROR_TO_EXIT_MS=" + afterErrorMs + "\\n");
+        if (afterErrorMs >= 500) process.exitCode = 3;
+      });
+    `;
+    const result = cp.spawnSync(process.execPath, ["-e", script], { encoding: "utf8", timeout: 5000, windowsHide: true });
+    assert.equal(result.error, undefined, result.error && result.error.message);
+    assert.equal(result.status, 0, `subprocess status ${result.status}\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
+    assert.match(result.stdout, /JSON_PENDING/);
+    assert.match(result.stdout, /CONTROLLED_DELAYED_ERROR_CLEANUP_OK/);
+    const timing = /ERROR_TO_EXIT_MS=(\d+)/.exec(result.stdout);
+    assert.ok(timing, `missing error-to-exit timing\n${result.stdout}`);
+    assert.ok(Number(timing[1]) < 500, `process retained discovery work for ${timing[1]} ms after the controlled error`);
+    assert.doesNotMatch(result.stderr, /Unhandled 'error' event|node:events/);
+  });
+
+  await test("delayed browser error cancels the transition from discovery to CDP", () => {
+    const helperPath = path.join(__dirname, "test-admin-reviews-cdp.js");
+    const script = `
+      "use strict";
+      const cp = require("node:child_process");
+      const fs = require("node:fs");
+      const path = require("node:path");
+      const { EventEmitter } = require("node:events");
+      let profile = "", caughtAt = 0;
+      global.fetch = async () => ({ status: 200, ok: true, json: async () => ({ webSocketDebuggerUrl: "ws://127.0.0.1:9222/devtools/browser/test" }) });
+      global.WebSocket = class extends EventTarget {
+        constructor() { super(); this.hold = setTimeout(() => {}, 1400); process.stdout.write("CDP_CONNECT_PENDING\\n"); }
+        close() { clearTimeout(this.hold); this.dispatchEvent(new Event("close")); }
+      };
+      cp.spawn = (_executable, args) => {
+        profile = args.find(value => value.startsWith("--user-data-dir=")).slice("--user-data-dir=".length);
+        fs.writeFileSync(path.join(profile, "DevToolsActivePort"), "9222\\n");
+        const child = new EventEmitter(); child.pid = undefined; child.exitCode = null;
+        setTimeout(() => child.emit("error", new Error("simulated delayed child error during CDP connect")), 150);
+        return child;
+      };
+      const { withCdpBrowser } = require(${JSON.stringify(helperPath)});
+      (async () => {
+        try {
+          await withCdpBrowser("suite-browser.exe", { timeoutMs: 1400, commandTimeoutMs: 1400 }, async () => {});
+          throw new Error("CDP transition failure unexpectedly succeeded");
+        } catch (error) {
+          caughtAt = Date.now();
+          if (!/simulated delayed child error during CDP connect/.test(String(error && error.message))) throw error;
+          if (!profile || fs.existsSync(profile)) throw new Error("suite-owned profile was not removed");
+          process.stdout.write("CONTROLLED_CDP_TRANSITION_ERROR_OK\\n");
+        }
+      })().catch(error => { process.stderr.write(String(error && error.stack || error)); process.exitCode = 2; });
+      process.on("beforeExit", () => {
+        if (!caughtAt) return;
+        const afterErrorMs = Date.now() - caughtAt;
+        process.stdout.write("CDP_ERROR_TO_EXIT_MS=" + afterErrorMs + "\\n");
+        if (afterErrorMs >= 500) process.exitCode = 3;
+      });
+    `;
+    const result = cp.spawnSync(process.execPath, ["-e", script], { encoding: "utf8", timeout: 5000, windowsHide: true });
+    assert.equal(result.error, undefined, result.error && result.error.message);
+    assert.equal(result.status, 0, `subprocess status ${result.status}\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
+    assert.match(result.stdout, /CDP_CONNECT_PENDING/);
+    assert.match(result.stdout, /CONTROLLED_CDP_TRANSITION_ERROR_OK/);
+    const timing = /CDP_ERROR_TO_EXIT_MS=(\d+)/.exec(result.stdout);
+    assert.ok(timing && Number(timing[1]) < 500, `CDP transition retained work after the controlled error\n${result.stdout}`);
     assert.doesNotMatch(result.stderr, /Unhandled 'error' event|node:events/);
   });
 
