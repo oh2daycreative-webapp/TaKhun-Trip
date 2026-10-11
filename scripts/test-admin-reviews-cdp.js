@@ -32,13 +32,19 @@ async function fetchLoopbackJson(endpoint, options = {}) {
   const url = validateLoopbackHttpUrl(endpoint);
   const timeoutMs = options.timeoutMs || 2000;
   const controller = new AbortController();
+  const externalSignal = options.signal;
+  const abortFromExternal = () => controller.abort(externalSignal.reason);
   const fetchImpl = options.fetchImpl || fetch;
   let response;
+  if (externalSignal && externalSignal.aborted) throw externalSignal.reason || new Error("CDP discovery was cancelled.");
+  if (externalSignal) externalSignal.addEventListener("abort", abortFromExternal, { once: true });
   try {
     response = await deadline(fetchImpl(url.href, { redirect: "manual", signal: controller.signal }), timeoutMs, "CDP discovery", () => controller.abort());
   } catch (error) {
     if (error && /timed out/.test(error.message)) throw error;
     throw new Error(`CDP discovery failed: ${error && error.message || error}`);
+  } finally {
+    if (externalSignal) externalSignal.removeEventListener("abort", abortFromExternal);
   }
   if (response.status >= 300 && response.status < 400) throw new Error("CDP discovery redirect was rejected.");
   if (!response.ok) throw new Error(`CDP discovery returned HTTP ${response.status}.`);
@@ -134,12 +140,12 @@ async function connectWebSocket(url, timeoutMs) {
   return new CdpClient(socket, timeoutMs);
 }
 
-async function discover(profile, timeoutMs) {
+async function discover(profile, timeoutMs, signal) {
   const activePort = path.join(profile, "DevToolsActivePort");
   return new Promise((resolve, reject) => {
-    let watcher, busy = false, settled = false;
+    let watcher, busy = false, settled = false, onAbort;
     const timer = setTimeout(() => finish(new Error(`CDP endpoint discovery timed out after ${timeoutMs} ms.`)), timeoutMs);
-    const finish = (error, value) => { if (settled) return; settled = true; clearTimeout(timer); if (watcher) watcher.close(); error ? reject(error) : resolve(value); };
+    const finish = (error, value) => { if (settled) return; settled = true; clearTimeout(timer); if (watcher) watcher.close(); if (signal && onAbort) signal.removeEventListener("abort", onAbort); error ? reject(error) : resolve(value); };
     const inspect = async () => {
       if (busy || !fs.existsSync(activePort)) return;
       busy = true;
@@ -148,12 +154,17 @@ async function discover(profile, timeoutMs) {
         const port = Number(lines[0]);
         if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Invalid DevTools port.");
         const endpoint = validateLoopbackHttpUrl(`http://127.0.0.1:${port}/json/version`).href;
-        const version = await fetchLoopbackJson(endpoint, { timeoutMs });
+        const version = await fetchLoopbackJson(endpoint, { timeoutMs, signal });
         const webSocket = validateLoopbackWebSocketUrl(version.webSocketDebuggerUrl);
         if (Number(webSocket.port) !== port) throw new Error("CDP WebSocket port does not match the discovered HTTP endpoint.");
         finish(null, { endpoint, webSocketUrl: webSocket.href, version });
       } catch (_error) { busy = false; }
     };
+    onAbort = () => finish(signal.reason || new Error("CDP browser launch failed."));
+    if (signal) {
+      if (signal.aborted) { onAbort(); return; }
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
     watcher = fs.watch(profile, inspect);
     inspect();
   });
@@ -169,48 +180,63 @@ function removeProfile(profile) {
 async function withCdpBrowser(executable, options, callback) {
   const timeoutMs = options.timeoutMs || 15000, commandTimeoutMs = options.commandTimeoutMs || 3000;
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "takhun-cdp-reviews-"));
-  let child, client, callbackError, cleanupError;
+  const spawn = options.spawn || cp.spawn;
+  const launchAbort = new AbortController();
+  let child, client, callbackError, cleanupError, childError, onChildError, terminationConfirmed = false;
   try {
-    child = cp.spawn(executable, [
+    child = spawn(executable, [
       "--headless=new", "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0", `--user-data-dir=${profile}`,
       "--disable-gpu", "--disable-gpu-sandbox", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
       "--no-first-run", "--no-default-browser-check", "about:blank"
     ], { windowsHide: true, stdio: "ignore" });
-    const discovery = await discover(profile, timeoutMs);
-    client = await connectWebSocket(discovery.webSocketUrl, commandTimeoutMs);
-    const target = await client.send("Target.createTarget", { url: "about:blank" });
-    const attached = await client.send("Target.attachToTarget", { targetId: target.targetId, flatten: true });
-    const sessionId = attached.sessionId;
-    const evaluationValue = result => {
-      if (result.exceptionDetails) throw new Error(`Browser evaluation failed: ${result.exceptionDetails.text}`);
-      return result.result && result.result.value;
-    };
-    const session = {
-      discovery,
-      send: (method, params) => client.send(method, params, sessionId),
-      waitForEvent: (method, predicate, eventTimeoutMs) => client.waitForEvent(method, message => message.sessionId === sessionId && (!predicate || predicate(message.params || {})), eventTimeoutMs),
-      evaluate: async expression => {
-        const result = await client.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, sessionId);
-        return evaluationValue(result);
-      },
-      beginEvaluation: async expression => {
-        const started = await client.send("Runtime.evaluate", { expression, awaitPromise: false }, sessionId);
-        if (started.exceptionDetails) throw new Error(`Browser evaluation failed: ${started.exceptionDetails.text}`);
-        const objectId = started.result && started.result.objectId;
-        if (!objectId) throw new Error("Browser evaluation did not return an awaitable object.");
-        return async () => evaluationValue(await client.send("Runtime.awaitPromise", { promiseObjectId: objectId, returnByValue: true }, sessionId));
-      },
-      press: async key => {
-        const spec = key === "Enter"
-          ? { key: "Enter", code: "Enter", keyIdentifier: "Enter", text: "\r", unmodifiedText: "\r", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 }
-          : { key: " ", code: "Space", keyIdentifier: "U+0020", text: " ", unmodifiedText: " ", windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 };
-        await client.send("Input.dispatchKeyEvent", Object.assign({ type: "keyDown" }, spec), sessionId);
-        await client.send("Input.dispatchKeyEvent", Object.assign({ type: "keyUp" }, spec, { text: "", unmodifiedText: "" }), sessionId);
-      }
-    };
-    return await callback(session);
+    const childFailure = new Promise((_, reject) => {
+      onChildError = error => {
+        childError = error instanceof Error ? error : new Error(String(error));
+        launchAbort.abort(childError);
+        if (client) client.shutdown(childError);
+        reject(childError);
+      };
+      child.on("error", onChildError);
+    });
+    const sessionWork = (async () => {
+      const discovery = await discover(profile, timeoutMs, launchAbort.signal);
+      client = await connectWebSocket(discovery.webSocketUrl, commandTimeoutMs);
+      const target = await client.send("Target.createTarget", { url: "about:blank" });
+      const attached = await client.send("Target.attachToTarget", { targetId: target.targetId, flatten: true });
+      const sessionId = attached.sessionId;
+      const evaluationValue = result => {
+        if (result.exceptionDetails) throw new Error(`Browser evaluation failed: ${result.exceptionDetails.text}`);
+        return result.result && result.result.value;
+      };
+      const session = {
+        discovery,
+        send: (method, params) => client.send(method, params, sessionId),
+        waitForEvent: (method, predicate, eventTimeoutMs) => client.waitForEvent(method, message => message.sessionId === sessionId && (!predicate || predicate(message.params || {})), eventTimeoutMs),
+        evaluate: async expression => {
+          const result = await client.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, sessionId);
+          return evaluationValue(result);
+        },
+        beginEvaluation: async expression => {
+          const started = await client.send("Runtime.evaluate", { expression, awaitPromise: false }, sessionId);
+          if (started.exceptionDetails) throw new Error(`Browser evaluation failed: ${started.exceptionDetails.text}`);
+          const objectId = started.result && started.result.objectId;
+          if (!objectId) throw new Error("Browser evaluation did not return an awaitable object.");
+          return async () => evaluationValue(await client.send("Runtime.awaitPromise", { promiseObjectId: objectId, returnByValue: true }, sessionId));
+        },
+        press: async key => {
+          const spec = key === "Enter"
+            ? { key: "Enter", code: "Enter", keyIdentifier: "Enter", text: "\r", unmodifiedText: "\r", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 }
+            : { key: " ", code: "Space", keyIdentifier: "U+0020", text: " ", unmodifiedText: " ", windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 };
+          await client.send("Input.dispatchKeyEvent", Object.assign({ type: "keyDown" }, spec), sessionId);
+          await client.send("Input.dispatchKeyEvent", Object.assign({ type: "keyUp" }, spec, { text: "", unmodifiedText: "" }), sessionId);
+        }
+      };
+      return callback(session);
+    })();
+    return await Promise.race([sessionWork, childFailure]);
   } catch (error) { callbackError = error; throw error; }
   finally {
+    launchAbort.abort(callbackError || childError || new Error("CDP browser session ended."));
     if (client) {
       try { await client.send("Browser.close"); } catch (_error) { /* Bounded process termination below remains authoritative. */ }
       client.close();
@@ -219,10 +245,21 @@ async function withCdpBrowser(executable, options, callback) {
       try {
         const termination = await terminateProcessTree(child, { timeoutMs: 2000 });
         if (!termination.ok) throw new Error(termination.error);
+        terminationConfirmed = true;
       } catch (error) { cleanupError = error; }
     }
     try { removeProfile(profile); } catch (error) { cleanupError = cleanupError || error; }
-    if (cleanupError && !callbackError) throw cleanupError;
+    const noProcessWasCreated = childError && (!child || !Number.isSafeInteger(child.pid) || child.pid < 1);
+    if (child && onChildError && (child.exitCode !== null || terminationConfirmed || noProcessWasCreated)) child.removeListener("error", onChildError);
+    const primaryError = callbackError || childError;
+    if (cleanupError && primaryError) {
+      const combined = new Error(`${primaryError.message}\nCleanup failed: ${cleanupError.message}`);
+      combined.cause = primaryError;
+      combined.cleanupFailed = true;
+      throw combined;
+    }
+    if (cleanupError) throw cleanupError;
+    if (childError && !callbackError) throw childError;
   }
 }
 

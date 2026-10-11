@@ -1,6 +1,8 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const cp = require("node:child_process");
+const path = require("node:path");
 const {
   CdpClient,
   validateLoopbackHttpUrl,
@@ -46,6 +48,57 @@ async function test(name, fn) {
     client.close();
     await assert.rejects(command, /closed/i);
     await assert.rejects(event, /closed/i);
+  });
+
+  await test("asynchronous browser spawn errors use controlled cleanup without lingering handles", () => {
+    const helperPath = path.join(__dirname, "test-admin-reviews-cdp.js");
+    const script = `
+      "use strict";
+      const cp = require("node:child_process");
+      const fs = require("node:fs");
+      const { EventEmitter } = require("node:events");
+      let profile = "";
+      cp.spawn = (_executable, args) => {
+        profile = args.find(value => value.startsWith("--user-data-dir=")).slice("--user-data-dir=".length);
+        const child = new EventEmitter();
+        child.pid = undefined;
+        child.exitCode = null;
+        process.nextTick(() => child.emit("error", new Error("simulated asynchronous OS launch failure")));
+        return child;
+      };
+      const { withCdpBrowser } = require(${JSON.stringify(helperPath)});
+      (async () => {
+        try {
+          await withCdpBrowser("suite-browser.exe", { timeoutMs: 1000, commandTimeoutMs: 100 }, async () => {});
+          throw new Error("spawn failure unexpectedly succeeded");
+        } catch (error) {
+          if (!/simulated asynchronous OS launch failure/.test(String(error && error.message))) throw error;
+          if (!profile || fs.existsSync(profile)) throw new Error("suite-owned profile was not removed");
+          process.stdout.write("CONTROLLED_SPAWN_ERROR_CLEANUP_OK\\n");
+        }
+      })().catch(error => { process.stderr.write(String(error && error.stack || error)); process.exitCode = 2; });
+    `;
+    const result = cp.spawnSync(process.execPath, ["-e", script], { encoding: "utf8", timeout: 3000, windowsHide: true });
+    assert.equal(result.error, undefined, result.error && result.error.message);
+    assert.equal(result.status, 0, `subprocess status ${result.status}\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
+    assert.match(result.stdout, /CONTROLLED_SPAWN_ERROR_CLEANUP_OK/);
+    assert.doesNotMatch(result.stderr, /Unhandled 'error' event|node:events/);
+  });
+
+  await test("synchronous browser spawn failures still remove their suite-owned profile", async () => {
+    const { withCdpBrowser } = require("./test-admin-reviews-cdp.js");
+    const fs = require("node:fs");
+    let profile = "";
+    await assert.rejects(() => withCdpBrowser("suite-browser.exe", {
+      timeoutMs: 100,
+      commandTimeoutMs: 100,
+      spawn: (_executable, args) => {
+        profile = args.find(value => value.startsWith("--user-data-dir=")).slice("--user-data-dir=".length);
+        throw new Error("simulated synchronous OS launch failure");
+      }
+    }, async () => {}), /simulated synchronous OS launch failure/);
+    assert.ok(profile);
+    assert.equal(fs.existsSync(profile), false);
   });
 
   if (process.exitCode) process.exit(process.exitCode);
