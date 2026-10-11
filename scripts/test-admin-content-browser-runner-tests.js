@@ -73,22 +73,24 @@ function temporaryProfile(label) {
 
   await test("termination deadline bounds a hanging taskkill process", async () => {
     const child = new EventEmitter(); child.pid = 12346; child.exitCode = null; child.kill = () => true;
-    const killer = new EventEmitter();
+    const killer = new EventEmitter(); killer.exitCode = null; let killerKills = 0; killer.kill = () => { killerKills += 1; return true; };
     const result = await runBoundedProcess("fake", [], { timeoutMs: 10, terminationTimeoutMs: 30,
       spawn(command) { if (command === "fake") { child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); return child; } return killer; }
     });
     assert.equal(result.code, 125);
     assert.match(result.stderr, /termination did not complete/i);
+    assert.equal(killerKills, 1, "runner must terminate its own hanging taskkill helper");
   });
 
   await test("normal child close during termination settles before the secondary deadline", async () => {
-    const child = new EventEmitter(); child.pid = 12347; child.exitCode = null; child.kill = () => true;
+    let directKills = 0; const child = new EventEmitter(); child.pid = 12347; child.exitCode = null; child.kill = () => { directKills += 1; return true; };
     const killer = new EventEmitter();
     const result = await runBoundedProcess("fake", [], { timeoutMs: 10, terminationTimeoutMs: 200,
       spawn(command) { if (command === "fake") { child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); return child; } setTimeout(() => { killer.emit("close", 1); child.exitCode = 1; child.emit("close", 1); }, 5); return killer; }
     });
     assert.equal(result.code, 124);
     assert.doesNotMatch(result.stderr, /termination did not complete/i);
+    assert.equal(directKills, 1, "taskkill failure must fall back only to the owned child");
   });
 
   await test("residual profile cleanup failure is an explicit nonzero result", async () => {
