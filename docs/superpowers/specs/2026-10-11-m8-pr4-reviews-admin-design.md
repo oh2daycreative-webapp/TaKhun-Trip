@@ -8,7 +8,7 @@ Add protected Reviews list/detail and moderation to the existing Admin CMS witho
 
 The existing fields remain authoritative: `review_id`, `place_id`, `reviewer_name`, `is_anonymous`, `rating`, `comment`, `admin_reply`, `status`, `created_at`, `updated_at`, `approved_at`, `approved_by`. Original reviewer, rating, comment, Place and creation time are immutable.
 
-`admin_reply` is optional text with at most 2,000 Unicode code points and 8,000 UTF-8 bytes. NUL and malformed UTF-16 surrogate sequences are rejected. Formula-leading text is stored with the existing leading-apostrophe protection and returned byte-for-byte equivalent to the accepted input. Legacy stored text is readable only when it can be projected safely; malformed identifiers, enums, timestamps, booleans, ratings or Unicode fail closed.
+`admin_reply` is optional text with at most 2,000 Unicode code points and 8,000 UTF-8 bytes. NUL and malformed UTF-16 surrogate sequences are rejected. Formula-leading text is stored with the existing leading-apostrophe protection and returned byte-for-byte equivalent to the accepted input. Ambiguous user inputs beginning with an apostrophe followed by `=`, `+`, `-`, or `@` are rejected before write. List reads skip malformed rows and every row with a duplicate valid ID, report a safe skipped-row warning, and paginate only valid unambiguous rows. Detail and mutation targets that are malformed or duplicated fail closed. No legacy row is repaired or deleted automatically.
 
 ## Actions and authorization
 
@@ -40,9 +40,9 @@ Approval writes `approved_at` and `approved_by`. Leaving `approved` preserves th
 
 ## Concurrency, persistence and cache
 
-The service computes a deterministic `r1-<sha256>` revision from all public/business fields except `updated_at`. Mutations authenticate before lock acquisition, acquire the script lock, re-authenticate, reread the row, compare `expected_revision`, validate the transition, and perform one verified full-row replacement.
+The service computes a deterministic `r1-<sha256>` revision from every persisted field including canonical `updated_at`. Under the lock, `updated_at` becomes the later of the wall-clock second or one second after its stored canonical value, so it increases through same-second and ABA cycles. Mutations authenticate before lock acquisition, acquire the script lock, re-authenticate, reread the row, compare `expected_revision`, validate the transition, and perform one verified full-row replacement.
 
-Before any mutation that changes an approved review's public projection, or makes a review approved, the service advances the existing Place public cache epoch. A failure before the entity write changes no entity or audit row. Once an entity write is attempted, an unverified result returns non-retryable `OUTCOME_UNKNOWN`; clients never retry automatically. An entity verified successfully remains success if the audit append cannot be confirmed and returns `audit_status: "unconfirmed"`.
+Public Review cache epoch read, cache lookup, Sheet load and cache fill hold the same bounded script lock used by submission and moderation; helpers inside the boundary do not reacquire it and lock failure has no unlocked fallback. Before any mutation that changes an approved review's public projection, or makes a review approved, the service advances the existing Place public cache epoch. A failure before the entity write changes no entity or audit row. Once an entity write is attempted, an unverified result returns non-retryable `OUTCOME_UNKNOWN`; clients never retry automatically. An entity verified successfully remains success if the audit append cannot be confirmed and returns `audit_status: "unconfirmed"`.
 
 Every mutation appends an uppercase action to `activity_logs` with entity type `review`. Server responses contain safe projections only.
 

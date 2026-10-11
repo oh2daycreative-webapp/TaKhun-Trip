@@ -763,6 +763,12 @@ public/admin/reviews.html
 3. Admin ต้องกดอนุมัติก่อนแสดงผล
 4. การลบใช้ `status = deleted`
 5. ถ้า `is_anonymous = TRUE` ให้แสดงชื่อเป็น “นักท่องเที่ยว”
+6. Reviewer name ว่างเป็นข้อมูลที่อ่านได้; UI ต้องไม่สร้าง HTML จากข้อความผู้ใช้
+7. List แสดงคำเตือนแบบ safe เมื่อข้าม invalid/duplicate legacy rows และ pagination นับเฉพาะแถวที่ใช้ได้
+8. Reply draft ผูกกับ `review_id`; เปลี่ยนรีวิวขณะ draft ยังไม่บันทึกต้องยืนยัน discard
+9. ระหว่าง mutation ต้อง disable controls ทันที; conflict/uncertain ต้อง reload authoritative detail ก่อนเขียนต่อ
+10. เปิด Detail ต้องย้าย focus ไป heading และ Back ต้องคืน focus ไป review card เดิม
+11. ปุ่ม Review ทุกปุ่มต้องมีพื้นที่อย่างน้อย 44×44 CSS pixels และใช้งานด้วย keyboard ได้
 
 ### 13.7 Review APIs
 

@@ -412,6 +412,11 @@ Google Sheets ควรมีชีตดังนี้
 2. หน้า Public แสดงเฉพาะ `approved`
 3. Admin เท่านั้นที่เปลี่ยนสถานะได้
 4. คะแนนต้องอยู่ระหว่าง 1–5
+5. `reviewer_name` อาจว่าง แต่ text ที่ Public เขียนต้องไม่มี NUL, malformed UTF-16 หรือ ambiguous apostrophe-formula prefix
+6. `updated_at` เป็น canonical `yyyy-MM-dd HH:mm:ss` และเพิ่มอย่างน้อยหนึ่งวินาทีทุก successful Admin mutation ภายใต้ script lock แม้ wall clock ยังอยู่ในวินาทีเดิม
+7. Revision รวม `updated_at`; Date cell และ timestamp string ที่มีค่าเดียวกันต้องให้ revision เดียวกัน
+8. Invalid legacy rows และ duplicate IDs ไม่ถูกแก้หรือลบอัตโนมัติ; Admin list ข้ามแถวเหล่านั้น ส่วน detail/mutation target ต้อง fail closed
+9. ไม่มี column, Script Property หรือ runtime configuration ใหม่สำหรับ M8 PR4 fixes
 
 ---
 

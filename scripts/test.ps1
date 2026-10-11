@@ -96,6 +96,8 @@ $required = @(
   "scripts/test-admin-review-service.js"
   "scripts/test-admin-reviews-api.js"
   "scripts/test-admin-reviews-ui.js"
+  "scripts/test-admin-content-browser-runner-tests.js"
+  "scripts/test-admin-content-browser-runner.js"
 )
 
 $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root $_)) })
@@ -181,6 +183,8 @@ if ($LASTEXITCODE -ne 0) { throw "Admin Review service verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin Reviews API verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-reviews-ui.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Reviews UI verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-content-browser-runner-tests.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin native browser runner verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-places.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Places list verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-places-accessibility.js")
