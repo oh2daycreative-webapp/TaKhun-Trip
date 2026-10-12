@@ -206,6 +206,18 @@ function createRouterRuntime({ routerSource = router, json = JSON } = {}) {
   assert.deepEqual(runtime.calls, [{ action:"adminGetDashboard", args:["BODY_TOKEN"] }]);
 }
 
+for (const action of [" adminGetDashboard", "adminGetDashboard ", "adminGetDashboardx", "AdminGetDashboard"]) {
+  const runtime = createRouterRuntime();
+  assert.deepEqual(post(runtime, { action, token:"BODY_TOKEN" }), { ok:false, error:{ code:"UNKNOWN_ACTION", message:"ไม่พบ action ที่เรียก" } });
+  assert.deepEqual(runtime.calls, []);
+}
+
+{
+  const runtime = createRouterRuntime();
+  assert.deepEqual(post(runtime, { action:" adminLogout ", token:"BODY_TOKEN" }), { ok:true, data:{ action:"adminLogout" } });
+  assert.deepEqual(runtime.calls, [{ action:"adminLogout", args:["BODY_TOKEN"] }]);
+}
+
 for (const action of ["adminGetGallery", "adminGetGalleryDetail", "adminGetGalleryMediaOptions", "createGalleryItem", "updateGalleryItem", "deleteGalleryItem"]) {
   const runtime = createRouterRuntime(), token = "BODY_TOKEN", payload = { marker: action };
   assert.deepEqual(post(runtime, { action, token, payload }, { parameter: { action: "adminLogout" }, token: "EVENT_TOKEN" }), { ok: true, data: { action } });

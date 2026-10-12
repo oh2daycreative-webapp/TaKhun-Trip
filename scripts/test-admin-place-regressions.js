@@ -32,7 +32,8 @@ function test(name, run) {
 }
 
 function exactActions(source) {
-  const actions = [...source.matchAll(/(?:^|[^.\w$])action\s*===\s*"([^"]+)"/gm)].map((match) => match[1]);
+  const actions = [...source.matchAll(/(?:^|[^.\w$])action\s*===\s*"([^"]+)"/gm),
+    ...source.matchAll(/if\s*\(\s*(?:body\s*&&\s*)?body\.action\s*===\s*"([^"]+)"/gm)].map((match) => match[1]);
   return [...new Set(actions)].sort();
 }
 

@@ -495,7 +495,8 @@
       throw safeError("MALFORMED_RESPONSE");
     }
     if (result.ok) {
-      if (!exactKeys(result, ["ok", "data", "message"]) || typeof result.message !== "string") {
+      if (!exactKeys(result, ["ok", "data", "message"]) || typeof result.message !== "string" ||
+          body.action === "adminGetDashboard" && result.message !== "success") {
         throw safeError("MALFORMED_RESPONSE");
       }
       return validateSuccess(body, result.data);

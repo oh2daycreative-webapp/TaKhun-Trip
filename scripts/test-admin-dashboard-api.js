@@ -21,6 +21,8 @@ test("strictly rejects malformed counts and warning projections",async()=>{const
 
 test("accepts exact zero summary and canonical ordered warning domains",async()=>{const value={total_places:0,total_routes:0,total_products:0,total_events:0,pending_reviews:0,total_gallery:0,warnings:["places","routes","products","events","reviews","gallery"].map(domain=>({domain,code:"SKIPPED_INVALID_OR_DUPLICATE_ROWS",skipped_count:1}))};const h=load(()=>response(value));assert.deepEqual(JSON.parse(JSON.stringify(await h.api.getDashboard(TOKEN))),value);});
 
+test("rejects a Dashboard success envelope whose message is not the exact contract literal",async()=>{for(const message of ["ok","Success","success ",""]){const h=load(()=>({ok:true,status:200,text:async()=>JSON.stringify({ok:true,data:summary,message})}));await rejectsCode(()=>h.api.getDashboard(TOKEN),"MALFORMED_RESPONSE");assert.equal(h.calls.length,1);}});
+
 test("backend network HTTP and malformed outcomes are safe and never retried",async()=>{for(const responder of [()=>{throw new TypeError("TOKEN secret");},()=>({ok:false,status:503,text:async()=>"secret"}),()=>({ok:true,status:200,text:async()=>"not json"}),()=>({ok:true,status:200,text:async()=>JSON.stringify({ok:false,error:{code:"UNAUTHORIZED",message:"safe"}})})]){const h=load(responder);await assert.rejects(h.api.getDashboard(TOKEN),error=>["NETWORK_ERROR","HTTP_ERROR","MALFORMED_RESPONSE","UNAUTHORIZED"].includes(error.code));assert.equal(h.calls.length,1);}});
 
 test("invalid token fails before fetch",async()=>{const h=load(()=>{throw Error("fetch must not run")});await rejectsCode(()=>h.api.getDashboard("bad"),"VALIDATION_ERROR");assert.equal(h.calls.length,0);});

@@ -55,6 +55,8 @@ No warning exposes IDs, cells, row numbers, statuses, source values, stack trace
 
 The service performs exactly six fresh `SheetService_readTable_` reads per successful request, one each for `places`, `routes`, `products`, `events`, `reviews`, and `gallery`. It never reads or writes cache state. It never calls a Sheet write helper, `SpreadsheetApp.flush`, a lock, an audit helper, Properties Service, or a mutation service.
 
+These are fresh sequential reads, not an atomic cross-table snapshot. If another operation changes content while the request is reading the six tables, individual card counts can reflect slightly different moments. The Dashboard intentionally introduces no lock or cache to mask that limitation.
+
 For every domain, duplicate means two or more rows with the same syntactically valid domain ID. All rows carrying that duplicate ID are skipped, so row order cannot decide the count. Blank/malformed IDs are skipped. Countability is intentionally limited to identity and lifecycle fields for Places, Routes, Products, Events, and Gallery; malformed unrelated content does not make an otherwise unambiguous entity disappear from a summary count.
 
 | Response key / Thai UI label | Table and identity | Included lifecycle | Invalid handling |
