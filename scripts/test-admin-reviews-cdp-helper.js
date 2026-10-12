@@ -18,6 +18,26 @@ async function test(name, fn) {
   catch (error) { process.stderr.write(`FAIL ${name}\n${error.stack}\n`); process.exitCode = 1; }
 }
 
+class RoutedSocket extends EventTarget {
+  constructor(options={}) { super();this.sent=[];this.sendCount=0;this.autoAck=options.autoAck!==false; }
+  send(raw) {
+    this.sendCount+=1;
+    const message=JSON.parse(raw);this.sent.push(message);
+    if(this.autoAck)queueMicrotask(()=>this.frame({id:message.id,result:{}}));
+  }
+  frame(message) { this.dispatchEvent(new MessageEvent("message",{data:JSON.stringify(message)})); }
+  fail() { this.dispatchEvent(new Event("error")); }
+  close() { this.dispatchEvent(new Event("close")); }
+}
+
+function targetFrame(socket,sessionId,inner) {
+  socket.frame({method:"Target.receivedMessageFromTarget",params:{sessionId,message:JSON.stringify(inner)}});
+}
+
+function innerCommand(socket,index=socket.sent.length-1) {
+  return JSON.parse(socket.sent[index].params.message);
+}
+
 (async () => {
   await test("CDP endpoint validators accept only loopback HTTP and WebSocket URLs", () => {
     assert.equal(validateLoopbackHttpUrl("http://127.0.0.1:9222/json/version").hostname, "127.0.0.1");
@@ -93,6 +113,16 @@ async function test(name, fn) {
     await assert.rejects(event, /closed/i);
   });
 
+  await test("post-shutdown client operations retain the first cause and create no work", async () => {
+    const socket=new RoutedSocket(),client=new CdpClient(socket,20),cause=new Error("first causal shutdown");
+    client.shutdown(cause);client.shutdown(new Error("later shutdown"));client.close();
+    const sent=client.send("Target.getTargets"),event=client.waitForEvent("Target.targetCreated");
+    const sentError=sent.catch(error=>error),eventError=event.catch(error=>error);
+    assert.equal(socket.sendCount,0);assert.equal(client.pending.size,0);assert.equal(client.eventWaiters.size,0);
+    assert.equal(client.listeners.size,0);assert.equal(client.shutdownListeners.size,0);assert.equal(client.shutdownError,cause);
+    assert.equal(await sentError,cause);assert.equal(await eventError,cause);
+  });
+
   await test("non-flatten target sessions route commands responses events and closure through the browser transport", async () => {
     class FakeBrowserClient {
       constructor() { this.listeners=new Map();this.sent=[];this.innerId=0; }
@@ -126,6 +156,68 @@ async function test(name, fn) {
     const session=new CdpTargetSession(browser,"SESSION-2",1000);
     await assert.rejects(session.send("Page.enable"),/CDP Page\.enable failed: blocked/);
     session.close();
+  });
+
+  await test("serialized production routing correlates target responses events and duplicate frames", async () => {
+    const socket=new RoutedSocket(),browser=new CdpClient(socket,1000),session=new CdpTargetSession(browser,"SESSION-ROUTED",1000);
+    const command=session.send("Page.enable"),inner=innerCommand(socket);
+    targetFrame(socket,"OTHER",{id:inner.id,result:{wrong:true}});assert.equal(session.pending.size,1);
+    targetFrame(socket,"SESSION-ROUTED",{id:inner.id,result:{enabled:true}});
+    targetFrame(socket,"SESSION-ROUTED",{id:inner.id,result:{duplicate:true}});
+    assert.deepEqual(await command,{enabled:true});
+    const event=session.waitForEvent("Page.loadEventFired",value=>value.marker===1,1000);
+    targetFrame(socket,"SESSION-ROUTED",{method:"Page.loadEventFired",params:{marker:0}});
+    targetFrame(socket,"SESSION-ROUTED",{method:"Page.loadEventFired",params:{marker:1}});
+    targetFrame(socket,"SESSION-ROUTED",{method:"Page.loadEventFired",params:{marker:2}});
+    assert.deepEqual(await event,{marker:1});await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(browser.pending.size,0);assert.equal(session.pending.size,0);assert.equal(session.eventWaiters.size,0);
+    session.close();browser.shutdown();
+  });
+
+  await test("serialized matching detach closes only its target session and releases production subscriptions", async () => {
+    const socket=new RoutedSocket(),browser=new CdpClient(socket,1000),session=new CdpTargetSession(browser,"SESSION-DETACH-ROUTED",1000);
+    const command=session.send("Page.enable"),event=session.waitForEvent("Page.loadEventFired");
+    const commandError=command.catch(error=>error),eventError=event.catch(error=>error);
+    socket.frame({method:"Target.detachedFromTarget",params:{sessionId:"OTHER"}});assert.equal(session.closed,false);
+    socket.frame({method:"Target.detachedFromTarget",params:{sessionId:"SESSION-DETACH-ROUTED",reason:"target_closed"}});
+    assert.match((await commandError).message,/target session detached/i);assert.match((await eventError).message,/target session detached/i);
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(session.closed,true);assert.equal(session.pending.size,0);assert.equal(session.eventWaiters.size,0);
+    assert.equal(browser.pending.size,0);assert.equal(browser.shutdownListeners.size,0);
+    assert.equal(browser.listeners.has("Target.receivedMessageFromTarget"),false);assert.equal(browser.listeners.has("Target.detachedFromTarget"),false);
+    browser.shutdown();
+  });
+
+  await test("serialized timeout ignores a late response and a later command still correlates", async () => {
+    const socket=new RoutedSocket(),browser=new CdpClient(socket,20),session=new CdpTargetSession(browser,"SESSION-TIMEOUT",20);
+    const timed=session.send("Page.enable"),first=innerCommand(socket);
+    await assert.rejects(timed,/Page\.enable timed out/);
+    targetFrame(socket,"SESSION-TIMEOUT",{id:first.id,result:{late:true}});
+    const next=session.send("Runtime.enable"),second=innerCommand(socket);
+    targetFrame(socket,"SESSION-TIMEOUT",{id:second.id,result:{enabled:true}});
+    assert.deepEqual(await next,{enabled:true});await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(browser.pending.size,0);assert.equal(session.pending.size,0);assert.equal(session.eventWaiters.size,0);
+    session.close();browser.shutdown();
+  });
+
+  await test("serialized outer rejection rejects the inner command once and clears both pending maps", async () => {
+    const socket=new RoutedSocket({autoAck:false}),browser=new CdpClient(socket,1000),session=new CdpTargetSession(browser,"SESSION-OUTER-ROUTED",1000);
+    const command=session.send("Page.enable"),outer=socket.sent[0];
+    socket.frame({id:outer.id,error:{code:-32000,message:"outer blocked"}});
+    await assert.rejects(command,/Target\.sendMessageToTarget failed: outer blocked/);
+    assert.equal(browser.pending.size,0);assert.equal(session.pending.size,0);
+    session.close();browser.shutdown();
+  });
+
+  await test("serialized detach and transport shutdown races preserve the first target cause and settle once", async () => {
+    const socket=new RoutedSocket(),browser=new CdpClient(socket,1000),session=new CdpTargetSession(browser,"SESSION-RACE-ROUTED",1000);
+    const command=session.send("Page.enable"),event=session.waitForEvent("Page.loadEventFired");
+    const commandError=command.catch(error=>error),eventError=event.catch(error=>error);
+    socket.frame({method:"Target.detachedFromTarget",params:{sessionId:"SESSION-RACE-ROUTED"}});socket.fail();socket.close();
+    assert.match((await commandError).message,/target session detached/i);assert.match((await eventError).message,/target session detached/i);
+    assert.match(session.closeError.message,/target session detached/i);assert.match(browser.shutdownError.message,/WebSocket failed/i);
+    assert.equal(browser.pending.size,0);assert.equal(browser.eventWaiters.size,0);assert.equal(browser.listeners.size,0);assert.equal(browser.shutdownListeners.size,0);
+    assert.equal(session.pending.size,0);assert.equal(session.eventWaiters.size,0);assert.equal(session.listeners.size,0);
   });
 
   await test("matching target detach immediately rejects pending command and event while other sessions are ignored", async () => {

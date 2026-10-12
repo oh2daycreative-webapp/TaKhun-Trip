@@ -113,7 +113,7 @@ class CdpClient {
   }
 
   send(method, params = {}, sessionId) {
-    if (this.closed) return Promise.reject(new Error("CDP WebSocket is closed."));
+    if (this.closed) return Promise.reject(this.shutdownError || new Error("CDP WebSocket is closed."));
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`CDP ${method} timed out after ${this.commandTimeoutMs} ms.`)); }, this.commandTimeoutMs);
@@ -127,6 +127,7 @@ class CdpClient {
   }
 
   waitForEvent(method, predicate = () => true, timeoutMs = this.commandTimeoutMs) {
+    if (this.closed) return Promise.reject(this.shutdownError || new Error("CDP WebSocket is closed."));
     return new Promise((resolve, reject) => {
       const waiter = { timer: null, reject };
       const listener = message => {
