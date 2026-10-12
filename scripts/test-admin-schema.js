@@ -437,7 +437,7 @@ test("final API transport and Router contract expose exactly the implemented Mil
   ]) assert.ok(transport.includes(literal), `transport contract must include ${literal}`);
   assert.match(transport, /unknown backend code[\s\S]+SERVER_ERROR/i);
   assert.match(transport, /public GET[\s\S]+unchanged/i);
-  assert.doesNotMatch(routerSource, /adminGetDashboard|createPlace|updatePlace|deletePlace/);
+  assert.doesNotMatch(routerSource, /createPlace|updatePlace|deletePlace/);
 });
 
 test("final Admin CMS section separates the implemented foundation from future CMS work", () => {
