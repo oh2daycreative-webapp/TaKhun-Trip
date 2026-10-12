@@ -157,6 +157,78 @@ class CdpClient {
   }
 }
 
+class CdpTargetSession {
+  constructor(browserClient, sessionId, commandTimeoutMs) {
+    this.browserClient = browserClient;
+    this.sessionId = sessionId;
+    this.commandTimeoutMs = commandTimeoutMs;
+    this.nextId = 1;
+    this.pending = new Map();
+    this.listeners = new Map();
+    this.eventWaiters = new Set();
+    this.closed = false;
+    this.receive = message => this.onMessage(message);
+    browserClient.on("Target.receivedMessageFromTarget", this.receive);
+  }
+
+  onMessage(message) {
+    const params = message && message.params;
+    if (!params || params.sessionId !== this.sessionId || typeof params.message !== "string") return;
+    let inner;
+    try { inner = JSON.parse(params.message); } catch (_error) { return; }
+    if (inner.id && this.pending.has(inner.id)) {
+      const pending = this.pending.get(inner.id); this.pending.delete(inner.id); clearTimeout(pending.timer);
+      if (inner.error) pending.reject(new Error(`CDP ${pending.method} failed: ${inner.error.message}`));
+      else pending.resolve(inner.result || {});
+      return;
+    }
+    const listeners = this.listeners.get(inner.method);
+    if (listeners) for (const listener of [...listeners]) listener(inner.params || {});
+  }
+
+  send(method, params = {}) {
+    if (this.closed) return Promise.reject(new Error("CDP target session is closed."));
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`CDP ${method} timed out after ${this.commandTimeoutMs} ms.`)); }, this.commandTimeoutMs);
+      this.pending.set(id, { resolve, reject, timer, method });
+      this.browserClient.send("Target.sendMessageToTarget", {
+        sessionId:this.sessionId,
+        message:JSON.stringify({ id, method, params })
+      }).catch(error => {
+        const pending = this.pending.get(id);
+        if (!pending) return;
+        this.pending.delete(id); clearTimeout(pending.timer); pending.reject(error);
+      });
+    });
+  }
+
+  waitForEvent(method, predicate = () => true, timeoutMs = this.commandTimeoutMs) {
+    if (this.closed) return Promise.reject(new Error("CDP target session is closed."));
+    return new Promise((resolve, reject) => {
+      const waiter = { timer:null, reject };
+      const listener = params => {
+        if (!predicate(params)) return;
+        clearTimeout(waiter.timer); this.eventWaiters.delete(waiter); this.off(method, listener); resolve(params);
+      };
+      this.on(method, listener);
+      waiter.timer = setTimeout(() => { this.eventWaiters.delete(waiter); this.off(method, listener); reject(new Error(`CDP event ${method} timed out after ${timeoutMs} ms.`)); }, timeoutMs);
+      this.eventWaiters.add(waiter);
+    });
+  }
+
+  on(method, listener) { if (!this.listeners.has(method)) this.listeners.set(method, new Set()); this.listeners.get(method).add(listener); }
+  off(method, listener) { const listeners=this.listeners.get(method);if(!listeners)return;listeners.delete(listener);if(!listeners.size)this.listeners.delete(method); }
+  close(error = new Error("CDP target session closed.")) {
+    if (this.closed) return;
+    this.closed = true;
+    this.browserClient.off("Target.receivedMessageFromTarget", this.receive);
+    for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error); }
+    for (const waiter of this.eventWaiters) { clearTimeout(waiter.timer); waiter.reject(error); }
+    this.pending.clear(); this.eventWaiters.clear(); this.listeners.clear();
+  }
+}
+
 async function connectWebSocket(url, timeoutMs, signal) {
   validateLoopbackWebSocketUrl(url);
   if (signal && signal.aborted) throw signal.reason || new Error("CDP WebSocket connection was cancelled.");
@@ -187,6 +259,13 @@ async function connectWebSocket(url, timeoutMs, signal) {
     throw signal.reason || new Error("CDP WebSocket connection was cancelled.");
   }
   return new CdpClient(socket, timeoutMs);
+}
+
+function keyEventSpec(key) {
+  if (key === "Tab") return { key:"Tab", code:"Tab", keyIdentifier:"U+0009", windowsVirtualKeyCode:9, nativeVirtualKeyCode:9 };
+  if (key === "Enter") return { key:"Enter", code:"Enter", keyIdentifier:"Enter", text:"\r", unmodifiedText:"\r", windowsVirtualKeyCode:13, nativeVirtualKeyCode:13 };
+  if (key === "Space") return { key:" ", code:"Space", keyIdentifier:"U+0020", text:" ", unmodifiedText:" ", windowsVirtualKeyCode:32, nativeVirtualKeyCode:32 };
+  throw new Error(`Unsupported CDP key: ${key}`);
 }
 
 async function discover(profile, timeoutMs, signal) {
@@ -231,7 +310,7 @@ async function withCdpBrowser(executable, options, callback) {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "takhun-cdp-reviews-"));
   const spawn = options.spawn || cp.spawn;
   const launchAbort = new AbortController();
-  let child, client, callbackError, cleanupError, childError, onChildError, terminationConfirmed = false;
+  let child, client, targetSession, callbackError, cleanupError, childError, onChildError, terminationConfirmed = false;
   try {
     child = spawn(executable, [
       "--headless=new", "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0", `--user-data-dir=${profile}`,
@@ -242,6 +321,7 @@ async function withCdpBrowser(executable, options, callback) {
       onChildError = error => {
         childError = error instanceof Error ? error : new Error(String(error));
         launchAbort.abort(childError);
+        if (targetSession) targetSession.close(childError);
         if (client) client.shutdown(childError);
         reject(childError);
       };
@@ -251,33 +331,32 @@ async function withCdpBrowser(executable, options, callback) {
       const discovery = await discover(profile, timeoutMs, launchAbort.signal);
       client = await connectWebSocket(discovery.webSocketUrl, commandTimeoutMs, launchAbort.signal);
       const target = await client.send("Target.createTarget", { url: "about:blank" });
-      const attached = await client.send("Target.attachToTarget", { targetId: target.targetId, flatten: true });
+      const attached = await client.send("Target.attachToTarget", { targetId: target.targetId, flatten: false });
       const sessionId = attached.sessionId;
+      targetSession = new CdpTargetSession(client, sessionId, commandTimeoutMs);
       const evaluationValue = result => {
         if (result.exceptionDetails) throw new Error(`Browser evaluation failed: ${result.exceptionDetails.text}`);
         return result.result && result.result.value;
       };
       const session = {
         discovery,
-        send: (method, params) => client.send(method, params, sessionId),
-        waitForEvent: (method, predicate, eventTimeoutMs) => client.waitForEvent(method, message => message.sessionId === sessionId && (!predicate || predicate(message.params || {})), eventTimeoutMs),
+        send: (method, params) => targetSession.send(method, params),
+        waitForEvent: (method, predicate, eventTimeoutMs) => targetSession.waitForEvent(method, predicate, eventTimeoutMs),
         evaluate: async expression => {
-          const result = await client.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, sessionId);
+          const result = await targetSession.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
           return evaluationValue(result);
         },
         beginEvaluation: async expression => {
-          const started = await client.send("Runtime.evaluate", { expression, awaitPromise: false }, sessionId);
+          const started = await targetSession.send("Runtime.evaluate", { expression, awaitPromise: false });
           if (started.exceptionDetails) throw new Error(`Browser evaluation failed: ${started.exceptionDetails.text}`);
           const objectId = started.result && started.result.objectId;
           if (!objectId) throw new Error("Browser evaluation did not return an awaitable object.");
-          return async () => evaluationValue(await client.send("Runtime.awaitPromise", { promiseObjectId: objectId, returnByValue: true }, sessionId));
+          return async () => evaluationValue(await targetSession.send("Runtime.awaitPromise", { promiseObjectId: objectId, returnByValue: true }));
         },
         press: async key => {
-          const spec = key === "Enter"
-            ? { key: "Enter", code: "Enter", keyIdentifier: "Enter", text: "\r", unmodifiedText: "\r", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 }
-            : { key: " ", code: "Space", keyIdentifier: "U+0020", text: " ", unmodifiedText: " ", windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 };
-          await client.send("Input.dispatchKeyEvent", Object.assign({ type: "keyDown" }, spec), sessionId);
-          await client.send("Input.dispatchKeyEvent", Object.assign({ type: "keyUp" }, spec, { text: "", unmodifiedText: "" }), sessionId);
+          const spec = keyEventSpec(key);
+          await targetSession.send("Input.dispatchKeyEvent", Object.assign({ type: "keyDown" }, spec));
+          await targetSession.send("Input.dispatchKeyEvent", Object.assign({ type: "keyUp" }, spec, { text: "", unmodifiedText: "" }));
         }
       };
       return callback(session);
@@ -286,6 +365,7 @@ async function withCdpBrowser(executable, options, callback) {
   } catch (error) { callbackError = error; throw error; }
   finally {
     launchAbort.abort(callbackError || childError || new Error("CDP browser session ended."));
+    if (targetSession) targetSession.close(callbackError || childError || new Error("CDP browser session ended."));
     if (client) {
       try { await client.send("Browser.close"); } catch (_error) { /* Bounded process termination below remains authoritative. */ }
       client.close();
@@ -314,6 +394,8 @@ async function withCdpBrowser(executable, options, callback) {
 
 module.exports = {
   CdpClient,
+  CdpTargetSession,
+  keyEventSpec,
   validateLoopbackHttpUrl,
   validateLoopbackWebSocketUrl,
   fetchLoopbackJson,

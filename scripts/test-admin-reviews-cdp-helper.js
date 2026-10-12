@@ -5,6 +5,8 @@ const cp = require("node:child_process");
 const path = require("node:path");
 const {
   CdpClient,
+  CdpTargetSession,
+  keyEventSpec,
   validateLoopbackHttpUrl,
   validateLoopbackWebSocketUrl,
   fetchLoopbackJson
@@ -88,6 +90,48 @@ async function test(name, fn) {
     client.close();
     await assert.rejects(command, /closed/i);
     await assert.rejects(event, /closed/i);
+  });
+
+  await test("non-flatten target sessions route commands responses events and closure through the browser transport", async () => {
+    class FakeBrowserClient {
+      constructor() { this.listeners=new Map();this.sent=[];this.innerId=0; }
+      on(method,listener){if(!this.listeners.has(method))this.listeners.set(method,new Set());this.listeners.get(method).add(listener);}
+      off(method,listener){const listeners=this.listeners.get(method);if(listeners)listeners.delete(listener);}
+      emit(method,params){for(const listener of this.listeners.get(method)||[])listener({method,params});}
+      async send(method,params){
+        this.sent.push({method,params});
+        assert.equal(method,"Target.sendMessageToTarget");
+        assert.equal(params.sessionId,"SESSION-1");
+        const inner=JSON.parse(params.message);this.innerId=inner.id;
+        queueMicrotask(()=>this.emit("Target.receivedMessageFromTarget",{sessionId:"OTHER",message:JSON.stringify({id:inner.id,result:{wrong:true}})}));
+        queueMicrotask(()=>this.emit("Target.receivedMessageFromTarget",{sessionId:"SESSION-1",message:JSON.stringify({id:inner.id,result:{enabled:true}})}));
+        return {};
+      }
+    }
+    const browser=new FakeBrowserClient(),session=new CdpTargetSession(browser,"SESSION-1",1000);
+    assert.deepEqual(await session.send("Page.enable"),{enabled:true});
+    assert.deepEqual(JSON.parse(browser.sent[0].params.message),{id:1,method:"Page.enable",params:{}});
+    const event=session.waitForEvent("Page.loadEventFired",value=>value.marker===1,1000);
+    browser.emit("Target.receivedMessageFromTarget",{sessionId:"SESSION-1",message:JSON.stringify({method:"Page.loadEventFired",params:{marker:0}})});
+    browser.emit("Target.receivedMessageFromTarget",{sessionId:"SESSION-1",message:JSON.stringify({method:"Page.loadEventFired",params:{marker:1}})});
+    assert.deepEqual(await event,{marker:1});
+    const pending=session.send("Runtime.evaluate");
+    session.close(new Error("target ended"));
+    await assert.rejects(pending,/target ended/);
+  });
+
+  await test("non-flatten target sessions preserve protocol errors", async () => {
+    const listeners=new Set(),browser={on(_method,listener){listeners.add(listener);},off(_method,listener){listeners.delete(listener);},async send(_method,params){const inner=JSON.parse(params.message);queueMicrotask(()=>{for(const listener of listeners)listener({params:{sessionId:"SESSION-2",message:JSON.stringify({id:inner.id,error:{code:-32000,message:"blocked"}})}});});return{};}};
+    const session=new CdpTargetSession(browser,"SESSION-2",1000);
+    await assert.rejects(session.send("Page.enable"),/CDP Page\.enable failed: blocked/);
+    session.close();
+  });
+
+  await test("native key routing distinguishes Tab from Space and Enter", () => {
+    assert.deepEqual(keyEventSpec("Tab"),{key:"Tab",code:"Tab",keyIdentifier:"U+0009",windowsVirtualKeyCode:9,nativeVirtualKeyCode:9});
+    assert.equal(keyEventSpec("Enter").windowsVirtualKeyCode,13);
+    assert.equal(keyEventSpec("Space").windowsVirtualKeyCode,32);
+    assert.throws(()=>keyEventSpec("Escape"),/Unsupported CDP key/);
   });
 
   await test("asynchronous browser spawn errors use controlled cleanup without lingering handles", () => {
