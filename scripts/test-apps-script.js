@@ -68,6 +68,7 @@ for (const { name, source } of sources) {
 }
 
 const postActions = [
+  "adminGetDashboard",
   "adminGetProducts", "adminGetProductDetail", "createProduct", "updateProduct", "deleteProduct",
   "adminGetEvents", "adminGetEventDetail", "createEvent", "updateEvent", "deleteEvent",
   "adminGetRoutes", "adminGetRouteDetail", "createRoute", "updateRoute", "deleteRoute",
@@ -168,6 +169,10 @@ function createRouterRuntime({ routerSource = router, json = JSON } = {}) {
       return { ok: true, data: { action } };
     };
   }
+  context.adminGetDashboard_ = (...args) => {
+    calls.push({ action: "adminGetDashboard", args });
+    return { ok: true, data: { action: "adminGetDashboard" } };
+  };
   for (const action of ["adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace", "adminInspectPlaceDependencies", "adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace", "adminGetPlaceMediaOptions", "adminInspectPlaceCreateDestinations"]) {
     context[`${action}_`] = (...args) => {
       calls.push({ action, args });
@@ -193,6 +198,12 @@ function createRouterRuntime({ routerSource = router, json = JSON } = {}) {
   vm.runInContext(apiResponse, context, { filename: "apps-script/ApiResponse.gs" });
   vm.runInContext(routerSource, context, { filename: "apps-script/Router.gs" });
   return { context, calls };
+}
+
+{
+  const runtime = createRouterRuntime();
+  assert.deepEqual(post(runtime, { action:"adminGetDashboard", token:"BODY_TOKEN" }, { parameter:{ action:"adminLogout" }, token:"EVENT_TOKEN" }), { ok:true, data:{ action:"adminGetDashboard" } });
+  assert.deepEqual(runtime.calls, [{ action:"adminGetDashboard", args:["BODY_TOKEN"] }]);
 }
 
 for (const action of ["adminGetGallery", "adminGetGalleryDetail", "adminGetGalleryMediaOptions", "createGalleryItem", "updateGalleryItem", "deleteGalleryItem"]) {
