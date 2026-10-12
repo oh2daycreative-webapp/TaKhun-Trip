@@ -419,8 +419,31 @@
     return write && dependencies ? { ...write, dependencies } : null;
   }
 
+  function safeDashboard(data) {
+    const countKeys = ["total_places", "total_routes", "total_products", "total_events", "pending_reviews", "total_gallery"];
+    if (!exactKeys(data, [...countKeys, "warnings"]) || !Array.isArray(data.warnings)) return null;
+    if (countKeys.some((key) => !Number.isSafeInteger(data[key]) || data[key] < 0)) return null;
+    const domains = ["places", "routes", "products", "events", "reviews", "gallery"];
+    let prior = -1;
+    const warnings = [];
+    for (const warning of data.warnings) {
+      if (!exactKeys(warning, ["domain", "code", "skipped_count"]) || warning.code !== "SKIPPED_INVALID_OR_DUPLICATE_ROWS" ||
+          !Number.isSafeInteger(warning.skipped_count) || warning.skipped_count < 1) return null;
+      const position = domains.indexOf(warning.domain);
+      if (position <= prior) return null;
+      prior = position;
+      warnings.push({ domain:warning.domain, code:warning.code, skipped_count:warning.skipped_count });
+    }
+    return Object.fromEntries(countKeys.map((key) => [key, data[key]]).concat([["warnings", warnings]]));
+  }
+
   function validateSuccess(body, data) {
     const action = body.action;
+    if (action === "adminGetDashboard") {
+      const dashboard = safeDashboard(data);
+      if (!dashboard) throw safeError("MALFORMED_RESPONSE");
+      return dashboard;
+    }
     if (REVIEW_ACTIONS.includes(action)) {
       const reviewed = safeReviewResponse(data, body);
       if (!reviewed) throw safeError("MALFORMED_RESPONSE");
@@ -472,7 +495,8 @@
       throw safeError("MALFORMED_RESPONSE");
     }
     if (result.ok) {
-      if (!exactKeys(result, ["ok", "data", "message"]) || typeof result.message !== "string") {
+      if (!exactKeys(result, ["ok", "data", "message"]) || typeof result.message !== "string" ||
+          body.action === "adminGetDashboard" && result.message !== "success") {
         throw safeError("MALFORMED_RESPONSE");
       }
       return validateSuccess(body, result.data);
@@ -548,6 +572,10 @@
 
   function logout(token) {
     return request({ action: "adminLogout", token });
+  }
+
+  function getDashboard(token) {
+    return request({ action:"adminGetDashboard", token:requireToken(token) });
   }
 
   function placeRequest(action, token, payload) {
@@ -954,7 +982,7 @@
   function deleteReview(token, payload) { return placeRequest("deleteReview", token, reviewMutationPayload(payload, "delete")); }
 
   global.TakhunAdminApi = Object.freeze({
-    login, validateSession, logout, getPlaces, getPlaceDetail, getPlaceMediaOptions, inspectPlaceDependencies,
+    login, validateSession, logout, getDashboard, getPlaces, getPlaceDetail, getPlaceMediaOptions, inspectPlaceDependencies,
     createPlace, savePlaceDraft, publishPlace, unpublishPlace, archivePlace, restorePlace,
     getProducts, getProductDetail, createProduct, updateProduct, deleteProduct,
     getEvents, getEventDetail, createEvent, updateEvent, deleteEvent,

@@ -58,6 +58,7 @@ function routeRequest_(method, event) {
         if (action === "adminLogin") return createJsonResponse_(adminLogin_(body.payload));
         if (action === "adminValidateSession") return createJsonResponse_(adminValidateSession_(body.token));
         if (action === "adminLogout") return createJsonResponse_(adminLogout_(body.token));
+        if (body && body.action === "adminGetDashboard") return createJsonResponse_(adminGetDashboard_(body.token));
         if (action === "adminGetProducts") return createJsonResponse_(adminGetProducts_(body.token, body.payload));
         if (action === "adminGetProductDetail") return createJsonResponse_(adminGetProductDetail_(body.token, body.payload));
         if (action === "createProduct") return createJsonResponse_(createProduct_(body.token, body.payload));

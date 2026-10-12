@@ -180,6 +180,14 @@ if ($LASTEXITCODE -ne 0) { throw "Admin API transport verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin browser auth verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-shell.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin shell verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-dashboard-service.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Dashboard service verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-dashboard-api.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Dashboard API verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-dashboard-ui.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Dashboard UI verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-dashboard-browser.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Dashboard native browser verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-review-service.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Review service verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-reviews-api.js")
