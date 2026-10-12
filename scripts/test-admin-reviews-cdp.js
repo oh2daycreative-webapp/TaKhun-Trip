@@ -91,7 +91,9 @@ class CdpClient {
     this.pending = new Map();
     this.listeners = new Map();
     this.eventWaiters = new Set();
+    this.shutdownListeners = new Set();
     this.closed = false;
+    this.shutdownError = null;
     socket.addEventListener("message", event => this.onMessage(event));
     socket.addEventListener("close", () => this.shutdown(new Error("CDP WebSocket closed.")));
     socket.addEventListener("error", () => this.shutdown(new Error("CDP WebSocket failed.")));
@@ -116,7 +118,11 @@ class CdpClient {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`CDP ${method} timed out after ${this.commandTimeoutMs} ms.`)); }, this.commandTimeoutMs);
       this.pending.set(id, { resolve, reject, timer, method });
-      this.socket.send(JSON.stringify(Object.assign({ id, method, params }, sessionId ? { sessionId } : {})));
+      try {
+        this.socket.send(JSON.stringify(Object.assign({ id, method, params }, sessionId ? { sessionId } : {})));
+      } catch (error) {
+        this.pending.delete(id); clearTimeout(timer); reject(error);
+      }
     });
   }
 
@@ -143,9 +149,19 @@ class CdpClient {
     listeners.delete(listener); if (!listeners.size) this.listeners.delete(method);
   }
 
+  onShutdown(listener) {
+    if (this.closed) { listener(this.shutdownError || new Error("CDP client closed.")); return; }
+    this.shutdownListeners.add(listener);
+  }
+
+  offShutdown(listener) { this.shutdownListeners.delete(listener); }
+
   shutdown(error = new Error("CDP client closed.")) {
     if (this.closed) return;
     this.closed = true;
+    this.shutdownError = error;
+    for (const listener of [...this.shutdownListeners]) listener(error);
+    this.shutdownListeners.clear();
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error); }
     for (const waiter of this.eventWaiters) { clearTimeout(waiter.timer); waiter.reject(error); }
     this.pending.clear(); this.eventWaiters.clear(); this.listeners.clear();
@@ -167,8 +183,16 @@ class CdpTargetSession {
     this.listeners = new Map();
     this.eventWaiters = new Set();
     this.closed = false;
+    this.closeError = null;
     this.receive = message => this.onMessage(message);
+    this.detach = message => {
+      const params = message && message.params;
+      if (params && params.sessionId === this.sessionId) this.close(new Error("CDP target session detached."));
+    };
+    this.transportShutdown = error => this.close(error || new Error("CDP browser transport closed."));
     browserClient.on("Target.receivedMessageFromTarget", this.receive);
+    browserClient.on("Target.detachedFromTarget", this.detach);
+    if (typeof browserClient.onShutdown === "function") browserClient.onShutdown(this.transportShutdown);
   }
 
   onMessage(message) {
@@ -187,7 +211,7 @@ class CdpTargetSession {
   }
 
   send(method, params = {}) {
-    if (this.closed) return Promise.reject(new Error("CDP target session is closed."));
+    if (this.closed) return Promise.reject(this.closeError || new Error("CDP target session is closed."));
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`CDP ${method} timed out after ${this.commandTimeoutMs} ms.`)); }, this.commandTimeoutMs);
@@ -204,7 +228,7 @@ class CdpTargetSession {
   }
 
   waitForEvent(method, predicate = () => true, timeoutMs = this.commandTimeoutMs) {
-    if (this.closed) return Promise.reject(new Error("CDP target session is closed."));
+    if (this.closed) return Promise.reject(this.closeError || new Error("CDP target session is closed."));
     return new Promise((resolve, reject) => {
       const waiter = { timer:null, reject };
       const listener = params => {
@@ -222,7 +246,10 @@ class CdpTargetSession {
   close(error = new Error("CDP target session closed.")) {
     if (this.closed) return;
     this.closed = true;
+    this.closeError = error;
     this.browserClient.off("Target.receivedMessageFromTarget", this.receive);
+    this.browserClient.off("Target.detachedFromTarget", this.detach);
+    if (typeof this.browserClient.offShutdown === "function") this.browserClient.offShutdown(this.transportShutdown);
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error); }
     for (const waiter of this.eventWaiters) { clearTimeout(waiter.timer); waiter.reject(error); }
     this.pending.clear(); this.eventWaiters.clear(); this.listeners.clear();

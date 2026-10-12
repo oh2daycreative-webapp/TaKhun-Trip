@@ -128,6 +128,90 @@ async function test(name, fn) {
     session.close();
   });
 
+  await test("matching target detach immediately rejects pending command and event while other sessions are ignored", async () => {
+    const listeners=new Map(),browser={closed:false,on(method,listener){if(!listeners.has(method))listeners.set(method,new Set());listeners.get(method).add(listener);},off(method,listener){const set=listeners.get(method);if(set)set.delete(listener);},onShutdown(){},offShutdown(){},async send(){return{};}};
+    const emit=(method,params)=>{for(const listener of listeners.get(method)||[])listener({method,params});};
+    const session=new CdpTargetSession(browser,"SESSION-DETACH",1000);
+    const command=session.send("Page.enable"),event=session.waitForEvent("Page.loadEventFired");
+    const commandRejected=assert.rejects(command,/target session detached/i),eventRejected=assert.rejects(event,/target session detached/i);
+    emit("Target.detachedFromTarget",{sessionId:"OTHER"});
+    assert.equal(session.closed,false);
+    emit("Target.detachedFromTarget",{sessionId:"SESSION-DETACH",reason:"target_closed"});
+    await Promise.all([commandRejected,eventRejected]);
+    assert.equal(session.closed,true);
+    assert.equal(session.pending.size,0);assert.equal(session.eventWaiters.size,0);
+  });
+
+  await test("browser transport close propagates its cause after outer acknowledgement", async () => {
+    class FakeSocket extends EventTarget {
+      send(raw){const message=JSON.parse(raw);queueMicrotask(()=>this.dispatchEvent(new MessageEvent("message",{data:JSON.stringify({id:message.id,result:{}})})));}
+      close(){this.dispatchEvent(new Event("close"));}
+    }
+    const socket=new FakeSocket(),browser=new CdpClient(socket,1000),session=new CdpTargetSession(browser,"SESSION-CLOSE",1000);
+    const command=session.send("Page.enable"),event=session.waitForEvent("Page.loadEventFired");
+    const commandRejected=assert.rejects(command,/WebSocket closed/i),eventRejected=assert.rejects(event,/WebSocket closed/i);
+    await new Promise(resolve=>setImmediate(resolve));
+    socket.dispatchEvent(new Event("close"));
+    await Promise.all([commandRejected,eventRejected]);
+    assert.equal(session.closed,true);
+    assert.equal(browser.shutdownListeners.size,0);
+  });
+
+  await test("browser transport error and already-closed setup retain the causal failure", async () => {
+    class FakeSocket extends EventTarget { send(){} close(){} }
+    const socket=new FakeSocket(),browser=new CdpClient(socket,1000),session=new CdpTargetSession(browser,"SESSION-ERROR",1000);
+    const pending=session.send("Runtime.evaluate"),event=session.waitForEvent("Runtime.executionContextCreated");
+    const pendingRejected=assert.rejects(pending,/WebSocket failed/i),eventRejected=assert.rejects(event,/WebSocket failed/i);
+    socket.dispatchEvent(new Event("error"));
+    await Promise.all([pendingRejected,eventRejected]);
+    const lateSession=new CdpTargetSession(browser,"SESSION-LATE",1000);
+    await assert.rejects(lateSession.send("Page.enable"),/WebSocket failed/i);
+    assert.equal(lateSession.closed,true);
+  });
+
+  await test("outer send rejection immediately clears target pending work", async () => {
+    const listeners=new Map(),failure=new Error("outer send rejected"),browser={closed:false,on(method,listener){if(!listeners.has(method))listeners.set(method,new Set());listeners.get(method).add(listener);},off(method,listener){const set=listeners.get(method);if(set)set.delete(listener);},onShutdown(){},offShutdown(){},send(){return Promise.reject(failure);}};
+    const session=new CdpTargetSession(browser,"SESSION-OUTER",1000);
+    await assert.rejects(session.send("Page.enable"),error=>error===failure);
+    assert.equal(session.pending.size,0);
+    session.close();
+  });
+
+  await test("a synchronous production transport send failure clears outer and inner pending work", async () => {
+    const failure=new Error("socket send failed");
+    class ThrowingSocket extends EventTarget { send(){throw failure;}close(){} }
+    const browser=new CdpClient(new ThrowingSocket(),1000),session=new CdpTargetSession(browser,"SESSION-SEND",1000);
+    await assert.rejects(session.send("Page.enable"),error=>error===failure);
+    assert.equal(browser.pending.size,0);assert.equal(session.pending.size,0);
+    session.close();browser.close();
+  });
+
+  await test("target command timeout ignores late and duplicate responses without retaining listeners", async () => {
+    const listeners=new Map(),messages=[],browser={closed:false,on(method,listener){if(!listeners.has(method))listeners.set(method,new Set());listeners.get(method).add(listener);},off(method,listener){const set=listeners.get(method);if(set)set.delete(listener);},onShutdown(){},offShutdown(){},async send(_method,params){messages.push(JSON.parse(params.message));return{};}};
+    const emit=inner=>{for(const listener of listeners.get("Target.receivedMessageFromTarget")||[])listener({params:{sessionId:"SESSION-LATE",message:JSON.stringify(inner)}});};
+    const session=new CdpTargetSession(browser,"SESSION-LATE",20);
+    await assert.rejects(session.send("Page.enable"),/timed out/);
+    emit({id:messages[0].id,result:{late:true}});
+    const next=session.send("Runtime.enable");
+    emit({id:messages[1].id,result:{ok:true}});emit({id:messages[1].id,result:{duplicate:true}});
+    assert.deepEqual(await next,{ok:true});assert.equal(session.pending.size,0);
+    const event=session.waitForEvent("Page.loadEventFired",()=>true,1000);
+    emit({method:"Page.loadEventFired",params:{marker:1}});emit({method:"Page.loadEventFired",params:{marker:2}});
+    assert.deepEqual(await event,{marker:1});assert.equal(session.eventWaiters.size,0);
+    session.close();
+  });
+
+  await test("close detach and shutdown races are idempotent and release every subscription", () => {
+    const listeners=new Map(),shutdown=new Set(),browser={closed:false,on(method,listener){if(!listeners.has(method))listeners.set(method,new Set());listeners.get(method).add(listener);},off(method,listener){const set=listeners.get(method);if(set)set.delete(listener);},onShutdown(listener){shutdown.add(listener);},offShutdown(listener){shutdown.delete(listener);},async send(){return{};}};
+    const session=new CdpTargetSession(browser,"SESSION-RACE",1000);
+    session.close(new Error("manual close"));session.close(new Error("duplicate close"));
+    for(const listener of shutdown)listener(new Error("late shutdown"));
+    for(const listener of listeners.get("Target.detachedFromTarget")||[])listener({params:{sessionId:"SESSION-RACE"}});
+    assert.equal((listeners.get("Target.receivedMessageFromTarget")||new Set()).size,0);
+    assert.equal((listeners.get("Target.detachedFromTarget")||new Set()).size,0);
+    assert.equal(shutdown.size,0);
+  });
+
   await test("production orchestration creates activates validates and then attaches its page target", async () => {
     const calls=[];
     const client={async send(method,params){calls.push({method,params});if(method==="Target.createTarget")return{targetId:"created-page"};if(method==="Target.getTargetInfo")return{targetInfo:{targetId:"created-page",type:"page",url:"about:blank"}};if(method==="Target.attachToTarget")return{sessionId:"SESSION-1"};return{};}};
