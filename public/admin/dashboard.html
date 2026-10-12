@@ -53,8 +53,27 @@
     <div class="admin-shell__backdrop" data-admin-backdrop hidden></div>
 
     <main class="admin-main" id="admin-main" data-admin-main tabindex="-1" aria-labelledby="page-title">
-      <section class="placeholder" data-admin-content hidden aria-hidden="true">
-        <p>หน้านี้อยู่ระหว่างการจัดเตรียม</p>
+      <section class="admin-dashboard" data-admin-content data-admin-dashboard hidden aria-hidden="true" aria-labelledby="dashboard-summary-title">
+        <div class="admin-dashboard__heading">
+          <div>
+            <h2 id="dashboard-summary-title">สรุปข้อมูล</h2>
+            <p>จำนวนรายการปัจจุบันจากระบบจัดการเนื้อหา</p>
+          </div>
+          <button class="button admin-dashboard__retry" type="button" data-dashboard-retry hidden>ลองโหลดอีกครั้ง</button>
+        </div>
+        <p class="admin-dashboard__status" data-dashboard-status role="status" aria-live="polite" aria-atomic="true">กำลังโหลดข้อมูลภาพรวม…</p>
+        <ul class="admin-dashboard__grid" aria-label="สรุปจำนวนข้อมูล">
+          <li class="admin-dashboard__card"><span>สถานที่ทั้งหมด</span><strong data-dashboard-count="total_places">—</strong></li>
+          <li class="admin-dashboard__card"><span>เส้นทางทั้งหมด</span><strong data-dashboard-count="total_routes">—</strong></li>
+          <li class="admin-dashboard__card"><span>สินค้าและบริการ</span><strong data-dashboard-count="total_products">—</strong></li>
+          <li class="admin-dashboard__card"><span>กิจกรรมทั้งหมด</span><strong data-dashboard-count="total_events">—</strong></li>
+          <li class="admin-dashboard__card"><span>รีวิวรอตรวจสอบ</span><strong data-dashboard-count="pending_reviews">—</strong></li>
+          <li class="admin-dashboard__card"><span>ภาพและวิดีโอ</span><strong data-dashboard-count="total_gallery">—</strong></li>
+        </ul>
+        <section class="admin-dashboard__quick" aria-labelledby="dashboard-quick-title">
+          <h2 id="dashboard-quick-title">ทางลัดจัดการข้อมูล</h2>
+          <nav class="admin-dashboard__links" data-dashboard-links aria-label="ทางลัดไปหน้าจัดการข้อมูล"></nav>
+        </section>
       </section>
     </main>
   </div>
@@ -63,9 +82,10 @@
   <script src="js/admin-api.js" defer></script>
   <script src="js/admin-auth.js" defer></script>
   <script src="js/admin-shell.js" defer></script>
+  <script src="js/admin-dashboard.js" defer></script>
   <script>
     window.addEventListener("DOMContentLoaded", function () {
-      window.TakhunAdminShell.init();
+      window.TakhunAdminDashboard.init();
     });
   </script>
 </body>

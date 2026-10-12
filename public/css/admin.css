@@ -35,6 +35,22 @@
 .admin-main { width: min(100% - 2rem, 72rem); min-width: 0; margin-inline: auto; padding-block: clamp(1.5rem, 4vw, 2.5rem); }
 .admin-main .placeholder { min-width: 0; }
 .admin-main .placeholder h2 { margin-top: 0; }
+.admin-dashboard { min-width: 0; overflow-wrap: anywhere; }
+.admin-dashboard__heading { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.admin-dashboard__heading h2,
+.admin-dashboard__heading p { margin: 0; }
+.admin-dashboard__heading p,
+.admin-dashboard__status { color: var(--color-muted); }
+.admin-dashboard__status { min-height: 1.5em; }
+.admin-dashboard__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: var(--space-4); margin: var(--space-4) 0; padding: 0; list-style: none; }
+.admin-dashboard__card { display: grid; min-width: 0; gap: var(--space-2); padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-card); }
+.admin-dashboard__card span { color: var(--color-muted); font-weight: 750; }
+.admin-dashboard__card strong { color: var(--color-primary-dark); font-size: clamp(2rem, 8vw, 3rem); line-height: 1; }
+.admin-dashboard__quick { margin-top: var(--space-5); }
+.admin-dashboard__links { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: var(--space-3); }
+.admin-dashboard__link { display: inline-flex; min-width: 0; min-height: 44px; align-items: center; justify-content: center; padding: .7rem 1rem; border: 1px solid var(--color-primary); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-primary-dark); font-weight: 800; text-align: center; text-decoration: none; }
+.admin-dashboard__retry { min-width: 44px; min-height: 44px; }
+.admin-dashboard :focus-visible { outline: 3px solid var(--color-primary-dark); outline-offset: 3px; }
 .admin-guard { display: grid; min-height: 100vh; place-items: center; align-content: center; gap: var(--space-3); padding: var(--space-4); text-align: center; }
 .admin-guard__message { max-width: 36rem; margin: 0; color: var(--color-primary-dark); font-weight: 750; }
 .admin-guard__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); }
