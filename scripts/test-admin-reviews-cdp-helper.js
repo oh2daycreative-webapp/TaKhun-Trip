@@ -6,6 +6,7 @@ const path = require("node:path");
 const {
   CdpClient,
   CdpTargetSession,
+  createActivePageTarget,
   keyEventSpec,
   validateLoopbackHttpUrl,
   validateLoopbackWebSocketUrl,
@@ -125,6 +126,15 @@ async function test(name, fn) {
     const session=new CdpTargetSession(browser,"SESSION-2",1000);
     await assert.rejects(session.send("Page.enable"),/CDP Page\.enable failed: blocked/);
     session.close();
+  });
+
+  await test("production orchestration creates activates validates and then attaches its page target", async () => {
+    const calls=[];
+    const client={async send(method,params){calls.push({method,params});if(method==="Target.createTarget")return{targetId:"created-page"};if(method==="Target.getTargetInfo")return{targetInfo:{targetId:"created-page",type:"page",url:"about:blank"}};if(method==="Target.attachToTarget")return{sessionId:"SESSION-1"};return{};}};
+    assert.deepEqual(await createActivePageTarget(client),{targetId:"created-page",sessionId:"SESSION-1"});
+    assert.deepEqual(calls.map(call=>call.method),["Target.createTarget","Target.activateTarget","Target.getTargetInfo","Target.attachToTarget"]);
+    assert.deepEqual(calls[1].params,{targetId:"created-page"});
+    assert.deepEqual(calls[3].params,{targetId:"created-page",flatten:false});
   });
 
   await test("native key routing distinguishes Tab from Space and Enter", () => {

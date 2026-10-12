@@ -268,6 +268,18 @@ function keyEventSpec(key) {
   throw new Error(`Unsupported CDP key: ${key}`);
 }
 
+async function createActivePageTarget(client) {
+  const created = await client.send("Target.createTarget", { url:"about:blank" });
+  if (!created || typeof created.targetId !== "string" || !created.targetId) throw new Error("CDP target creation omitted its target ID.");
+  await client.send("Target.activateTarget", { targetId:created.targetId });
+  const described = await client.send("Target.getTargetInfo", { targetId:created.targetId });
+  const target = described && described.targetInfo;
+  if (!target || target.targetId !== created.targetId || target.type !== "page" || target.url !== "about:blank") throw new Error("CDP created page target did not reach the expected lifecycle state.");
+  const attached = await client.send("Target.attachToTarget", { targetId:created.targetId, flatten:false });
+  if (!attached || typeof attached.sessionId !== "string" || !attached.sessionId) throw new Error("CDP target attach omitted its session ID.");
+  return { targetId:created.targetId, sessionId:attached.sessionId };
+}
+
 async function discover(profile, timeoutMs, signal) {
   const activePort = path.join(profile, "DevToolsActivePort");
   return new Promise((resolve, reject) => {
@@ -330,8 +342,7 @@ async function withCdpBrowser(executable, options, callback) {
     const sessionWork = (async () => {
       const discovery = await discover(profile, timeoutMs, launchAbort.signal);
       client = await connectWebSocket(discovery.webSocketUrl, commandTimeoutMs, launchAbort.signal);
-      const target = await client.send("Target.createTarget", { url: "about:blank" });
-      const attached = await client.send("Target.attachToTarget", { targetId: target.targetId, flatten: false });
+      const attached = await createActivePageTarget(client);
       const sessionId = attached.sessionId;
       targetSession = new CdpTargetSession(client, sessionId, commandTimeoutMs);
       const evaluationValue = result => {
@@ -395,6 +406,7 @@ async function withCdpBrowser(executable, options, callback) {
 module.exports = {
   CdpClient,
   CdpTargetSession,
+  createActivePageTarget,
   keyEventSpec,
   validateLoopbackHttpUrl,
   validateLoopbackWebSocketUrl,
