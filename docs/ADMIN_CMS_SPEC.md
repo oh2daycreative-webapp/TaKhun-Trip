@@ -1374,3 +1374,10 @@ Explicit API methods use the existing authenticated POST-body transport. All wri
 The UI displays Thai field errors, native Boolean controls, paired numeric coordinates and textual Gregorian date/same-day time validation without timezone conversion. Cards, filters and forms share scoped responsive styles, visible focus, labelled controls and live status feedback. URLs remain editable text and are never inserted into active links or remote image elements.
 
 See [non-production QA](M8_PHASE_B_QA.md). Local completion does not claim M8 complete, PR1 merged or deployment completed.
+## Admin Settings 2026-10-13 authority
+
+Admin Settings exposes exactly 12 existing public keys. `maintenance_mode` is excluded and not managed. All authenticated roles read; only `super_admin` writes, without password step-up. The browser preserves a dirty draft across conflict, uncertain result, mixed reconciliation, and failed reconciliation. It never merges or resubmits automatically. Even when a reconciliation read matches submitted values, that proves only the current values; it does not confirm the request or audit. Adopting a new revision requires an explicit user choice.
+
+Current effects are intentionally narrow: `site_name`, slogans, email, phone, Facebook, and LINE affect About. `default_language` does not currently set the public shell language. `logo_url` is not currently rendered. `hero_image_url` does not replace the approved local About asset. `reviews_enabled` and `events_enabled` do not currently control public sections. No public consumer changes belong to this feature.
+
+The backend uses monotonic persisted timestamps, exact revisions, locked cache miss/fill/invalidation, and non-atomic per-cell scattered writes. Pre-existing in-flight cache hits may finish stale. Failed or unverifiable persistence is `OUTCOME_UNKNOWN`. Formula/coercion behavior is simulated locally and is not real Google Sheets evidence. Unknown rows and unrelated values, formulas, formats, and metadata remain untouched.

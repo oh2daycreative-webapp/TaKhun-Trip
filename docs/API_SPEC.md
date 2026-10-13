@@ -2724,3 +2724,12 @@ API ของ **Takhun Trip** ต้องเรียบง่าย ใช้�
 The [Phase A contract](M8_PHASE_A_CONTRACT.md) is authoritative for Product/Event Admin reads, writes, lifecycle, revisions, audit and failure behavior. It supersedes the historical examples in sections 7.12–7.19: create always makes a draft; updates/deletes require `expected_revision`; status assignments follow an explicit transition matrix. Existing action names are preserved, with `adminGetProductDetail` and `adminGetEventDetail` added. All ten actions use authenticated POST-body transport. All four Admin roles can read; only editor/super_admin can write.
 
 Product/Event list/detail, Home and Search cache keys now also include the Script Cache content generation. Existing Place epoch behavior is unchanged. See the contract for exact payload fields, safe error codes, verified-write/audit-warning semantics and Phase B reconciliation requirements. Products/Events UI is not implemented in Phase A.
+## Admin Settings 2026-10-13 authority
+
+This section supersedes older `adminGetSettings` and `updateSettings` examples. Admin Settings manages exactly 12 public keys and `maintenance_mode` is excluded and not managed. Both Admin actions are strict literal POST-body actions. Every authenticated Admin role may call `adminGetSettings`; only `super_admin` may call `updateSettings`. The write payload contains exactly `expected_revision` and a complete twelve-key `settings` object.
+
+Canonical rows must exist exactly once and contain valid values and timestamps. Revision hashes canonical values plus persisted monotonic timestamps, preventing ABA. A no-op changes no cell, timestamp, cache, or audit. Changed writes update only the changed canonical value/timestamp cells and preserve all unrelated rows, columns, formulas, formats, and metadata.
+
+Public cache misses and fills share the script lock with mutation; invalidation is verified before the first write. A pre-existing in-flight cache-hit read may still complete with its old value, but a stale cache miss cannot refill after a successful save. Scattered Google Sheets writes are non-atomic. Any attempted write whose persistence or read-back cannot be verified returns `OUTCOME_UNKNOWN` with `retryable:false` and is never retried automatically.
+
+Formula-backed canonical values are invalid persisted state. Historical literal apostrophes remain literal. New formula-trigger text is rejected, except a complete valid Thai `+66` phone. Apps Script values/formulas/write coercion is simulated by local tests; it is not real Google Sheets evidence.

@@ -188,6 +188,18 @@ if ($LASTEXITCODE -ne 0) { throw "Admin Dashboard API verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin Dashboard UI verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-dashboard-browser.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Dashboard native browser verification failed." }
+& node (Join-Path $PSScriptRoot "test-settings-service.js")
+if ($LASTEXITCODE -ne 0) { throw "Public Settings service verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-settings-service.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Settings service verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-settings-router.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Settings Router verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-settings-api.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Settings API verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-settings-ui.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Settings UI verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-settings-browser.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Settings native browser verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-review-service.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Review service verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-reviews-api.js")
