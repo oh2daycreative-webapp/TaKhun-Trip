@@ -44,22 +44,22 @@ function fixture(role, width, height) {
     .replace(/<script[\s\S]*?<\/script>/g, "")
     .replace("</head>", `<style>${cssSource}</style></head>`)
     .replace("</body>", `<script>
-      window.stats={writes:0,confirms:0};
+      window.stats={writes:0,reads:0,confirms:0,mode:"success"};
       window.confirm=()=>{stats.confirms++;return false};
       window.TakhunAdminAuth={
         readSession:()=>({token:"TOKEN",role:${JSON.stringify(role)}}),logout:async()=>{},
         guardProtectedPage:async({onAuthenticated})=>{const result={status:"authenticated",admin:{role:${JSON.stringify(role)},display_name:"Test Admin"}};onAuthenticated(result);return result}
       };
       window.TakhunAdminApi={
-        getSettings:async()=>({settings:${JSON.stringify(values)},revision:"r1-${"a".repeat(64)}"}),
-        updateSettings:async(_token,payload)=>{stats.writes++;return {settings:payload.settings,revision:"r1-${"b".repeat(64)}",audit_status:"recorded"}}
+        getSettings:async()=>{stats.reads++;if(stats.mode==="uncertain")throw Object.assign(Error("safe"),{code:"NETWORK_ERROR"});const changed=stats.mode!=="success";return {settings:{...${JSON.stringify(values)},main_email:changed?"latest@example.test":"hello@example.test"},revision:"r1-"+(changed?"c":"a").repeat(64)}},
+        updateSettings:async(_token,payload)=>{stats.writes++;if(stats.mode==="conflict")throw Object.assign(Error("safe"),{code:"CONFLICT"});if(stats.mode==="uncertain")throw Object.assign(Error("safe"),{code:"TIMEOUT"});return {settings:payload.settings,revision:"r1-${"b".repeat(64)}",changed:true,audit_status:"unconfirmed"}}
       };
       eval(atob(${JSON.stringify(Buffer.from(shellSource).toString("base64"))}));
       eval(atob(${JSON.stringify(Buffer.from(controllerSource).toString("base64"))}));
       (async()=>{
         const check=(condition,message)=>{if(!condition)throw Error(message)};
         const pause=()=>new Promise(resolve=>setTimeout(resolve,30));
-        await window.TakhunAdminSettings.init();await pause();
+        const controller=await window.TakhunAdminSettings.init();await pause();
         const form=document.querySelector("[data-settings-form]");
         const fields=Array.from(form.elements).filter(field=>field.name);
         const canWrite=${JSON.stringify(role === "super_admin")};
@@ -83,6 +83,22 @@ function fixture(role, width, height) {
           check(document.activeElement===name,"invalid field was not focused");
           name.value="ชื่อใหม่";name.dispatchEvent(new Event("input",{bubbles:true}));form.requestSubmit();await pause();
           check(stats.writes===1,"valid save did not mutate once");
+           const audit=document.querySelector("[data-settings-audit]");
+           check(!audit.hidden&&audit.textContent.includes("audit")&&controller.snapshot().auditStatus==="unconfirmed","unconfirmed audit warning missing hidden="+audit.hidden+" text="+audit.textContent+" state="+JSON.stringify(controller.snapshot()));
+           stats.mode="conflict";controller.setField("site_name","Draft after conflict");
+           try{await controller.save()}catch(_error){}
+           check(controller.snapshot().reconciliationRequired===true,"conflict gate missing");
+           const blockedWrites=stats.writes;controller.setField("site_slogan_en","Reviewed draft");form.requestSubmit();await pause();
+           check(stats.writes===blockedWrites,"DOM allowed blocked conflict resubmit");
+           document.querySelector("[data-settings-keep]").click();await pause();
+           check(controller.snapshot().revision==="r1-"+"c".repeat(64)&&controller.snapshot().draft.site_name==="Draft after conflict","keep-draft revision adoption failed");
+           stats.mode="success";await controller.save();
+           stats.mode="uncertain";controller.setField("site_name","Uncertain draft");
+           try{await controller.save()}catch(_error){}
+           check(controller.snapshot().status==="uncertain"&&controller.snapshot().reconciliationRequired===true,"uncertain gate missing");
+           check(!document.querySelector("[data-settings-retry-read]").hidden,"failed reconciliation retry missing");
+           const uncertainWrites=stats.writes;form.requestSubmit();await pause();check(stats.writes===uncertainWrites,"DOM allowed uncertain resubmit");
+           stats.mode="retryRead";await controller.retryReconciliation();check(controller.snapshot().latest.revision==="r1-"+"c".repeat(64),"read-only reconciliation retry failed");
         }
         document.body.innerHTML="<pre id=result>PASS ${role} ${width}x${height}</pre>";
       })().catch(error=>{document.body.innerHTML="<pre id=result>FAIL "+error.message+"</pre>"});

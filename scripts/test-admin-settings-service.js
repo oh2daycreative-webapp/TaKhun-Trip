@@ -75,7 +75,7 @@ function load(options = {}) {
     LockService: { getScriptLock: () => ({ tryLock: () => options.lockFailure ? false : true, releaseLock() {} }) },
     SpreadsheetApp: { flush: () => { if (options.flushFailure) throw new Error("flush"); } },
     SheetService_readTable_: () => ({ headers: ["log_id", "admin_id", "action", "entity_type", "entity_id", "description", "created_at", "audit_id", "actor_admin_id", "occurred_at"], rows: [] }),
-    SheetService_getSheet_: () => ({ getLastRow: () => 1, getName: () => "activity_logs" }),
+    SheetService_getSheet_: (name) => name === "settings" ? { getRange(row, column) { return { setValue(value) { writeCount += 1; writes.push({ row, column, value }); if (options.failWriteAt === writeCount) throw new Error("write failure"); const key = column === 2 ? "setting_value" : "updated_at"; const entry = rows.find(item => item.sourceRowNumber === row); if (options.coerceFormula && key === "setting_value") { entry.values[key] = value; entry.formulas[key] = "=COERCED()"; } else entry.values[key] = options.readBackMismatch && key === "setting_value" ? "mismatch" : value; } }; }, getLastRow: () => rows.length + 1, getName: () => "settings" } : ({ getLastRow: () => 1, getName: () => "activity_logs" }),
     SheetService_prepareAppendDestination_: (_sheet, headers) => ({ sheet: { getName: () => "activity_logs", getLastRow: () => 1 }, headers, sourceRowNumber: 2 }),
     SheetService_appendObjectWithRow_: () => ({ sourceRowNumber: 2 }),
     console
@@ -90,13 +90,13 @@ function load(options = {}) {
     headerMap: { setting_key: 0, setting_value: 1, description: 2, updated_at: 3 },
     rows
   });
-  context.AdminSettingsService_setCell_ = (entry, field, value) => {
+  if (!options.productionWriter) context.AdminSettingsService_setCell_ = (entry, field, value) => {
     writeCount += 1;
     writes.push({ row: entry.sourceRowNumber, field, value });
     if (options.failWriteAt === writeCount) throw new Error("write failure");
     entry.values[field] = options.readBackMismatch && field === "setting_value" ? "mismatch" : value;
   };
-  context.AdminSettingsService_audit_ = () => options.auditStatus || "recorded";
+  if (!options.productionAudit) context.AdminSettingsService_audit_ = () => options.auditStatus || "recorded";
   return { context, rows, writes, cacheValues };
 }
 
@@ -228,6 +228,58 @@ test("cache invalidation failure occurs before the first scattered write", () =>
   assert.equal(response.ok, false);
   assert.equal(response.error.code, "SERVER_ERROR");
   assert.deepEqual(harness.writes, []);
+});
+
+test("production cell writer reports value timestamp and formula coercion failures without touching unrelated cells", () => {
+  for (const options of [{ failWriteAt: 1 }, { failWriteAt: 2 }, { coerceFormula: true }]) {
+    const rows = tableRows();
+    rows[0].values.description = "keep-me";
+    rows[0].formulas.description = "=UNRELATED()";
+    const harness = load({ role: "super_admin", rows, productionWriter: true, ...options });
+    const current = plain(required(harness.context, "adminGetSettings_")("token"));
+    const response = plain(required(harness.context, "updateSettings_")("token", { expected_revision: current.data.revision, settings: logical({ site_name: "Changed" }) }));
+    assert.equal(response.error.code, "OUTCOME_UNKNOWN");
+    assert.equal(rows[0].values.description, "keep-me");
+    assert.equal(rows[0].formulas.description, "=UNRELATED()");
+    assert.equal(harness.cacheValues.has("public:getSettings"), false);
+  }
+});
+
+test("production audit helper classifies every post-persistence audit failure as unconfirmed", () => {
+  for (const stage of ["uuid", "read", "prepare", "append", "flush", "verify"]) {
+    const harness = load({ role: "super_admin", productionAudit: true });
+    const context = harness.context;
+    if (stage === "uuid") context.Utilities.getUuid = () => { throw new Error("uuid"); };
+    if (stage === "read") context.SheetService_readTable_ = () => { throw new Error("read"); };
+    if (stage === "prepare") context.SheetService_prepareAppendDestination_ = () => { throw new Error("prepare"); };
+    if (stage === "append") context.SheetService_appendObjectWithRow_ = () => { throw new Error("append"); };
+    if (stage === "flush") context.SpreadsheetApp.flush = () => { throw new Error("flush"); };
+    if (stage === "verify") context.SheetService_readTable_ = (() => { let calls=0; return () => ++calls===1 ? { headers:["log_id","admin_id","action","entity_type","entity_id","description","created_at","audit_id","actor_admin_id","occurred_at"], rows:[] } : { headers:[], rows:[] }; })();
+    const status = context.AdminSettingsService_audit_({ admin_id:"ADM-1" }, "r1-"+"a".repeat(64), ["site_name"], "2026-10-13 10:00:01");
+    assert.equal(status, "unconfirmed", stage);
+  }
+});
+
+test("verified settings persistence remains a known success when production audit fails", () => {
+  const harness = load({ role: "super_admin", productionAudit: true });
+  const current = plain(required(harness.context, "adminGetSettings_")("token"));
+  harness.context.Utilities.getUuid = () => { throw new Error("uuid"); };
+  const response = plain(required(harness.context, "updateSettings_")("token", { expected_revision: current.data.revision, settings: logical({ site_name: "Changed" }) }));
+  assert.equal(response.ok, true);
+  assert.equal(response.data.changed, true);
+  assert.equal(response.data.audit_status, "unconfirmed");
+  assert.equal(response.data.settings.site_name, "Changed");
+});
+
+test("audit destination preflight failure is mutation-free and remains distinct from audit warning", () => {
+  const harness = load({ role: "super_admin", productionAudit: true });
+  const current = plain(required(harness.context, "adminGetSettings_")("token"));
+  harness.context.SheetService_prepareAppendDestination_ = () => { throw new Error("preflight"); };
+  const response = plain(required(harness.context, "updateSettings_")("token", { expected_revision: current.data.revision, settings: logical({ site_name: "Changed" }) }));
+  assert.equal(response.ok, false);
+  assert.equal(response.error.code, "SERVER_ERROR");
+  assert.deepEqual(harness.writes, []);
+  assert.equal(harness.cacheValues.has("public:getSettings"), true);
 });
 
 if (process.exitCode) process.exit(process.exitCode);

@@ -211,17 +211,17 @@ function AdminSettingsService_invalidateCache_() {
 }
 
 function AdminSettingsService_audit_(admin, revision, changedKeys, timestamp) {
-  var required = ["log_id", "admin_id", "action", "entity_type", "entity_id", "description", "created_at", "audit_id", "actor_admin_id", "occurred_at"];
-  var table = SheetService_readTable_("activity_logs", required);
-  var auditId = Utilities.getUuid();
-  var record = {
-    log_id: auditId, admin_id: admin.admin_id, action: "UPDATE_SETTINGS", entity_type: "settings", entity_id: "global",
-    description: JSON.stringify({ revision: revision, changed_keys: changedKeys.slice() }), created_at: timestamp,
-    audit_id: auditId, actor_admin_id: admin.admin_id, occurred_at: timestamp
-  };
-  var sheet = SheetService_getSheet_("activity_logs");
-  var prepared = SheetService_prepareAppendDestination_(sheet, table.headers, table.headers);
   try {
+    var required = ["log_id", "admin_id", "action", "entity_type", "entity_id", "description", "created_at", "audit_id", "actor_admin_id", "occurred_at"];
+    var table = SheetService_readTable_("activity_logs", required);
+    var auditId = Utilities.getUuid();
+    var record = {
+      log_id: auditId, admin_id: admin.admin_id, action: "UPDATE_SETTINGS", entity_type: "settings", entity_id: "global",
+      description: JSON.stringify({ revision: revision, changed_keys: changedKeys.slice() }), created_at: timestamp,
+      audit_id: auditId, actor_admin_id: admin.admin_id, occurred_at: timestamp
+    };
+    var sheet = SheetService_getSheet_("activity_logs");
+    var prepared = SheetService_prepareAppendDestination_(sheet, table.headers, table.headers);
     SheetService_appendObjectWithRow_("activity_logs", table.headers, record, prepared);
     SpreadsheetApp.flush();
     var matches = SheetService_readTable_("activity_logs", required).rows.filter(function (entry) { return entry.values.audit_id === auditId; });
