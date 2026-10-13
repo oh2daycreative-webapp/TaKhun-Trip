@@ -375,9 +375,26 @@ test("Settings and Categories cache namespaces ignore Place epoch changes", () =
     const cache = createCache();
     const properties = createProperties("1");
     let reads = 0;
+    let lockHeld = false;
+    let lockAcquisitions = 0;
+    let lockReleases = 0;
     const context = {
       JSON, Object, Math, Number, String, Array, Date, RegExp, encodeURIComponent, isFinite,
       CacheService: { getScriptCache: () => cache },
+      LockService: { getScriptLock: () => ({
+        tryLock(timeout) {
+          assert.equal(timeout, 10000);
+          assert.equal(lockHeld, false);
+          lockHeld = true;
+          lockAcquisitions += 1;
+          return true;
+        },
+        releaseLock() {
+          assert.equal(lockHeld, true);
+          lockHeld = false;
+          lockReleases += 1;
+        }
+      }) },
       PropertiesService: { getScriptProperties: () => properties },
       readSheetObjects_(name) { assert.equal(name, entry.sheet); reads += 1; return []; }
     };
@@ -389,6 +406,10 @@ test("Settings and Categories cache namespaces ignore Place epoch changes", () =
     assert.equal(reads, 1, `${entry.action} must reuse its cache across Place epoch changes`);
     assert.equal(cache.puts.length, 1);
     assert.equal(cache.puts[0].key.includes("place-epoch"), false);
+    const expectedLocks = entry.sheet === "settings" ? 1 : 0;
+    assert.equal(lockAcquisitions, expectedLocks, `${entry.action} lock acquisition count`);
+    assert.equal(lockReleases, expectedLocks, `${entry.action} lock release count`);
+    assert.equal(lockHeld, false, `${entry.action} must not retain the script lock`);
   });
 });
 
