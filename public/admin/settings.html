@@ -53,8 +53,18 @@
     <div class="admin-shell__backdrop" data-admin-backdrop hidden></div>
 
     <main class="admin-main" id="admin-main" data-admin-main tabindex="-1" aria-labelledby="page-title">
-      <section class="placeholder" data-admin-content hidden aria-hidden="true">
-        <p>หน้านี้อยู่ระหว่างการจัดเตรียม</p>
+      <section class="admin-settings" data-admin-content data-admin-settings hidden aria-hidden="true" aria-labelledby="settings-heading">
+        <div class="admin-settings__heading"><div><h2 id="settings-heading">ตั้งค่าเว็บไซต์</h2><p>จัดการข้อมูลสาธารณะ 12 รายการ โดยไม่แตะการตั้งค่าโครงสร้างพื้นฐานหรือข้อมูลลับ</p></div></div>
+        <p class="admin-settings__status" data-settings-status aria-live="polite" aria-atomic="true">กำลังโหลดการตั้งค่า…</p>
+        <button type="button" class="button" data-settings-load-retry>ลองโหลดการตั้งค่าอีกครั้ง</button>
+        <p class="admin-settings__status" data-settings-audit hidden aria-live="polite" aria-atomic="true"></p>
+        <div class="admin-settings__reconcile" data-settings-reconcile hidden><p>มีข้อมูลล่าสุดจากเซิร์ฟเวอร์ แบบร่างจะไม่ถูกแทนที่จนกว่าคุณจะเลือก และระบบจะไม่ส่งคำขอบันทึกซ้ำอัตโนมัติ</p><p data-settings-changes></p><button type="button" class="button" data-settings-adopt>ใช้ค่าล่าสุดและทิ้งแบบร่าง</button><button type="button" class="button" data-settings-keep>เก็บแบบร่างและใช้ revision ล่าสุด</button><button type="button" class="button" data-settings-retry-read hidden>ลองอ่านค่าล่าสุดอีกครั้ง</button></div>
+        <form class="admin-settings__form" data-settings-form>
+          <fieldset><legend>ข้อมูลเว็บไซต์</legend><label>ชื่อเว็บไซต์<input name="site_name" required maxlength="120"></label><label>สโลแกนภาษาไทย<input name="site_slogan_th" required maxlength="300"></label><label>สโลแกนภาษาอังกฤษ<input name="site_slogan_en" maxlength="300"></label><label>ภาษาเริ่มต้น<select name="default_language" required><option value="th">ไทย</option><option value="en">English</option></select><small><code>default_language</code> ยังไม่เปลี่ยนภาษาเริ่มต้นของ public shell</small></label></fieldset>
+          <fieldset><legend>ช่องทางติดต่อ</legend><label>อีเมลหลัก<input name="main_email" type="email" maxlength="254"></label><label>โทรศัพท์หลัก<input name="main_phone" type="tel" maxlength="40" placeholder="+66 77 123 456"></label><label>Facebook URL<input name="facebook_url" type="url" maxlength="2048"></label><label>LINE URL<input name="line_url" type="url" maxlength="2048"></label></fieldset>
+          <fieldset><legend>รูปภาพและสถานะการแสดงผล</legend><label>Logo URL<input name="logo_url" type="url" maxlength="2048"><small><code>logo_url</code> ยังไม่ถูกนำไปแสดงบนเว็บสาธารณะ</small></label><label>Hero Image URL<input name="hero_image_url" type="url" maxlength="2048"><small><code>hero_image_url</code> ไม่แทน media asset ของหน้า About ในงานนี้</small></label><label class="admin-settings__check"><input name="reviews_enabled" type="checkbox"> เปิดรีวิว</label><small><code>reviews_enabled</code> ยังไม่ควบคุมส่วนรีวิวสาธารณะ</small><label class="admin-settings__check"><input name="events_enabled" type="checkbox"> เปิดกิจกรรม</label><small><code>events_enabled</code> ยังไม่ควบคุมส่วนกิจกรรมสาธารณะ</small></fieldset>
+          <div class="admin-settings__actions"><button class="button" type="submit" data-settings-save>บันทึก</button><button class="button" type="button" data-settings-discard>คืนค่าในแบบฟอร์ม</button></div>
+        </form>
       </section>
     </main>
   </div>
@@ -63,9 +73,10 @@
   <script src="js/admin-api.js" defer></script>
   <script src="js/admin-auth.js" defer></script>
   <script src="js/admin-shell.js" defer></script>
+  <script src="js/admin-settings.js" defer></script>
   <script>
     window.addEventListener("DOMContentLoaded", function () {
-      window.TakhunAdminShell.init();
+      window.TakhunAdminSettings.init();
     });
   </script>
 </body>

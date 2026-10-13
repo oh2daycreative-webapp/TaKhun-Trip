@@ -46,6 +46,7 @@ function assertRouterBoundary(source) {
     "adminGetGallery", "adminGetGalleryDetail", "adminGetGalleryMediaOptions",
     "createGalleryItem", "updateGalleryItem", "deleteGalleryItem",
     "adminGetReviews", "adminGetReviewDetail", "approveReview", "hideReview", "replyReview", "clearReviewReply", "deleteReview",
+    "adminGetSettings", "updateSettings",
     "submitReview", "adminLogin", "adminValidateSession", "adminLogout",
     "adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace",
     "adminInspectPlaceDependencies", "adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace",

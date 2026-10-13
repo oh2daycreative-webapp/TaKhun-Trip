@@ -322,10 +322,10 @@ test("all protected pages load exact dependencies in safe order and explicitly i
     const positions = ordered.map((src) => html.indexOf(`<script src="${src}" defer></script>`));
     assert.equal(positions.every((position) => position >= 0), true, `${key}: missing dependency`);
     assert.equal(positions.every((position, index) => index === 0 || positions[index - 1] < position), true, `${key}: script order`);
-    if (["dashboard", "places", "place-edit", "routes", "products", "events", "reviews", "gallery"].includes(key)) {
+    if (["dashboard", "places", "place-edit", "routes", "products", "events", "reviews", "gallery", "settings"].includes(key)) {
       const content = key === "products" || key === "events";
-      const controller = key === "dashboard" ? "admin-dashboard" : content ? "admin-content-ui" : key === "places" ? "admin-places" : key === "routes" ? "admin-routes" : key === "reviews" ? "admin-reviews" : key === "gallery" ? "admin-gallery" : "admin-place-edit";
-      const initializer = key === "dashboard" ? "TakhunAdminDashboard" : content ? "TakhunAdminContentUI" : key === "places" ? "TakhunAdminPlaces" : key === "routes" ? "TakhunAdminRoutes" : key === "reviews" ? "TakhunAdminReviews" : key === "gallery" ? "TakhunAdminGallery" : "TakhunAdminPlaceEdit";
+      const controller = key === "dashboard" ? "admin-dashboard" : content ? "admin-content-ui" : key === "places" ? "admin-places" : key === "routes" ? "admin-routes" : key === "reviews" ? "admin-reviews" : key === "gallery" ? "admin-gallery" : key === "settings" ? "admin-settings" : "admin-place-edit";
+      const initializer = key === "dashboard" ? "TakhunAdminDashboard" : content ? "TakhunAdminContentUI" : key === "places" ? "TakhunAdminPlaces" : key === "routes" ? "TakhunAdminRoutes" : key === "reviews" ? "TakhunAdminReviews" : key === "gallery" ? "TakhunAdminGallery" : key === "settings" ? "TakhunAdminSettings" : "TakhunAdminPlaceEdit";
       const controllerPosition = html.indexOf(`<script src="js/${controller}.js" defer></script>`);
       assert.equal(controllerPosition > positions[positions.length - 1], true, `${key}: controller dependency`);
       assert.equal(occurrences(html, new RegExp(`${initializer}\\.init\\(\\)`, "g")), 1, `${key}: controller init invocation`);
@@ -337,11 +337,11 @@ test("all protected pages load exact dependencies in safe order and explicitly i
   }
 });
 
-test("protected placeholders retain Milestone intent without metrics CRUD moderation or settings UI", () => {
+test("remaining protected placeholders retain Milestone intent without out-of-scope UI", () => {
   const forbidden = /(?:metric|analytics|chart|<table\b|<form\b|data-admin-(?:count|create|edit|delete|publish|upload)|เพิ่ม|แก้ไข|ลบ|เผยแพร่|อัปโหลด|อนุมัติรีวิว|จัดการบทบาท|language-switch)/i;
   for (const [key] of pageFixtures) {
     const html = htmlFor(key);
-    if (["dashboard", "places", "place-edit", "routes", "products", "events", "reviews", "gallery"].includes(key)) continue;
+    if (["dashboard", "places", "place-edit", "routes", "products", "events", "reviews", "gallery", "settings"].includes(key)) continue;
     assert.match(html, /class="placeholder"/);
     if (key !== "404") assert.match(html, /หน้านี้อยู่ระหว่างการจัดเตรียม/);
     else assert.match(html, /ไม่พบหน้า Admin/);

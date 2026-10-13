@@ -59,6 +59,7 @@ function load(options = {}) {
   const context = {
     JSON, Object, Math, Number, String, Array, RegExp, encodeURIComponent, isFinite,
     CacheService: options.cacheService || { getScriptCache: () => store },
+    LockService: options.lockService || { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) },
     readSheetObjects_: options.readSheetObjects_ || ((name) => {
       reads.push(name);
       assert.equal(name, "settings");
@@ -137,6 +138,20 @@ test("settings return an empty successful object for empty headers-only or malfo
   }
 });
 
+test("settings omit formula-backed canonical cells without reinterpreting literal apostrophes", () => {
+  const { context } = load({ rows: [] });
+  const build = required(context, "SettingsService_buildSettingsResponse_");
+  const response = plain(build([
+    { sourceRowNumber: 2, values: { setting_key: "site_name", setting_value: "Computed" }, formulas: { setting_value: "=A1" } },
+    { sourceRowNumber: 3, values: { setting_key: "site_slogan_th", setting_value: "'=historical" }, formulas: { setting_value: "" } },
+    { sourceRowNumber: 4, values: { setting_key: "main_phone", setting_value: "+66 77 123 456" }, formulas: { setting_value: "" } }
+  ]));
+  assert.deepEqual(response.data, {
+    site_slogan_th: "'=historical",
+    main_phone: "+66 77 123 456"
+  });
+});
+
 test("settings cache uses one normalized key and 600 seconds", () => {
   const store = createCache();
   const { context, reads } = load({ cache: store });
@@ -148,6 +163,23 @@ test("settings cache uses one normalized key and 600 seconds", () => {
   assert.equal(store.puts.length, 1);
   assert.equal(store.puts[0].key, "public:getSettings");
   assert.equal(store.puts[0].ttl, 600);
+});
+
+test("settings cache miss locks and double-checks before sheet read or fill", () => {
+  const cached = { ok: true, data: { site_name: "Filled by prior in-flight reader" }, message: "success" };
+  let gets = 0;
+  let locks = 0;
+  const store = createCache();
+  store.get = () => (++gets === 1 ? null : JSON.stringify(cached));
+  const harness = load({
+    cache: store,
+    lockService: { getScriptLock: () => ({ tryLock() { locks += 1; return true; }, releaseLock() {} }) }
+  });
+  assert.deepEqual(plain(required(harness.context, "getSettings_")({})), cached);
+  assert.equal(locks, 1);
+  assert.equal(gets, 2);
+  assert.deepEqual(harness.reads, []);
+  assert.equal(store.puts.length, 0);
 });
 
 test("settings reject malformed or unsafe cached success shapes and reload", () => {

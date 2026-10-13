@@ -1168,3 +1168,9 @@ Retain all Admin Places and public regressions. Run all three focused suites, `c
 
 ## 32. M8 PR1 Phase B.1 remediation regressions
 The mandatory Phase B runner includes the narrow native-browser `test-admin-content-browser.js`. It covers Product/Event related-Place Enter isolation, Save behavior, intentional numeric blanks, native `badInput`, field feedback/focus and valid numeric normalization. API contracts cover exact legacy content metadata `YYYY-MM-DD HH:mm:ss` for Product/Event list/detail while authentication timestamps remain strict ISO. Lifecycle expectations use a separately declared literal matrix for both domains.
+## Admin Settings local regressions
+
+- Run backend model/mutation tests for exactly 12 keys, all read roles, super-admin writes, validation, valid `+66`, historical apostrophes, formula detection, ABA timestamps, no-op audit behavior, cache interleavings, and partial value/timestamp failures.
+- Run exact Router and Admin API tests plus UI controller tests for dirty drafts, conflict and uncertain reconciliation, explicit revision adoption, and no automatic resubmit.
+- Run public Settings and About regressions. Apps Script storage/coercion is simulated; it is not real Google Sheets evidence.
+- Run native shell tests at 1280×900, 390×844, and 360×800, then `npm.cmd test`, `npm.cmd run build`, syntax checks, and `git diff --check`.
