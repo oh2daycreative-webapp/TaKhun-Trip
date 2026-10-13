@@ -9,6 +9,8 @@ var SettingsService_BOOLEAN_KEYS_ = ["reviews_enabled", "events_enabled"];
 
 function getSettings_(_parameters) {
   var cache = null;
+  var lock = null;
+  var acquired = false;
   try {
     cache = CacheService.getScriptCache();
     var cached = cache.get(SettingsService_CACHE_KEY_);
@@ -20,15 +22,35 @@ function getSettings_(_parameters) {
     // Cache failures and malformed cache entries must not prevent a public sheet read.
   }
 
-  var response = SettingsService_buildSettingsResponse_(SettingsService_readTable_().rows);
-  if (response && response.ok === true) {
-    try {
-      if (cache) cache.put(SettingsService_CACHE_KEY_, JSON.stringify(response), SettingsService_CACHE_SECONDS_);
-    } catch (_settingsCacheWriteError) {
-      // Return the successful uncached response.
+  try {
+    lock = LockService.getScriptLock();
+    if (!lock.tryLock(10000)) throw new Error("CONTENT_LOCK");
+    acquired = true;
+    if (cache) {
+      try {
+        var secondCached = cache.get(SettingsService_CACHE_KEY_);
+        if (secondCached) {
+          try {
+            var secondParsed = JSON.parse(secondCached);
+            if (SettingsService_validCachedResponse_(secondParsed)) return secondParsed;
+          } catch (_settingsSecondCacheParseError) { /* Replace malformed cache below. */ }
+        }
+      } catch (_settingsSecondCacheReadError) { cache = null; }
+    }
+    var response = SettingsService_buildSettingsResponse_(SettingsService_readTable_().rows);
+    if (response && response.ok === true) {
+      try {
+        if (cache) cache.put(SettingsService_CACHE_KEY_, JSON.stringify(response), SettingsService_CACHE_SECONDS_);
+      } catch (_settingsCacheWriteError) {
+        // Return the successful uncached response.
+      }
+    }
+    return response;
+  } finally {
+    if (acquired) {
+      try { lock.releaseLock(); } catch (_settingsLockReleaseError) { /* Preserve the read result. */ }
     }
   }
-  return response;
 }
 
 function SettingsService_buildSettingsResponse_(sourceRows) {

@@ -46,6 +46,9 @@ function tableRows(settings = logical(), overrides = {}) {
 
 function load(options = {}) {
   const rows = options.rows || tableRows();
+  const cacheValues = new Map([["public:getSettings", "stale"]]);
+  const writes = [];
+  let writeCount = 0;
   const context = {
     JSON, Object, Math, Number, String, Array, RegExp, Date, Map, Set,
     encodeURIComponent, decodeURIComponent, isFinite,
@@ -65,7 +68,17 @@ function load(options = {}) {
     }),
     CryptoService_utf8Bytes_: (value) => Array.from(Buffer.from(value, "utf8")),
     CryptoService_sha256_: (bytes) => Array.from(require("node:crypto").createHash("sha256").update(Buffer.from(bytes)).digest()),
-    LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) }
+    CacheService: { getScriptCache: () => ({
+      get: (key) => cacheValues.has(key) ? cacheValues.get(key) : null,
+      remove: (key) => { if (options.cacheRemoveFailure) throw new Error("cache remove"); cacheValues.delete(key); }
+    }) },
+    LockService: { getScriptLock: () => ({ tryLock: () => options.lockFailure ? false : true, releaseLock() {} }) },
+    SpreadsheetApp: { flush: () => { if (options.flushFailure) throw new Error("flush"); } },
+    SheetService_readTable_: () => ({ headers: ["log_id", "admin_id", "action", "entity_type", "entity_id", "description", "created_at", "audit_id", "actor_admin_id", "occurred_at"], rows: [] }),
+    SheetService_getSheet_: () => ({ getLastRow: () => 1, getName: () => "activity_logs" }),
+    SheetService_prepareAppendDestination_: (_sheet, headers) => ({ sheet: { getName: () => "activity_logs", getLastRow: () => 1 }, headers, sourceRowNumber: 2 }),
+    SheetService_appendObjectWithRow_: () => ({ sourceRowNumber: 2 }),
+    console
   };
   vm.createContext(context);
   for (const file of ["apps-script/SettingsService.gs", "apps-script/AdminSettingsService.gs"]) {
@@ -77,7 +90,14 @@ function load(options = {}) {
     headerMap: { setting_key: 0, setting_value: 1, description: 2, updated_at: 3 },
     rows
   });
-  return context;
+  context.AdminSettingsService_setCell_ = (entry, field, value) => {
+    writeCount += 1;
+    writes.push({ row: entry.sourceRowNumber, field, value });
+    if (options.failWriteAt === writeCount) throw new Error("write failure");
+    entry.values[field] = options.readBackMismatch && field === "setting_value" ? "mismatch" : value;
+  };
+  context.AdminSettingsService_audit_ = () => options.auditStatus || "recorded";
+  return { context, rows, writes, cacheValues };
 }
 
 function required(context, name) {
@@ -92,7 +112,7 @@ function test(name, fn) {
 
 test("all authenticated roles read one exact canonical projection and revision", () => {
   for (const role of ["super_admin", "editor", "reviewer", "viewer"]) {
-    const context = load({ role });
+    const { context } = load({ role });
     const response = plain(required(context, "adminGetSettings_")("token"));
     assert.equal(response.ok, true);
     assert.deepEqual(response.data.settings, logical());
@@ -109,7 +129,7 @@ test("Admin reads fail closed for missing duplicate formula or invalid timestamp
     tableRows(logical(), { updated_at: "not-a-time" })
   ];
   for (const rows of cases) {
-    const response = plain(required(load({ rows }), "adminGetSettings_")("token"));
+    const response = plain(required(load({ rows }).context, "adminGetSettings_")("token"));
     assert.equal(response.ok, false);
     assert.equal(response.error.code, "SETTINGS_SCHEMA");
   }
@@ -117,14 +137,14 @@ test("Admin reads fail closed for missing duplicate formula or invalid timestamp
 
 test("historical apostrophes and valid +66 phones round-trip as literal logical values", () => {
   const rows = tableRows(logical({ site_slogan_en: "'=historical", main_phone: "+66 81 234 5678" }));
-  const response = plain(required(load({ rows }), "adminGetSettings_")("token"));
+  const response = plain(required(load({ rows }).context, "adminGetSettings_")("token"));
   assert.equal(response.ok, true);
   assert.equal(response.data.settings.site_slogan_en, "'=historical");
   assert.equal(response.data.settings.main_phone, "+66 81 234 5678");
 });
 
 test("request validation accepts the approved fields and rejects coercion unsafe forms", () => {
-  const context = load();
+  const { context } = load();
   const validate = required(context, "AdminSettingsService_validateRequestSettings_");
   assert.deepEqual(plain(validate(logical())), logical());
   for (const candidate of [
@@ -141,11 +161,73 @@ test("request validation accepts the approved fields and rejects coercion unsafe
 });
 
 test("Date and equivalent timestamp strings produce the same revision", () => {
-  const context = load();
+  const { context } = load();
   const revision = required(context, "AdminSettingsService_revision_");
   const stringRows = tableRows();
   const dateRows = tableRows().map((row) => ({ ...row, values: { ...row.values, updated_at: new Date("2026-10-13T10:00:00.000Z") } }));
   assert.equal(revision(required(context, "AdminSettingsService_canonical_")(stringRows)), revision(required(context, "AdminSettingsService_canonical_")(dateRows)));
+});
+
+test("super admin full replacement writes only changed value and timestamp cells after cache invalidation", () => {
+  const harness = load({ role: "super_admin" });
+  const current = plain(required(harness.context, "adminGetSettings_")("token"));
+  const replacement = logical({ site_name: "Takhun Trip New", main_phone: "+66 81 234 5678" });
+  const response = plain(required(harness.context, "updateSettings_")("token", { expected_revision: current.data.revision, settings: replacement }));
+  assert.equal(response.ok, true);
+  assert.equal(response.data.changed, true);
+  assert.equal(response.data.audit_status, "recorded");
+  assert.deepEqual(response.data.settings, replacement);
+  assert.notEqual(response.data.revision, current.data.revision);
+  assert.equal(harness.cacheValues.has("public:getSettings"), false);
+  assert.deepEqual(harness.writes.map((write) => write.field), ["setting_value", "updated_at", "setting_value", "updated_at"]);
+  assert.deepEqual(new Set(harness.writes.map((write) => write.row)), new Set([2, 7]));
+});
+
+test("no-op keeps revision cache timestamps and audit untouched", () => {
+  const harness = load({ role: "super_admin" });
+  const current = plain(required(harness.context, "adminGetSettings_")("token"));
+  const response = plain(required(harness.context, "updateSettings_")("token", { expected_revision: current.data.revision, settings: logical() }));
+  assert.deepEqual(response, { ok: true, data: { settings: logical(), revision: current.data.revision, changed: false, audit_status: "not_applicable" }, message: "success" });
+  assert.deepEqual(harness.writes, []);
+  assert.equal(harness.cacheValues.has("public:getSettings"), true);
+});
+
+test("writes reject non-super-admin stale and malformed full replacements before persistence", () => {
+  for (const fixture of [
+    { harness: load({ role: "editor" }), revision: /^r1-/ },
+    { harness: load({ role: "super_admin" }), revision: "r1-" + "0".repeat(64) }
+  ]) {
+    const current = plain(required(fixture.harness.context, "adminGetSettings_")("token"));
+    const expected = typeof fixture.revision === "string" ? fixture.revision : current.data.revision;
+    const response = plain(required(fixture.harness.context, "updateSettings_")("token", { expected_revision: expected, settings: logical({ site_name: "Changed" }) }));
+    assert.equal(response.ok, false);
+    assert.equal(response.error.code, typeof fixture.revision === "string" ? "CONFLICT" : "FORBIDDEN");
+    assert.deepEqual(fixture.harness.writes, []);
+  }
+  const malformed = load({ role: "super_admin" });
+  const response = plain(required(malformed.context, "updateSettings_")("token", { expected_revision: "bad", settings: logical() }));
+  assert.equal(response.error.code, "VALIDATION_ERROR");
+  assert.deepEqual(malformed.writes, []);
+});
+
+test("partial value timestamp flush and read-back failures remain OUTCOME_UNKNOWN with cache absent", () => {
+  for (const options of [{ failWriteAt: 2 }, { flushFailure: true }, { readBackMismatch: true }]) {
+    const harness = load({ role: "super_admin", ...options });
+    const current = plain(required(harness.context, "adminGetSettings_")("token"));
+    const response = plain(required(harness.context, "updateSettings_")("token", { expected_revision: current.data.revision, settings: logical({ site_name: "Changed" }) }));
+    assert.equal(response.ok, false);
+    assert.deepEqual(response.error, { code: "OUTCOME_UNKNOWN", message: "The result is uncertain. Reload and reconcile; do not retry automatically.", retryable: false });
+    assert.equal(harness.cacheValues.has("public:getSettings"), false);
+  }
+});
+
+test("cache invalidation failure occurs before the first scattered write", () => {
+  const harness = load({ role: "super_admin", cacheRemoveFailure: true });
+  const current = plain(required(harness.context, "adminGetSettings_")("token"));
+  const response = plain(required(harness.context, "updateSettings_")("token", { expected_revision: current.data.revision, settings: logical({ site_name: "Changed" }) }));
+  assert.equal(response.ok, false);
+  assert.equal(response.error.code, "SERVER_ERROR");
+  assert.deepEqual(harness.writes, []);
 });
 
 if (process.exitCode) process.exit(process.exitCode);

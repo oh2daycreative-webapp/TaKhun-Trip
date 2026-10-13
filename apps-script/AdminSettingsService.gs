@@ -165,3 +165,118 @@ function adminGetSettings_(token) {
     return { ok: true, data: { settings: canonical.settings, revision: AdminSettingsService_revision_(canonical) }, message: "success" };
   } catch (error) { return AdminSettingsService_errorResponse_(error); }
 }
+
+function AdminSettingsService_revisionInput_(value) {
+  if (typeof value !== "string" || !/^r1-[a-f0-9]{64}$/.test(value)) throw new Error("VALIDATION_ERROR");
+  return value;
+}
+
+function AdminSettingsService_mutationPayload_(payload) {
+  AdminSettingsService_exactObject_(payload, ["expected_revision", "settings"], "VALIDATION_ERROR");
+  return { expected_revision: AdminSettingsService_revisionInput_(payload.expected_revision), settings: AdminSettingsService_validateRequestSettings_(payload.settings) };
+}
+
+function AdminSettingsService_timestampMillis_(value) {
+  var parts = AdminSettingsService_timestamp_(value).match(/\d+/g).map(Number);
+  return Date.UTC(parts[0], parts[1] - 1, parts[2], parts[3], parts[4], parts[5]);
+}
+
+function AdminSettingsService_timestampFromMillis_(value) {
+  var date = new Date(value);
+  function two(number) { return ("0" + number).slice(-2); }
+  return date.getUTCFullYear() + "-" + two(date.getUTCMonth() + 1) + "-" + two(date.getUTCDate()) + " " + two(date.getUTCHours()) + ":" + two(date.getUTCMinutes()) + ":" + two(date.getUTCSeconds());
+}
+
+function AdminSettingsService_nextTimestamp_(canonical) {
+  var now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
+  var maximum = AdminSettingsService_KEYS_.reduce(function (value, key) { return Math.max(value, AdminSettingsService_timestampMillis_(canonical.timestamps[key])); }, 0);
+  return AdminSettingsService_timestampFromMillis_(Math.max(AdminSettingsService_timestampMillis_(now), maximum + 1000));
+}
+
+function AdminSettingsService_storageValue_(key, value) {
+  if (AdminSettingsService_BOOLEAN_KEYS_.indexOf(key) >= 0) return value ? "TRUE" : "FALSE";
+  return value;
+}
+
+function AdminSettingsService_setCell_(entry, field, value, table) {
+  var sheet = SheetService_getSheet_("settings");
+  if (!entry || !Number.isSafeInteger(entry.sourceRowNumber) || !table || !Object.prototype.hasOwnProperty.call(table.headerMap, field)) throw new Error("SETTINGS_SCHEMA");
+  sheet.getRange(entry.sourceRowNumber, table.headerMap[field] + 1).setValue(value);
+}
+
+function AdminSettingsService_invalidateCache_() {
+  var cache = CacheService.getScriptCache();
+  cache.remove(SettingsService_CACHE_KEY_);
+  if (cache.get(SettingsService_CACHE_KEY_) !== null) throw new Error("SETTINGS_CACHE_INVALIDATION");
+}
+
+function AdminSettingsService_audit_(admin, revision, changedKeys, timestamp) {
+  var required = ["log_id", "admin_id", "action", "entity_type", "entity_id", "description", "created_at", "audit_id", "actor_admin_id", "occurred_at"];
+  var table = SheetService_readTable_("activity_logs", required);
+  var auditId = Utilities.getUuid();
+  var record = {
+    log_id: auditId, admin_id: admin.admin_id, action: "UPDATE_SETTINGS", entity_type: "settings", entity_id: "global",
+    description: JSON.stringify({ revision: revision, changed_keys: changedKeys.slice() }), created_at: timestamp,
+    audit_id: auditId, actor_admin_id: admin.admin_id, occurred_at: timestamp
+  };
+  var sheet = SheetService_getSheet_("activity_logs");
+  var prepared = SheetService_prepareAppendDestination_(sheet, table.headers, table.headers);
+  try {
+    SheetService_appendObjectWithRow_("activity_logs", table.headers, record, prepared);
+    SpreadsheetApp.flush();
+    var matches = SheetService_readTable_("activity_logs", required).rows.filter(function (entry) { return entry.values.audit_id === auditId; });
+    if (matches.length !== 1 || matches[0].sourceRowNumber !== prepared.sourceRowNumber) throw new Error("AUDIT_VERIFY");
+    return "recorded";
+  } catch (_auditError) { return "unconfirmed"; }
+}
+
+function AdminSettingsService_write_(admin, payload) {
+  var table = SettingsService_readTable_();
+  var current = AdminSettingsService_canonical_(table.rows);
+  var currentRevision = AdminSettingsService_revision_(current);
+  if (currentRevision !== payload.expected_revision) throw new Error("CONFLICT");
+  var changedKeys = AdminSettingsService_KEYS_.filter(function (key) { return current.settings[key] !== payload.settings[key]; });
+  if (!changedKeys.length) return { settings: current.settings, revision: currentRevision, changed: false, audit_status: "not_applicable" };
+
+  var timestamp = AdminSettingsService_nextTimestamp_(current);
+  // Validate the existing audit destination before invalidating cache or writing settings.
+  var auditHeaders = ["log_id", "admin_id", "action", "entity_type", "entity_id", "description", "created_at", "audit_id", "actor_admin_id", "occurred_at"];
+  var auditTable = SheetService_readTable_("activity_logs", auditHeaders);
+  SheetService_prepareAppendDestination_(SheetService_getSheet_("activity_logs"), auditTable.headers, auditTable.headers);
+  AdminSettingsService_invalidateCache_();
+
+  var attempted = false;
+  try {
+    changedKeys.forEach(function (key) {
+      attempted = true;
+      AdminSettingsService_setCell_(current.entries[key], "setting_value", AdminSettingsService_storageValue_(key, payload.settings[key]), table);
+      AdminSettingsService_setCell_(current.entries[key], "updated_at", timestamp, table);
+    });
+    SpreadsheetApp.flush();
+    var verified = AdminSettingsService_canonical_(SettingsService_readTable_().rows);
+    AdminSettingsService_KEYS_.forEach(function (key) {
+      if (verified.settings[key] !== payload.settings[key] || verified.entries[key].sourceRowNumber !== current.entries[key].sourceRowNumber) throw new Error("SETTINGS_VERIFY");
+      if (changedKeys.indexOf(key) >= 0 && verified.timestamps[key] !== timestamp) throw new Error("SETTINGS_VERIFY");
+    });
+    var revision = AdminSettingsService_revision_(verified);
+    return { settings: verified.settings, revision: revision, changed: true, audit_status: AdminSettingsService_audit_(admin, revision, changedKeys, timestamp) };
+  } catch (error) {
+    if (attempted) throw new Error("OUTCOME_UNKNOWN");
+    throw error;
+  }
+}
+
+function updateSettings_(token, payload) {
+  var lock = null;
+  var acquired = false;
+  try {
+    AdminSettingsService_authorize_(token, ["super_admin"]);
+    var parsed = AdminSettingsService_mutationPayload_(payload);
+    lock = LockService.getScriptLock();
+    if (!lock.tryLock(10000)) throw new Error("CONTENT_LOCK");
+    acquired = true;
+    var admin = AdminSettingsService_authorize_(token, ["super_admin"]);
+    return { ok: true, data: AdminSettingsService_write_(admin, parsed), message: "success" };
+  } catch (error) { return AdminSettingsService_errorResponse_(error); }
+  finally { if (acquired) { try { lock.releaseLock(); } catch (_releaseError) { /* Preserve known result. */ } } }
+}
