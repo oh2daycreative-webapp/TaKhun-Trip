@@ -20,7 +20,7 @@ function getSettings_(_parameters) {
     // Cache failures and malformed cache entries must not prevent a public sheet read.
   }
 
-  var response = SettingsService_buildSettingsResponse_(readSheetObjects_("settings"));
+  var response = SettingsService_buildSettingsResponse_(SettingsService_readTable_().rows);
   if (response && response.ok === true) {
     try {
       if (cache) cache.put(SettingsService_CACHE_KEY_, JSON.stringify(response), SettingsService_CACHE_SECONDS_);
@@ -36,10 +36,13 @@ function SettingsService_buildSettingsResponse_(sourceRows) {
   var booleanKeys = SettingsService_keyMap_(SettingsService_BOOLEAN_KEYS_);
   var values = Object.create(null);
 
-  (Array.isArray(sourceRows) ? sourceRows : []).forEach(function (row) {
+  (Array.isArray(sourceRows) ? sourceRows : []).forEach(function (source) {
+    var row = source && source.values && source.formulas ? source.values : source;
+    var formulas = source && source.values && source.formulas ? source.formulas : null;
     if (!row || typeof row !== "object") return;
     var key = SettingsService_trim_(row.setting_key);
     if (!Object.prototype.hasOwnProperty.call(allowed, key) || Object.prototype.hasOwnProperty.call(values, key)) return;
+    if (formulas && SettingsService_trim_(formulas.setting_value)) return;
 
     if (Object.prototype.hasOwnProperty.call(booleanKeys, key)) {
       var parsedBoolean = SettingsService_boolean_(row.setting_value);
@@ -55,6 +58,32 @@ function SettingsService_buildSettingsResponse_(sourceRows) {
     if (Object.prototype.hasOwnProperty.call(values, key)) data[key] = values[key];
   });
   return { ok: true, data: data, message: "success" };
+}
+
+function SettingsService_readTable_() {
+  if (typeof SheetService_getSheet_ !== "function") {
+    return { headers: [], headerMap: Object.create(null), rows: readSheetObjects_("settings") };
+  }
+  var sheet = SheetService_getSheet_("settings");
+  var range = sheet.getDataRange();
+  var values = range.getValues();
+  var formulas = range.getFormulas();
+  if (!values || !values.length || sheet.getLastRow() < 1) throw new Error("Data headers are not available.");
+  var headers = values[0].map(function (header) { return SettingsService_trim_(header); });
+  var headerMap = SheetService_assertUniqueHeaders_(headers, ["setting_key", "setting_value", "updated_at"]);
+  var rows = [];
+  for (var rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
+    var cells = values[rowIndex] || [];
+    if (!cells.some(function (cell) { return SettingsService_trim_(cell) !== ""; })) continue;
+    var projected = Object.create(null);
+    var projectedFormulas = Object.create(null);
+    headers.forEach(function (header, columnIndex) {
+      projected[header] = columnIndex < cells.length ? cells[columnIndex] : "";
+      projectedFormulas[header] = formulas && formulas[rowIndex] && columnIndex < formulas[rowIndex].length ? formulas[rowIndex][columnIndex] : "";
+    });
+    rows.push({ sourceRowNumber: rowIndex + 1, values: projected, formulas: projectedFormulas });
+  }
+  return { headers: headers, headerMap: headerMap, rows: rows };
 }
 
 function SettingsService_validCachedResponse_(response) {

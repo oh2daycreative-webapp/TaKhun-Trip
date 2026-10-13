@@ -137,6 +137,20 @@ test("settings return an empty successful object for empty headers-only or malfo
   }
 });
 
+test("settings omit formula-backed canonical cells without reinterpreting literal apostrophes", () => {
+  const { context } = load({ rows: [] });
+  const build = required(context, "SettingsService_buildSettingsResponse_");
+  const response = plain(build([
+    { sourceRowNumber: 2, values: { setting_key: "site_name", setting_value: "Computed" }, formulas: { setting_value: "=A1" } },
+    { sourceRowNumber: 3, values: { setting_key: "site_slogan_th", setting_value: "'=historical" }, formulas: { setting_value: "" } },
+    { sourceRowNumber: 4, values: { setting_key: "main_phone", setting_value: "+66 77 123 456" }, formulas: { setting_value: "" } }
+  ]));
+  assert.deepEqual(response.data, {
+    site_slogan_th: "'=historical",
+    main_phone: "+66 77 123 456"
+  });
+});
+
 test("settings cache uses one normalized key and 600 seconds", () => {
   const store = createCache();
   const { context, reads } = load({ cache: store });
