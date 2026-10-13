@@ -54,6 +54,14 @@ function routeRequest_(method, event) {
           return createJsonResponse_({ ok: false, error: { code: "VALIDATION_ERROR", message: "ข้อมูลคำขอไม่ถูกต้อง" } });
         }
         action = body && typeof body === "object" && !Array.isArray(body) && typeof body.action === "string" ? body.action.trim() : "";
+        var exactBodyKeys = function (expected) {
+          if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+          var actual = Object.keys(body).sort();
+          var wanted = expected.slice().sort();
+          return actual.length === wanted.length && actual.every(function (key, index) { return key === wanted[index]; });
+        };
+        if (body && body.action === "adminGetSettings" && exactBodyKeys(["action", "token"])) return createJsonResponse_(adminGetSettings_(body.token));
+        if (body && body.action === "updateSettings" && exactBodyKeys(["action", "token", "payload"])) return createJsonResponse_(updateSettings_(body.token, body.payload));
         if (action === "submitReview") return createJsonResponse_(submitReview_(body.payload));
         if (action === "adminLogin") return createJsonResponse_(adminLogin_(body.payload));
         if (action === "adminValidateSession") return createJsonResponse_(adminValidateSession_(body.token));

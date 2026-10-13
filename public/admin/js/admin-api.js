@@ -13,6 +13,8 @@
     "NOT_FOUND",
     "CONFLICT",
     "CONTENT_LOCK"
+    ,"SETTINGS_SCHEMA",
+    "OUTCOME_UNKNOWN"
   ]);
   const ADMIN_ROLES = Object.freeze(["super_admin", "editor", "reviewer", "viewer"]);
   const ADMIN_ID_PATTERN = /^ADM-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -42,6 +44,7 @@
   ]);
   const REVIEW_STATUSES = Object.freeze(["pending", "approved", "hidden", "deleted"]);
   const REVIEW_ACTIONS = Object.freeze(["adminGetReviews", "adminGetReviewDetail", "approveReview", "hideReview", "replyReview", "clearReviewReply", "deleteReview"]);
+  const SETTINGS_KEYS = Object.freeze(["site_name","site_slogan_th","site_slogan_en","default_language","main_email","main_phone","facebook_url","line_url","logo_url","hero_image_url","reviews_enabled","events_enabled"]);
 
   class AdminApiError extends Error {
     constructor(code) {
@@ -439,6 +442,13 @@
 
   function validateSuccess(body, data) {
     const action = body.action;
+    if (action === "adminGetSettings" || action === "updateSettings") {
+      const settings = safeSettings(data && data.settings, false);
+      const expected = action === "adminGetSettings" ? ["settings", "revision"] : ["settings", "revision", "changed", "audit_status"];
+      if (!exactKeys(data, expected) || !settings || !validRevision(data.revision)) throw safeError("MALFORMED_RESPONSE");
+      if (action === "updateSettings" && (typeof data.changed !== "boolean" || data.changed && !["recorded","unconfirmed"].includes(data.audit_status) || !data.changed && data.audit_status !== "not_applicable")) throw safeError("MALFORMED_RESPONSE");
+      return action === "adminGetSettings" ? { settings, revision:data.revision } : { settings, revision:data.revision, changed:data.changed, audit_status:data.audit_status };
+    }
     if (action === "adminGetDashboard") {
       const dashboard = safeDashboard(data);
       if (!dashboard) throw safeError("MALFORMED_RESPONSE");
@@ -496,13 +506,17 @@
     }
     if (result.ok) {
       if (!exactKeys(result, ["ok", "data", "message"]) || typeof result.message !== "string" ||
-          body.action === "adminGetDashboard" && result.message !== "success") {
+          ["adminGetDashboard", "adminGetSettings", "updateSettings"].includes(body.action) && result.message !== "success") {
         throw safeError("MALFORMED_RESPONSE");
       }
       return validateSuccess(body, result.data);
     }
     const domain = contentDomain(body.action);
     const reviewAction = REVIEW_ACTIONS.includes(body.action);
+    if (body.action === "updateSettings" && result.error && result.error.code === "OUTCOME_UNKNOWN") {
+      if (!exactKeys(result, ["ok", "error"]) || !exactKeys(result.error, ["code", "message", "retryable"]) || typeof result.error.message !== "string" || result.error.retryable !== false) throw safeError("MALFORMED_RESPONSE");
+      const error = safeError("OUTCOME_UNKNOWN"); error.retryable = false; throw error;
+    }
     if (reviewAction && result.error && result.error.code === "OUTCOME_UNKNOWN") {
       if (!exactKeys(result, ["ok", "error"]) || !exactKeys(result.error, ["code", "message", "retryable", "review_id"]) ||
           typeof result.error.message !== "string" || result.error.retryable !== false || !validContentId(result.error.review_id) ||
@@ -577,6 +591,39 @@
   function getDashboard(token) {
     return request({ action:"adminGetDashboard", token:requireToken(token) });
   }
+
+  function validSettingsPhone(value) {
+    if (value === "") return true;
+    if (typeof value !== "string" || value !== value.trim() || !/^[+0-9 .()\-]+$/.test(value) || (value.match(/\(/g)||[]).length !== (value.match(/\)/g)||[]).length) return false;
+    return /^(?:0[2-7]\d{7}|0[689]\d{8}|\+66[2-7]\d{7}|\+66[689]\d{8})$/.test(value.replace(/[ .()\-]/g,""));
+  }
+
+  function safeSettings(value, requestMode) {
+    if (!exactKeys(value, SETTINGS_KEYS)) return null;
+    const result = {};
+    for (const key of SETTINGS_KEYS) {
+      const field = value[key];
+      if (["reviews_enabled","events_enabled"].includes(key)) { if (typeof field !== "boolean") return null; result[key]=field; continue; }
+      const maximum = key === "site_name" ? 120 : ["site_slogan_th","site_slogan_en"].includes(key) ? 300 : key === "main_email" ? 254 : key === "main_phone" ? 40 : 2048;
+      const minimum = ["site_name","site_slogan_th"].includes(key) ? 1 : 0;
+      if (!validUnicodeLength(field, minimum, maximum) || field !== field.trim() || requestMode && (/^[=+\-@]/.test(field) || /^'[=+\-@]/.test(field)) && key !== "main_phone") return null;
+      result[key]=field;
+    }
+    if (!["th","en"].includes(result.default_language) || !validSettingsPhone(result.main_phone)) return null;
+    if (result.main_email && !/^[\x21-\x7E]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])$/.test(result.main_email)) return null;
+    for (const key of ["facebook_url","line_url","logo_url","hero_image_url"]) if (!validUrl(result[key])) return null;
+    return result;
+  }
+
+  function settingsPayload(payload) {
+    const source=requestObject(payload,["expected_revision","settings"],["expected_revision","settings"],false);
+    if(!validRevision(source.expected_revision))validationError();
+    const settings=safeSettings(source.settings,true);if(!settings)validationError();
+    return{expected_revision:source.expected_revision,settings};
+  }
+
+  function getSettings(token) { return request({ action:"adminGetSettings", token:requireToken(token) }); }
+  function updateSettings(token,payload) { return request({ action:"updateSettings", token:requireToken(token), payload:settingsPayload(payload) }); }
 
   function placeRequest(action, token, payload) {
     return request({ action, token: requireToken(token), payload });
@@ -988,6 +1035,7 @@
     getEvents, getEventDetail, createEvent, updateEvent, deleteEvent,
     getRoutes, getRouteDetail, createRoute, updateRoute, deleteRoute,
     getGallery, getGalleryDetail, getGalleryMediaOptions, createGalleryItem, updateGalleryItem, deleteGalleryItem,
-    getReviews, getReviewDetail, approveReview, hideReview, replyReview, clearReviewReply, deleteReview
+    getReviews, getReviewDetail, approveReview, hideReview, replyReview, clearReviewReply, deleteReview,
+    getSettings, updateSettings
   });
 })(window);
