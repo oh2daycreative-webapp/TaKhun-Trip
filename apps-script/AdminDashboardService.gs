@@ -1,13 +1,15 @@
 var AdminDashboardService_WARNING_CODE_ = "SKIPPED_INVALID_OR_DUPLICATE_ROWS";
 var AdminDashboardService_COMMON_STATUSES_ = ["draft", "published", "hidden", "archived", "deleted"];
-var AdminDashboardService_DOMAINS_ = [
-  { domain:"places", key:"total_places", sheet:"places", id:"place_id", headers:["place_id","status"], statuses:["draft","published","archived"], idLimit:64 },
-  { domain:"routes", key:"total_routes", sheet:"routes", id:"route_id", headers:["route_id","status"], statuses:AdminDashboardService_COMMON_STATUSES_, idLimit:100 },
-  { domain:"products", key:"total_products", sheet:"products", id:"product_id", headers:["product_id","status"], statuses:AdminDashboardService_COMMON_STATUSES_, idLimit:100 },
-  { domain:"events", key:"total_events", sheet:"events", id:"event_id", headers:["event_id","status"], statuses:AdminDashboardService_COMMON_STATUSES_, idLimit:100 },
-  { domain:"reviews", key:"pending_reviews", sheet:"reviews", id:"review_id", headers:AdminReviewService_HEADERS_, statuses:AdminReviewService_STATUSES_, idLimit:100, review:true },
-  { domain:"gallery", key:"total_gallery", sheet:"gallery", id:"media_id", headers:["media_id","status"], statuses:AdminDashboardService_COMMON_STATUSES_, idLimit:100 }
-];
+function AdminDashboardService_domains_() {
+  return [
+    { domain:"places", key:"total_places", sheet:"places", id:"place_id", headers:["place_id","status"], statuses:["draft","published","archived"], idLimit:64 },
+    { domain:"routes", key:"total_routes", sheet:"routes", id:"route_id", headers:["route_id","status"], statuses:AdminDashboardService_COMMON_STATUSES_, idLimit:100 },
+    { domain:"products", key:"total_products", sheet:"products", id:"product_id", headers:["product_id","status"], statuses:AdminDashboardService_COMMON_STATUSES_, idLimit:100 },
+    { domain:"events", key:"total_events", sheet:"events", id:"event_id", headers:["event_id","status"], statuses:AdminDashboardService_COMMON_STATUSES_, idLimit:100 },
+    { domain:"reviews", key:"pending_reviews", sheet:"reviews", id:"review_id", headers:AdminReviewService_HEADERS_, statuses:AdminReviewService_STATUSES_, idLimit:100, review:true },
+    { domain:"gallery", key:"total_gallery", sheet:"gallery", id:"media_id", headers:["media_id","status"], statuses:AdminDashboardService_COMMON_STATUSES_, idLimit:100 }
+  ];
+}
 
 function AdminDashboardService_error_(error) {
   var code = error && error.message;
@@ -58,7 +60,7 @@ function adminGetDashboard_(token) {
       total_gallery:0,
       warnings:[]
     };
-    AdminDashboardService_DOMAINS_.forEach(function (definition) {
+    AdminDashboardService_domains_().forEach(function (definition) {
       var result = AdminDashboardService_count_(definition);
       data[definition.key] = result.count;
       if (result.skipped) data.warnings.push({ domain:definition.domain, code:AdminDashboardService_WARNING_CODE_, skipped_count:result.skipped });

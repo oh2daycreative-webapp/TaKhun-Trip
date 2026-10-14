@@ -1,4 +1,8 @@
-var AdminSettingsService_KEYS_ = SettingsService_PUBLIC_KEYS_.slice();
+var AdminSettingsService_KEYS_ = [
+  "site_name", "site_slogan_th", "site_slogan_en", "default_language",
+  "main_email", "main_phone", "facebook_url", "line_url", "logo_url",
+  "hero_image_url", "reviews_enabled", "events_enabled"
+];
 var AdminSettingsService_BOOLEAN_KEYS_ = ["reviews_enabled", "events_enabled"];
 var AdminSettingsService_ROLES_ = ["super_admin", "editor", "reviewer", "viewer"];
 
