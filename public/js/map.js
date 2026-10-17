@@ -94,10 +94,12 @@
     return { focus: String(params.get("focus") || "").trim(), category: String(params.get("category") || "").trim(), district: String(params.get("district") || "").trim(), keyword: String(params.get("keyword") || "").trim(), route: String(params.get("route") || "").trim() };
   }
 
-  function resolveFocus(id) {
+  // F-07: focus is resolved against the loaded live published places (not the bundled snapshot).
+  function resolveFocus(id, places = state.places) {
     if (!validateIdentifier(id)) return { state: "not-found", place: null };
     try {
-      const place = global.TakhunPlaceData?.getPlaceById?.(String(id).trim());
+      const wanted = String(id).trim();
+      const place = (Array.isArray(places) ? places : []).find((item) => item?.place_id === wanted) || null;
       if (!place || place.status !== "published") return { state: "not-found", place: null };
       return hasMapCoordinates(place) ? { state: "ready", place } : { state: "no-coordinate", place };
     } catch (_error) { return { state: "not-found", place: null }; }
@@ -257,20 +259,26 @@
   function updateSelectedMarkers() { state.markers.forEach((marker, id) => { const element = marker.getElement?.(); element?.classList.toggle("is-selected", id === state.selectedPlaceId); element?.setAttribute("aria-pressed", String(id === state.selectedPlaceId)); }); }
   function renderMarkers() { state.markers.forEach((marker) => marker.remove()); state.markers.clear(); const ids = new Set(state.filtered.filter(hasMapCoordinates).map((place) => place.place_id)); state.markerPlaces.filter((place) => ids.has(place.place_id)).forEach((place) => state.markers.set(place.place_id, createMarker(place))); }
   function visibleLatLngs() { return state.filtered.filter(hasMapCoordinates).map((place) => [normalizeCoordinate(place.latitude), normalizeCoordinate(place.longitude)]); }
-  function fitVisible() { if (!state.map) return; const latlngs = visibleLatLngs(); if (!latlngs.length) return; if (latlngs.length === 1) state.map.setView(latlngs[0], 13); else state.map.fitBounds(latlngs, { padding: [36, 36], maxZoom: 14 }); }
+  // F-12: without a view Leaflet draws no tiles. Same viewport-only default as the admin place map
+  // (docs: 8.900000, 98.800000 @ zoom 10); it is never a place coordinate.
+  const DEFAULT_VIEW = Object.freeze({ center: Object.freeze([8.9, 98.8]), zoom: 10 });
+  function showDefaultView() { if (state.map?.setView) state.map.setView(DEFAULT_VIEW.center, DEFAULT_VIEW.zoom); }
+  function fitVisible() { if (!state.map) return; const latlngs = visibleLatLngs(); if (!latlngs.length) { showDefaultView(); return; } if (latlngs.length === 1) state.map.setView(latlngs[0], 13); else state.map.fitBounds(latlngs, { padding: [36, 36], maxZoom: 14 }); }
 
   function renderLegend() { const host = document.querySelector("[data-map-legend-list]"); if (!host) return; const fragment = document.createDocumentFragment(); state.categories.forEach((category) => { const item = make("li"); const symbol = make("span", `map-legend__symbol map-legend__symbol--${category}`, CATEGORY_SYMBOLS[category] || "●"); symbol.setAttribute("aria-hidden", "true"); item.append(symbol, make("span", "", label("categories", category))); fragment.append(item); }); host.replaceChildren(fragment); }
   function applyFilters({ fit = true, url = true } = {}) { state.filtered = filterPlaces(state.places, state, global.TakhunI18n?.getCurrentLang?.()); if (state.selectedPlaceId && !state.filtered.some((place) => place.place_id === state.selectedPlaceId)) closePreview(false); renderFilters(); renderList(); if (state.map) renderMarkers(); setPrimaryState(mounts(), state.filtered.length ? (hasLeaflet() ? "ready" : "leaflet-unavailable") : "empty"); if (fit && state.map) fitVisible(); if (url) updateUrl("replace"); }
 
   function showFocusNotices(query) { const notFound = document.querySelector("[data-map-focus-not-found]"); const noCoordinate = document.querySelector("[data-map-focus-no-coordinate]"); const route = document.querySelector("[data-map-route-unavailable]"); if (notFound) notFound.hidden = true; if (noCoordinate) noCoordinate.hidden = true; if (route) route.hidden = !query.route; if (!query.focus) return; const result = resolveFocus(query.focus); if (result.state === "not-found") { if (notFound) notFound.hidden = false; return; } if (result.state === "no-coordinate") { if (noCoordinate) noCoordinate.hidden = false; return; } if (!state.filtered.some((place) => place.place_id === result.place.place_id)) return; const marker = state.markers.get(result.place.place_id); state.map?.setView([normalizeCoordinate(result.place.latitude), normalizeCoordinate(result.place.longitude)], 14); renderPreview(result.place, marker?.getElement?.()); }
 
-  function initLeaflet() { if (!hasLeaflet()) return false; if (state.map) return true; state.map = global.L.map("map", { scrollWheelZoom: false }); state.tileLayer = global.L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "&copy; OpenStreetMap contributors", maxZoom: 19 }); state.tileLayer.on("tileerror", () => { noteTileError(); const notice = document.querySelector("[data-map-tile-unavailable]"); if (notice) notice.hidden = false; }); state.tileLayer.addTo(state.map); return true; }
+  function initLeaflet() { if (!hasLeaflet()) return false; if (state.map) return true; state.map = global.L.map("map", { scrollWheelZoom: false }); showDefaultView(); state.tileLayer = global.L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "&copy; OpenStreetMap contributors", maxZoom: 19 }); state.tileLayer.on("tileerror", () => { noteTileError(); const notice = document.querySelector("[data-map-tile-unavailable]"); if (notice) notice.hidden = false; }); state.tileLayer.addTo(state.map); return true; }
   function hydrateQuery(query) { state.category = state.categories.includes(query.category) ? query.category : ""; state.district = state.districts.includes(query.district) ? query.district : ""; state.keyword = query.keyword; const input = document.querySelector("[data-map-search]"); if (input) input.value = state.keyword; }
 
-  function render() {
+  let renderGeneration = 0;
+  async function render() {
+    const generation = ++renderGeneration;
     setPrimaryState(mounts(), "loading"); closePreview(false);
-    try { if (!global.TakhunPlaceData?.listPlaces) throw new Error("Shared place data unavailable"); state.places = getPublishedPlaces(global.TakhunPlaceData.listPlaces()); state.markerPlaces = getMarkerPlaces(state.places); state.categories = uniqueMarkerValues("category"); state.districts = uniqueMarkerValues("district"); const query = parseQuery(); hydrateQuery(query); const focus = resolveFocus(query.focus); if (focus.state === "ready") Object.assign(state, reconcileFocusFilters(focus.place, state)); renderLegend(); const leafletReady = initLeaflet(); applyFilters({ fit: leafletReady, url: false }); showFocusNotices(query); }
-    catch (_error) { state.places = []; state.filtered = []; renderList(); setPrimaryState(mounts(), "error"); }
+    try { if (!global.TakhunPlaceData?.loadPublishedPlaces) throw new Error("Live place data unavailable"); const loaded = await global.TakhunPlaceData.loadPublishedPlaces(); if (generation !== renderGeneration) return; state.places = getPublishedPlaces(loaded); state.markerPlaces = getMarkerPlaces(state.places); state.categories = uniqueMarkerValues("category"); state.districts = uniqueMarkerValues("district"); const query = parseQuery(); hydrateQuery(query); const focus = resolveFocus(query.focus); if (focus.state === "ready") Object.assign(state, reconcileFocusFilters(focus.place, state)); renderLegend(); const leafletReady = initLeaflet(); applyFilters({ fit: leafletReady, url: false }); showFocusNotices(query); }
+    catch (_error) { if (generation !== renderGeneration) return; state.places = []; state.filtered = []; renderList(); setPrimaryState(mounts(), "error"); }
   }
 
   function bind() {

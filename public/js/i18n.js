@@ -127,7 +127,8 @@
     loading: "กำลังโหลดข้อมูลสถานที่…", empty_all: "ยังไม่มีสถานที่ที่เผยแพร่", empty_filtered: "ไม่พบสถานที่ที่ตรงกับตัวกรอง",
     error: "โหลดข้อมูลสถานที่ไม่สำเร็จ", favorite_added: "บันทึกสถานที่แล้ว", image_alt: "ภาพของ {name}", image_fallback: "ยังไม่มีภาพ",
     no_script: "ไม่สามารถโหลดรายการได้ โปรดเปิดใช้งาน JavaScript เพื่อดูข้อมูลสถานที่",
-    categories: { ...I18N_MESSAGES.th.places.categories, temple_culture: "วัด / วัฒนธรรม" },
+    // F-08: every backend place category needs a label (same Thai wording as the Admin category options).
+    categories: { ...I18N_MESSAGES.th.places.categories, temple_culture: "วัด / วัฒนธรรม", main_point: "จุดหลัก", lake: "เขื่อนและทะเลสาบ", accommodation: "ที่พัก", product_shop: "ร้านผลิตภัณฑ์", waterfall: "น้ำตก", cave: "ถ้ำ", service: "บริการ" },
     route_groups: { main_point_1: "จุดหลักบ้านตาขุน 1", main_point_2: "จุดหลักบ้านตาขุน 2", main_point_3: "จุดหลักบ้านตาขุน 3", main_point_4: "จุดหลักบ้านตาขุน 4", nearby_khiri_rat_nikhom: "เที่ยวต่อคีรีรัฐนิคม", nearby_phanom: "เที่ยวต่อพนม" }
   });
   Object.assign(I18N_MESSAGES.en.places, {
@@ -136,7 +137,7 @@
     loading: "Loading places…", empty_all: "No published places yet.", empty_filtered: "No places match these filters.",
     error: "Unable to load places.", favorite_added: "Place saved.", image_alt: "Image of {name}", image_fallback: "No image yet",
     no_script: "Enable JavaScript to view places.",
-    categories: { ...I18N_MESSAGES.en.places.categories, temple_culture: "Temple / Culture" },
+    categories: { ...I18N_MESSAGES.en.places.categories, temple_culture: "Temple / Culture", main_point: "Main Point", lake: "Dam and Lake", accommodation: "Accommodation", product_shop: "Product Shop", waterfall: "Waterfall", cave: "Cave", service: "Service" },
     route_groups: { main_point_1: "Ban Ta Khun Main Point 1", main_point_2: "Ban Ta Khun Main Point 2", main_point_3: "Ban Ta Khun Main Point 3", main_point_4: "Ban Ta Khun Main Point 4", nearby_khiri_rat_nikhom: "Continue to Khiri Rat Nikhom", nearby_phanom: "Continue to Phanom" }
   });
 

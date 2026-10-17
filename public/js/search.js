@@ -202,6 +202,14 @@
 
   function t(key) { return global.TakhunI18n?.t?.(key) || key; }
   function format(key, values = {}) { return Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, String(value)), t(key)); }
+  // F-08: show the same translated labels as the places/products pages instead of raw codes (nature, ban_ta_khun).
+  function codeLabel(namespace, value) {
+    const code = String(value ?? "").trim();
+    if (!code) return "";
+    const key = `${namespace}.${code}`;
+    const text = t(key);
+    return text && text !== key ? text : code.replaceAll("_", " ");
+  }
   function currentLang() { return global.TakhunI18n?.getCurrentLang?.() === "en" ? "en" : "th"; }
   function make(tag, className = "", text = "") {
     const element = global.document.createElement(tag);
@@ -241,9 +249,9 @@
     body.append(heading);
     const description = String(item.short_description || item.description || "").trim();
     if (description) body.append(make("p", "search-card__description", description));
-    if (section === "places") { appendMeta(body, "search.meta_category", item.category); appendMeta(body, "search.meta_district", item.district); }
+    if (section === "places") { appendMeta(body, "search.meta_category", codeLabel("places.categories", item.category)); appendMeta(body, "search.meta_district", codeLabel("places.districts", item.district)); }
     if (section === "routes") { appendMeta(body, "search.meta_duration", item.duration); appendMeta(body, "search.meta_travel_style", item.travel_style); }
-    if (section === "products") { appendMeta(body, "search.meta_category", item.category); appendMeta(body, "search.meta_producer", item.producer_name); }
+    if (section === "products") { appendMeta(body, "search.meta_category", codeLabel("products.categories", item.category)); appendMeta(body, "search.meta_producer", item.producer_name); }
     if (section === "events") {
       appendMeta(body, "search.event_date", formatEventDate(item.event_date, currentLang()));
       appendMeta(body, "search.event_time", formatTimeRange(item.start_time, item.end_time));

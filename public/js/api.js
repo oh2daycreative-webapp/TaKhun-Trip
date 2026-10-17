@@ -126,6 +126,14 @@
     return get("getRouteDetail", { ...params, route_id: routeId }, options);
   }
 
+  function getPlaces(params = {}, options = {}) {
+    const allowed = { lang: params?.lang === "en" ? "en" : "th" };
+    for (const key of ["district", "category", "route_group", "keyword", "featured", "main_route", "page", "page_size"]) {
+      if (params?.[key] !== undefined) allowed[key] = params[key];
+    }
+    return get("getPlaces", allowed, options);
+  }
+
   function getPlaceDetail(placeId, params = {}, options = {}) {
     return get("getPlaceDetail", { ...params, place_id: placeId }, options);
   }
@@ -186,6 +194,7 @@
     getCategories,
     getRoutes,
     getRouteDetail,
+    getPlaces,
     getPlaceDetail,
     getTripTemplates,
     getProducts,

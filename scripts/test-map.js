@@ -87,13 +87,30 @@ test("parses supported queries and safely flags route overlay", () => {
 });
 
 test("resolves focus without falling back to another record", () => {
+  // F-07 (owner decision 2026-10-16): focus is resolved against the loaded LIVE places, never the bundled snapshot.
   const data = { listPlaces() { return records; }, getPlaceById(id) { return records.find((item) => item.place_id === id) || null; } };
   const { api } = loadMap({ data });
-  assert.equal(api.resolveFocus("A").state, "ready");
-  assert.equal(api.resolveFocus("C").state, "no-coordinate");
-  assert.equal(api.resolveFocus("D").state, "not-found");
-  assert.equal(api.resolveFocus("UNKNOWN").state, "not-found");
-  assert.equal(api.resolveFocus("../bad").state, "not-found");
+  assert.equal(api.resolveFocus("A", records).state, "ready");
+  assert.equal(api.resolveFocus("C", records).state, "no-coordinate");
+  assert.equal(api.resolveFocus("D", records).state, "not-found");
+  assert.equal(api.resolveFocus("UNKNOWN", records).state, "not-found");
+  assert.equal(api.resolveFocus("../bad", records).state, "not-found");
+  assert.equal(api.resolveFocus("A").state, "not-found", "nothing loaded yet -> the bundled snapshot is never consulted");
+});
+
+test("F-07 the map source loads live places only and keeps its error state on failure (static check)", () => {
+  // The DOM render path is verified in the browser retest; here: no bundled-snapshot access remains.
+  const text = source();
+  assert.match(text, /await global\.TakhunPlaceData\.loadPublishedPlaces\(\)/);
+  assert.doesNotMatch(text, /TakhunPlaceData\??\.(listPlaces|getPlaceById|getNearbyPlaces)/);
+  assert.match(text, /catch \(_error\) \{ if \(generation !== renderGeneration\) return; state\.places = \[\]; state\.filtered = \[\]; renderList\(\); setPrimaryState\(mounts\(\), "error"\); \}/);
+});
+
+test("F-12 the map always has a view: default Ban Ta Khun viewport when no marker can be fitted (static check)", () => {
+  const text = source();
+  assert.match(text, /const DEFAULT_VIEW = Object\.freeze\(\{ center: Object\.freeze\(\[8\.9, 98\.8\]\), zoom: 10 \}\);/);
+  assert.match(text, /state\.map = global\.L\.map\("map", \{ scrollWheelZoom: false \}\); showDefaultView\(\);/, "view set as soon as the map exists");
+  assert.match(text, /if \(!latlngs\.length\) \{ showDefaultView\(\); return; \}/, "no markers -> default view, not an empty canvas");
 });
 
 test("focus with coordinates reconciles conflicting filters instead of failing silently", () => {

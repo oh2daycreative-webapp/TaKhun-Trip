@@ -10,9 +10,10 @@ const canonicalSource = fs.readFileSync(path.join(root, "public/js/content-data.
 const dataSource = fs.readFileSync(path.join(root, "public/js/place-data.js"), "utf8");
 const source = fs.readFileSync(path.join(root, "public/js/places.js"), "utf8");
 
-function loadModule(storageSeed = null, storageThrows = false) {
+function loadModule(storageSeed = null, storageThrows = false, liveApi = null) {
   const values = new Map(storageSeed === null ? [] : [["TAKHUN_FAVORITES", storageSeed]]);
   const context = {
+    TakhunApi: liveApi || undefined,
     console,
     URLSearchParams,
     setTimeout,
@@ -54,15 +55,59 @@ test("exposes isolated data, filter, pagination, URL and storage helpers", () =>
   }
 });
 
-test("loads the ten canonical published places without mock identifiers", async () => {
-  const { api } = loadModule();
+// F-07 (owner decision 2026-10-16): the list shows the LIVE published places (getPlaces), never the bundled
+// ten-place snapshot in content-data.js (which stays in git only as the source for re-entry).
+function liveItem(id, lang, extra = {}) {
+  return { place_id: id, name: `${id}-${lang}`, name_th: `${id}-th`, name_en: `${id}-en`, district: "phanom", category: "nature",
+    route_group: "", short_description: lang === "en" ? `${id} short en` : `${id} short th`, phone: "", google_maps_url: "", latitude: "", longitude: "",
+    cover_image_url: "", is_featured: false, is_main_route_point: false, ...extra };
+}
+function fakeLiveApi(pagesByLang, calls = []) {
+  return { async getPlaces(params) { calls.push({ ...params }); const data = pagesByLang[params.lang][params.page - 1];
+    if (data instanceof Error) throw data; return data; } };
+}
+
+test("F-07 loads live published places across pages, merges TH/EN, and ignores the bundled snapshot", async () => {
+  const calls = [];
+  const live = fakeLiveApi({
+    th: [{ items: [liveItem("PLC-1", "th", { latitude: 9.1, longitude: 98.7 })], total: 2, total_pages: 2 }, { items: [liveItem("PLC-2", "th")], total: 2, total_pages: 2 }],
+    en: [{ items: [liveItem("PLC-1", "en", { latitude: 9.1, longitude: 98.7 })], total: 2, total_pages: 2 }, { items: [liveItem("PLC-2", "en", { short_description: "PLC-2 short th" })], total: 2, total_pages: 2 }]
+  }, calls);
+  const { api } = loadModule(null, false, live);
   const all = await api.loadPlaces();
-  assert.equal(all.length, 10);
-  const published = api.filterPlaces(all, api.createPageState().filters, "th");
-  assert.equal(published.length, 10);
-  assert.ok(published.every((place) => place.status === "published"));
-  assert.ok(all.every((place) => !place.place_id.startsWith("MOCK-")));
-  assert.equal(all.find((place) => place.place_id === "BTK-005")?.name_th, "วัดเขาพัง");
+  assert.deepEqual(JSON.parse(JSON.stringify(all.map((place) => place.place_id))), ["PLC-1", "PLC-2"], "only live places; none of the ten bundled ones");
+  assert.ok(all.every((place) => place.status === "published"));
+  assert.equal(all[0].short_description_en, "PLC-1 short en");
+  assert.equal(all[1].short_description_en, "", "backend Thai fallback is not stored as English");
+  assert.equal(all[0].latitude, 9.1);
+  assert.equal(all[1].latitude, null, "no coordinates -> no map button");
+  assert.equal(api.canOpenMap(all[1]), false);
+  assert.deepEqual(calls.map((call) => [call.lang, call.page, call.page_size]).sort(), [["en", 1, 100], ["en", 2, 100], ["th", 1, 100], ["th", 2, 100]]);
+  assert.equal(api.filterPlaces(all, api.createPageState().filters, "th").length, 2);
+});
+
+test("F-07 a live failure or malformed page rejects with no static fallback", async () => {
+  for (const pages of [{ th: [new Error("NETWORK_ERROR")], en: [{ items: [], total: 0, total_pages: 0 }] },
+    { th: [{ items: "x", total_pages: 1 }], en: [{ items: [], total: 0, total_pages: 0 }] }]) {
+    const { api } = loadModule(null, false, fakeLiveApi(pages));
+    await assert.rejects(api.loadPlaces());
+  }
+  const { api } = loadModule();
+  await assert.rejects(api.loadPlaces(), /Live place API is unavailable/, "no TakhunApi -> error, never the bundled list");
+});
+
+test("F-06 a hidden .button (load more when everything is shown) is really hidden by CSS", () => {
+  const css = fs.readFileSync(path.join(root, "public/css/main.css"), "utf8");
+  const buttonRule = css.indexOf(".button {");
+  const hiddenRule = css.indexOf(".button[hidden] { display: none; }");
+  assert.ok(buttonRule !== -1 && hiddenRule > buttonRule, ".button[hidden] must exist after .button so the attribute wins");
+  const { api } = loadModule();
+  assert.equal(api.paginatePlaces([{ place_id: "A" }], 1).hasMore, false, "1 of 1 shown -> the button gets hidden");
+});
+
+test("F-07 zero live places is a valid empty list", async () => {
+  const { api } = loadModule(null, false, fakeLiveApi({ th: [{ items: [], total: 0, total_pages: 0 }], en: [{ items: [], total: 0, total_pages: 0 }] }));
+  assert.equal((await api.loadPlaces()).length, 0);
 });
 
 test("parses all supported query parameters and ignores unknown enum values", () => {
