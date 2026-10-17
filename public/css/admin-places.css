@@ -50,6 +50,10 @@
 .admin-place-edit__actions .button, .admin-place-edit__submit .button { min-width: 44px; min-height: 44px; }
 .admin-place-validation-summary { margin-block: 1rem; padding: 1rem; border: 2px solid #a61b1b; border-radius: var(--radius-sm); background: #fff2f2; color: #701111; font-weight: 700; }
 .admin-place-validation-summary[hidden] { display: none; }
+/* F-04: a field the server rules require stays visibly invalid (not only while focused) until it is changed. */
+[data-admin-place-edit-form] [aria-invalid="true"] { border: 2px solid #a61b1b; background-color: #fff7f7; box-shadow: 0 0 0 1px #a61b1b; }
+.admin-place-field-hint { display: block; margin-block-start: 0.25rem; color: #9b1430; font-size: 0.875rem; font-weight: 600; }
+.admin-place-field-hint[hidden] { display: none; }
 .admin-place-edit__notice { min-height: 1.5rem; }.admin-place-edit__foundation { color: var(--color-muted); }
 .admin-place-map-picker { grid-column: 1 / -1; min-width: 0; }.admin-place-map-picker > p { margin: .75rem 0; }.admin-place-map-picker [data-admin-place-map] { width: 100%; min-height: 300px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); box-sizing: border-box; }.admin-place-map-picker .button { display: inline-flex; min-height: 44px; align-items: center; }
 [data-admin-place-map] .leaflet-control-zoom a { display: flex; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; box-sizing: border-box; }

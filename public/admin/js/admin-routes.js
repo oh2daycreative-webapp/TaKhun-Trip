@@ -9,7 +9,7 @@
     hidden: ["draft", "published", "archived", "deleted"], archived: ["draft", "deleted"], deleted: ["draft"]
   });
   const STATUS_LABELS = Object.freeze({ draft: "ฉบับร่าง", published: "เผยแพร่", hidden: "ซ่อน", archived: "เก็บถาวร", deleted: "ลบแล้ว" });
-  const UNCERTAIN_CODES = ["OUTCOME_UNKNOWN", "NETWORK_ERROR", "TIMEOUT", "HTTP_ERROR", "MALFORMED_RESPONSE"];
+  const UNCERTAIN_CODES = ["OUTCOME_UNKNOWN", "NETWORK_ERROR", "TIMEOUT", "HTTP_ERROR", "MALFORMED_RESPONSE", "REDIRECT_BOUNCE"];
   let elements, token, role, canWrite = false, initialized = false, bound = false;
   let page = 1, filters = { keyword: "", status: "" }, listBusy = false, mutationBusy = false, mutationRequestBusy = false, detailGeneration = 0;
   let record = null, stops = [], placeResults = [], placePage = 1, placeTotalPages = 0, placeGeneration = 0, placeBusy = false, dirty = false, blocked = false, currentView = "list";
@@ -23,7 +23,7 @@
   function announce(text, editor) { (editor ? elements.editorStatus : elements.listStatus).textContent = !editor && deleteAuditWarning ? (text ? `${text} · ${deleteAuditWarning}` : deleteAuditWarning) : text; }
   function beginMutationMessage() { deleteAuditWarning = ""; return ++mutationMessageGeneration; }
   function safeMessage(error) {
-    return ({ UNAUTHORIZED: "กรุณาเข้าสู่ระบบอีกครั้ง", FORBIDDEN: "บัญชีนี้ไม่มีสิทธิ์ทำรายการ", VALIDATION_ERROR: "ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง", NOT_FOUND: "ไม่พบเส้นทาง", CONFLICT: "ข้อมูลบนเซิร์ฟเวอร์เปลี่ยนแล้ว กรุณาโหลดข้อมูลล่าสุดเพื่อกระทบยอด", INVALID_TRANSITION: "ไม่สามารถเปลี่ยนเป็นสถานะนี้ได้", OUTCOME_UNKNOWN: "ยังยืนยันผลรายการไม่ได้ กรุณากระทบยอดก่อนทำรายการใหม่", NETWORK_ERROR: "การเชื่อมต่อขัดข้อง ผลรายการอาจยังไม่แน่นอน", TIMEOUT: "หมดเวลารอผล ผลรายการอาจยังไม่แน่นอน" })[error && error.code] || "ไม่สามารถทำรายการได้ในขณะนี้";
+    return ({ UNAUTHORIZED: "กรุณาเข้าสู่ระบบอีกครั้ง", FORBIDDEN: "บัญชีนี้ไม่มีสิทธิ์ทำรายการ", VALIDATION_ERROR: "ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง", NOT_FOUND: "ไม่พบเส้นทาง", CONFLICT: "ข้อมูลบนเซิร์ฟเวอร์เปลี่ยนแล้ว กรุณาโหลดข้อมูลล่าสุดเพื่อกระทบยอด", INVALID_TRANSITION: "ไม่สามารถเปลี่ยนเป็นสถานะนี้ได้", OUTCOME_UNKNOWN: "ยังยืนยันผลรายการไม่ได้ กรุณากระทบยอดก่อนทำรายการใหม่", REDIRECT_BOUNCE: "ไม่แน่ใจผลการบันทึก กรุณาตรวจสอบรายการก่อนทำซ้ำ", NETWORK_ERROR: "การเชื่อมต่อขัดข้อง ผลรายการอาจยังไม่แน่นอน", TIMEOUT: "หมดเวลารอผล ผลรายการอาจยังไม่แน่นอน" })[error && error.code] || "ไม่สามารถทำรายการได้ในขณะนี้";
   }
   function readMarker() { try { const value = global.sessionStorage.getItem(MARKER); return value ? JSON.parse(value) : null; } catch (_error) { return null; } }
   function resetUncertainReadiness(marker) { uncertainMarkerKey = marker ? JSON.stringify(marker) : ""; uncertainGeneration += 1; uncertainReadyGeneration = -1; if (elements) elements.uncertainComplete.hidden = true; }

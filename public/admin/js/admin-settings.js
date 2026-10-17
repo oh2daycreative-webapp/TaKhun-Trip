@@ -1,7 +1,7 @@
 "use strict";
 (function createAdminSettings(global) {
   const KEYS=Object.freeze(["site_name","site_slogan_th","site_slogan_en","default_language","main_email","main_phone","facebook_url","line_url","logo_url","hero_image_url","reviews_enabled","events_enabled"]);
-  const INDETERMINATE_CODES=Object.freeze(["OUTCOME_UNKNOWN","TIMEOUT","NETWORK_ERROR","HTTP_ERROR","MALFORMED_RESPONSE"]);
+  const INDETERMINATE_CODES=Object.freeze(["OUTCOME_UNKNOWN","TIMEOUT","NETWORK_ERROR","HTTP_ERROR","MALFORMED_RESPONSE","REDIRECT_BOUNCE"]);
   const clone=value=>value===null?null:JSON.parse(JSON.stringify(value));
   const same=(a,b)=>KEYS.every(key=>a&&b&&a[key]===b[key]);
   function createController({api,token,role,onChange}) {

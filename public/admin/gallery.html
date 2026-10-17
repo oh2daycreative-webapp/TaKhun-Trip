@@ -57,7 +57,7 @@
       <section class="admin-content-manager admin-gallery" data-admin-content data-admin-gallery hidden aria-hidden="true">
         <div data-gallery-list-view>
           <div class="content-toolbar"><h2>รายการแกลเลอรี</h2><button class="button" type="button" data-gallery-create>เพิ่มภาพ</button></div>
-          <form class="content-filters admin-gallery__filters" data-gallery-filters aria-label="ค้นหาและกรองแกลเลอรี">
+          <form autocomplete="off" class="content-filters admin-gallery__filters" data-gallery-filters aria-label="ค้นหาและกรองแกลเลอรี">
             <label class="content-field">ค้นหา <input name="keyword" type="search" maxlength="200" autocomplete="off"></label>
             <label class="content-field">สถานะ <select name="status"><option value="">ทุกสถานะ</option><option value="draft">ฉบับร่าง</option><option value="published">เผยแพร่</option><option value="hidden">ซ่อน</option><option value="archived">เก็บถาวร</option><option value="deleted">ลบแบบซอฟต์</option></select></label>
             <label class="content-field">ประเภทสื่อ <select name="media_type"><option value="">ทุกประเภท</option><option value="image">ภาพ</option><option value="video">วิดีโอเดิม</option></select></label>
@@ -77,7 +77,7 @@
           <p class="content-id" data-gallery-identity></p><p data-gallery-legacy-warning hidden></p>
           <p class="content-notice" data-gallery-editor-status role="status" aria-live="assertive" aria-atomic="true" tabindex="-1"></p>
           <div data-gallery-readonly></div>
-          <form class="content-editor" data-gallery-form novalidate>
+          <form autocomplete="off" class="content-editor" data-gallery-form novalidate>
             <fieldset data-gallery-media-picker><legend>ภาพที่อนุมัติ</legend>
               <div class="content-toolbar"><label class="content-field">ค้นหาภาพ <input type="search" data-gallery-media-keyword maxlength="200"></label><button class="button" type="button" data-gallery-media-search>ค้นหา</button></div>
               <p data-gallery-media-status role="status" aria-live="polite" aria-atomic="true"></p><div class="admin-gallery__media-grid" data-gallery-media-results></div>
