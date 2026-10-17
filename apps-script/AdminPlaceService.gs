@@ -158,7 +158,7 @@ function adminCreatePlace_(token, payload) {
           placeId, "draft", 1, 0, true, occurredAt, occurredAt
         ));
       } catch (error) {
-        return AdminPlaceService_failClosed_(state);
+        return AdminPlaceService_failClosed_(state, error, "CREATE");
       }
     }
     return AdminPlaceService_withWriteLock_(createUnderLock);
@@ -243,7 +243,7 @@ function adminSavePlaceDraft_(token, payload) {
           responseCreatedAt, occurredAt
         ));
       } catch (error) {
-        return AdminPlaceService_failClosed_(state);
+        return AdminPlaceService_failClosed_(state, error, "UPDATE_DRAFT");
       }
     });
   });
@@ -315,7 +315,7 @@ function adminPublishPlace_(token, payload) {
         state.audit = null;
         return response;
       } catch (error) {
-        return AdminPlaceService_failClosed_(state);
+        return AdminPlaceService_failClosed_(state, error, "PUBLISH");
       }
     });
   });
@@ -451,8 +451,12 @@ function AdminPlaceService_applyLifecycleWrite_(admin, state, lifecycle, action,
         values: AdminPlaceService_mergeRow_(state.rows.draft.values, draftPatch)
       };
     } else if (ensureDraft) {
+      // F-09: projectContent_ returns the API shape (lists as arrays, unescaped text). Real Sheets stores an array
+      // as text, so the strict read-back failed and every unpublish/restore without a draft rolled back.
+      // Validate with the projection, but store the place row's own stored values.
+      AdminPlaceService_projectContent_(state.rows.place.values);
       var draftRecord = AdminPlaceService_newDraft_(
-        state.place_id, AdminPlaceService_projectContent_(state.rows.place.values), nextVersion,
+        state.place_id, AdminPlaceService_storedContent_(state.rows.place.values), nextVersion,
         lifecycle.publishedVersion, occurredAt, admin.admin_id, state.rows.place.values
       );
       var appendedDraft = SheetService_appendObjectWithRow_(
@@ -481,9 +485,19 @@ function AdminPlaceService_applyLifecycleWrite_(admin, state, lifecycle, action,
     ));
     state.audit = null;
     return response;
-  } catch (_error) {
-    return AdminPlaceService_failClosed_(state);
+  } catch (error) {
+    return AdminPlaceService_failClosed_(state, error, action);
   }
+}
+
+// Content headers exactly as stored in the place row (storage form); booleans normalized for the "0" columns.
+function AdminPlaceService_storedContent_(source) {
+  var result = {};
+  AdminPlaceService_CONTENT_HEADERS_.forEach(function (header) {
+    var value = Object.prototype.hasOwnProperty.call(source, header) ? source[header] : "";
+    result[header] = AdminPlaceService_BOOLEAN_HEADERS_.indexOf(header) !== -1 ? AdminPlaceService_booleanValue_(value) : value;
+  });
+  return result;
 }
 
 function AdminPlaceService_dependencyParameters_(payload) {
@@ -1007,6 +1021,10 @@ function AdminPlaceService_verifyIntendedState_(snapshot, intended) {
       var same = actual === expected ||
         (actual instanceof Date && expected instanceof Date && actual.getTime() === expected.getTime());
       if (!same) {
+        AdminPlaceService_lastVerifyMismatch_ = {
+          sheet: target.sheetName, field: header,
+          expected_kind: AdminPlaceService_valueKind_(expected), actual_kind: AdminPlaceService_valueKind_(actual)
+        };
         throw new Error("ADMIN_PLACE_WRITE_VERIFY");
       }
     });
@@ -1309,14 +1327,23 @@ function AdminPlaceService_applySelectivePatch_(snapshot, key, sheetName, source
       Object.keys(patch).length !== orderedFields.length) {
     throw new Error("ADMIN_PLACE_SELECTIVE_PATCH");
   }
+  var orderedPatch = {};
   orderedFields.forEach(function (field) {
     if (!Object.prototype.hasOwnProperty.call(patch, field)) throw new Error("ADMIN_PLACE_SELECTIVE_PATCH");
-    AdminPlaceService_setSelectiveRestore_(snapshot, key, snapshot.restore_fields[key].concat([field]));
-    var fieldPatch = {};
-    fieldPatch[field] = patch[field];
-    SheetService_updateObjectAtRow_(sheetName, sourceRowNumber, fieldPatch);
+    orderedPatch[field] = patch[field];
   });
+  // Register every field before the single write: restoring a field that was not yet written rewrites
+  // the value captured under the same lock. One helper call avoids a full-sheet read (and flush) per field.
+  AdminPlaceService_setSelectiveRestore_(snapshot, key, snapshot.restore_fields[key].concat(orderedFields));
+  SheetService_updateObjectAtRow_(sheetName, sourceRowNumber, orderedPatch);
   return true;
+}
+
+function AdminPlaceService_sameCellValue_(left, right) {
+  if (left instanceof Date || right instanceof Date) {
+    return left instanceof Date && right instanceof Date && left.getTime() === right.getTime();
+  }
+  return left === right;
 }
 
 function AdminPlaceService_restoreState_(snapshot) {
@@ -1380,16 +1407,24 @@ function AdminPlaceService_restoreState_(snapshot) {
           SheetService_replaceObjectAtRow_(target.sheetName, before.sourceRowNumber, before.values);
         } else if (restoreFields.length) {
           var restoreSeen = Object.create(null);
+          var restorePatch = {};
+          var currentRow = currentTable.rows.filter(function (entry) {
+            return entry && entry.sourceRowNumber === before.sourceRowNumber;
+          })[0];
           restoreFields.forEach(function (field) {
             if (typeof field !== "string" || field === "place_id" || target.headers.indexOf(field) === -1 ||
                 Object.prototype.hasOwnProperty.call(restoreSeen, field)) {
               throw new Error("ADMIN_PLACE_RESTORE_FIELDS");
             }
             restoreSeen[field] = true;
-            var restorePatch = {};
+            // Fields are registered before the single action write; a cell still holding its captured
+            // value was not written, so leave it (and any physical formula) untouched.
+            if (currentRow && currentRow.values && AdminPlaceService_sameCellValue_(currentRow.values[field], before.values[field])) return;
             restorePatch[field] = before.values[field];
-            SheetService_updateObjectAtRow_(target.sheetName, before.sourceRowNumber, restorePatch);
           });
+          if (Object.keys(restorePatch).length) {
+            SheetService_updateObjectAtRow_(target.sheetName, before.sourceRowNumber, restorePatch);
+          }
         }
       } else {
         if (restoreFields !== null && restoreFields.length) throw new Error("ADMIN_PLACE_RESTORE_FIELDS");
@@ -1452,13 +1487,49 @@ function AdminPlaceService_restoreState_(snapshot) {
   return true;
 }
 
-function AdminPlaceService_failClosed_(snapshot) {
+function AdminPlaceService_failClosed_(snapshot, error, operation) {
+  var rollback = "not_needed";
   try {
-    if (snapshot) AdminPlaceService_restoreState_(snapshot);
+    if (snapshot) {
+      AdminPlaceService_restoreState_(snapshot);
+      rollback = "restored";
+    }
   } catch (rollbackError) {
     // A rollback failure never changes the client-safe outcome.
+    rollback = "failed";
   }
+  AdminPlaceService_logFailClosed_(operation, error, rollback);
   return AdminPlaceService_error_("SERVER_ERROR", "เกิดข้อผิดพลาดของระบบ");
+}
+
+// F-10: one structured line in Executions per fail-closed write so production failures stay diagnosable.
+// Fixed internal codes, operation names, field names and value kinds only — never values or credentials.
+var AdminPlaceService_lastVerifyMismatch_ = null;
+
+function AdminPlaceService_valueKind_(value) {
+  if (Array.isArray(value)) return "array";
+  if (value instanceof Date) return "date";
+  if (value === null) return "null";
+  if (value === "") return "empty";
+  return typeof value;
+}
+
+function AdminPlaceService_logFailClosed_(operation, error, rollback) {
+  try {
+    var message = error && typeof error.message === "string" ? error.message : "";
+    var entry = {
+      event: "ADMIN_PLACE_FAIL_CLOSED",
+      operation: /^[A-Z_]{1,32}$/.test(String(operation)) ? operation : "UNKNOWN",
+      code: /^[A-Z][A-Z0-9_]{0,63}$/.test(message) ? message : "UNCLASSIFIED",
+      rollback: rollback
+    };
+    if (entry.code === "UNCLASSIFIED" && error && /^[A-Za-z]{1,40}$/.test(String(error.name))) entry.error_name = error.name;
+    if (AdminPlaceService_lastVerifyMismatch_) entry.verify_mismatch = AdminPlaceService_lastVerifyMismatch_;
+    if (typeof console !== "undefined" && console && typeof console.error === "function") console.error(JSON.stringify(entry));
+  } catch (_logError) {
+    // Logging never changes the client-safe outcome.
+  }
+  AdminPlaceService_lastVerifyMismatch_ = null;
 }
 
 function AdminPlaceService_requireContext_(draftContentScope, publishTargetId) {

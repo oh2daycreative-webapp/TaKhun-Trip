@@ -258,10 +258,13 @@ function makeHarness(options) {
     }
   };
   const media = { matches: Boolean(config.desktop), addEventListener() {} };
-  const context = vm.createContext({ window: { document, TakhunAdminAuth: auth, matchMedia: () => media }, document, console });
+  const reloads = [];
+  const windowObject = { document, TakhunAdminAuth: auth, matchMedia: () => media };
+  if (config.withLocation) windowObject.location = { reload() { reloads.push(1); } };
+  const context = vm.createContext({ window: windowObject, document, console });
   context.window.window = context.window;
   vm.runInContext(config.sourceOverride || source, context, { filename: "admin-shell.js" });
-  return { shell: context.window.TakhunAdminShell, document, elements, authCalls };
+  return { shell: context.window.TakhunAdminShell, document, elements, authCalls, reloads };
 }
 
 function deferred() {
@@ -288,6 +291,24 @@ function assertGuardPendingIsHidden(harness) {
   assert.equal(harness.elements.shell.contains(harness.elements.publicLink), true);
   assert.equal(harness.authCalls.authenticatedCallbacks, 0);
 }
+
+test("F-03 every admin content form disables browser autofill; login keeps its credential hints", () => {
+  // Chrome autofilled a personal name into a Place name on 2026-10-16 (privacy risk on shared agency PCs).
+  const pages = fs.readdirSync(path.join(root, "public/admin")).filter((name) => name.endsWith(".html") && name !== "login.html");
+  let forms = 0;
+  for (const page of pages) {
+    for (const tag of fs.readFileSync(path.join(root, "public/admin", page), "utf8").match(/<form\b[^>]*>/g) || []) {
+      forms += 1;
+      assert.match(tag, /\bautocomplete="off"/, `${page}: ${tag}`);
+    }
+  }
+  assert.equal(forms, 8, "all 8 static admin content forms covered");
+  const contentUi = fs.readFileSync(path.join(root, "public/admin/js/admin-content-ui.js"), "utf8");
+  assert.equal((contentUi.match(/node\("form"/g) || []).length, 2);
+  assert.equal((contentUi.match(/setAttribute\("autocomplete", "off"\)/g) || []).length, 2, "products/events forms built in JS");
+  const login = fs.readFileSync(path.join(root, "public/admin/login.html"), "utf8");
+  assert.doesNotMatch(login.match(/<form\b[^>]*>/)[0], /autocomplete="off"/, "login form unchanged");
+});
 
 test("all protected pages declare the source guard and one semantic shared shell contract", () => {
   for (const [key, heading] of pageFixtures) {
@@ -441,6 +462,25 @@ test("unconfirmed guard keeps both shell and content hidden and retry is explici
   assert.equal(harness.elements.shell.hidden, false);
   assert.equal(harness.elements.retry.disabled, false);
   assert.equal(harness.elements.retry.getAttribute("aria-busy"), "false");
+});
+
+test("F-02b retry reloads the page once (re-runs every page module init) instead of re-running only the guard", async () => {
+  const harness = makeHarness({ withLocation: true, guardResults: [{ status: "unconfirmed", code: "TIMEOUT" }, { status: "authenticated", admin: { display_name: "x", role: "editor" } }] });
+  assert.equal((await harness.shell.init()).status, "unconfirmed");
+  await Promise.all([harness.elements.retry.dispatch("click"), harness.elements.retry.dispatch("click")]);
+  assert.equal(harness.reloads.length, 1, "exactly one reload, busy-safe");
+  assert.equal(harness.authCalls.guard, 1, "the guard alone is never re-run when a reload is available");
+  assert.equal(harness.elements.retry.disabled, true);
+  assert.equal(harness.elements.shell.hidden, true);
+});
+
+test("F-02c the guard message shows the fixed error code only", async () => {
+  const harness = makeHarness({ guardResults: [{ status: "unconfirmed", code: "NETWORK_ERROR" }] });
+  await harness.shell.init();
+  assert.match(harness.elements.guardMessage.textContent, /ตรวจสอบสิทธิ์ไม่สำเร็จ.*\(NETWORK_ERROR\)$/);
+  const odd = makeHarness({ guardResults: [{ status: "unconfirmed", code: "<b>x</b>" }] });
+  await odd.shell.init();
+  assert.doesNotMatch(odd.elements.guardMessage.textContent, /<b>|\(/);
 });
 
 test("an unresolved authoritative guard keeps every authenticated shell surface hidden until success", async () => {

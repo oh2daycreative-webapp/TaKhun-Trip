@@ -2,7 +2,7 @@
 (function createAdminReviews(global){
   const ROLE_ACTIONS=Object.freeze({super_admin:["approve","hide","reply","clearReply","delete"],editor:["approve","hide","reply","clearReply"],reviewer:["approve","hide"],viewer:[]});
   const API_METHODS=Object.freeze({approve:"approveReview",hide:"hideReview",reply:"replyReview",clearReply:"clearReviewReply",delete:"deleteReview"});
-  const UNCERTAIN=Object.freeze(["OUTCOME_UNKNOWN","NETWORK_ERROR","TIMEOUT","HTTP_ERROR","MALFORMED_RESPONSE"]);
+  const UNCERTAIN=Object.freeze(["OUTCOME_UNKNOWN","NETWORK_ERROR","TIMEOUT","HTTP_ERROR","MALFORMED_RESPONSE","REDIRECT_BOUNCE"]);
   function permissions(role){return (ROLE_ACTIONS[role]||[]).slice();}
   function codedError(code){const error=new Error(code.toLowerCase());error.code=code;return error;}
   function forbidden(){return codedError("FORBIDDEN");}
@@ -52,7 +52,7 @@
     return Object.freeze({loadList,loadDetail,setReplyDraft,mutate,state});
   }
   function node(tag,text,className){const item=global.document.createElement(tag);if(text!==undefined)item.textContent=text;if(className)item.className=className;return item;}
-  function safeMessage(code){return({LOADING:"กำลังโหลดข้อมูล",SUCCESS:"บันทึกสำเร็จ",AUDIT_UNCONFIRMED:"บันทึกสำเร็จ แต่ยังยืนยันบันทึกการตรวจสอบไม่ได้ กรุณาอย่าส่งซ้ำ",SKIPPED_INVALID_REVIEWS:"ข้ามรีวิวที่มีข้อมูลไม่สมบูรณ์หรือรหัสซ้ำอย่างปลอดภัย",UNAUTHORIZED:"กรุณาเข้าสู่ระบบอีกครั้ง",FORBIDDEN:"บัญชีนี้ไม่มีสิทธิ์ทำรายการ",VALIDATION_ERROR:"ข้อมูลไม่ถูกต้อง",NOT_FOUND:"ไม่พบรีวิว",CONFLICT:"รีวิวเปลี่ยนแปลงแล้ว กรุณาโหลดข้อมูลล่าสุด",CONTENT_LOCK:"ข้อมูลกำลังถูกใช้งาน กรุณาลองใหม่",INVALID_TRANSITION:"ไม่สามารถทำรายการกับสถานะนี้ได้",OUTCOME_UNKNOWN:"ยังยืนยันผลไม่ได้ กรุณาโหลดข้อมูลเพื่อตรวจสอบและอย่าส่งซ้ำ"})[code]||"ไม่สามารถทำรายการได้ในขณะนี้";}
+  function safeMessage(code){return({LOADING:"กำลังโหลดข้อมูล",LOADED:"โหลดข้อมูลแล้ว",SUCCESS:"บันทึกสำเร็จ",AUDIT_UNCONFIRMED:"บันทึกสำเร็จ แต่ยังยืนยันบันทึกการตรวจสอบไม่ได้ กรุณาอย่าส่งซ้ำ",SKIPPED_INVALID_REVIEWS:"ข้ามรีวิวที่มีข้อมูลไม่สมบูรณ์หรือรหัสซ้ำอย่างปลอดภัย",UNAUTHORIZED:"กรุณาเข้าสู่ระบบอีกครั้ง",FORBIDDEN:"บัญชีนี้ไม่มีสิทธิ์ทำรายการ",VALIDATION_ERROR:"ข้อมูลไม่ถูกต้อง",NOT_FOUND:"ไม่พบรีวิว",CONFLICT:"รีวิวเปลี่ยนแปลงแล้ว กรุณาโหลดข้อมูลล่าสุด",CONTENT_LOCK:"ข้อมูลกำลังถูกใช้งาน กรุณาลองใหม่",INVALID_TRANSITION:"ไม่สามารถทำรายการกับสถานะนี้ได้",OUTCOME_UNKNOWN:"ยังยืนยันผลไม่ได้ กรุณาโหลดข้อมูลเพื่อตรวจสอบและอย่าส่งซ้ำ",REDIRECT_BOUNCE:"ไม่แน่ใจผลการบันทึก กรุณาตรวจสอบรายการก่อนทำซ้ำ"})[code]||"ไม่สามารถทำรายการได้ในขณะนี้";}
   function initDom(token,role){
     const root=global.document.querySelector("[data-admin-reviews]");if(!root)return null;
     const e={filters:root.querySelector("[data-review-filters]"),status:root.querySelector("[data-review-status]"),list:root.querySelector("[data-review-list]"),detail:root.querySelector("[data-review-detail]"),currentReply:root.querySelector("[data-review-current-reply]"),replyEditor:root.querySelector("[data-review-reply-editor]"),reply:root.querySelector("[data-review-reply]"),actions:root.querySelector("[data-review-actions]"),back:root.querySelector("[data-review-back]"),prev:root.querySelector("[data-review-prev]"),next:root.querySelector("[data-review-next]"),page:root.querySelector("[data-review-page]")};
@@ -63,7 +63,7 @@
         e.list.replaceChildren();totalPages=result.total_pages;page=result.page;e.page.textContent=`หน้า ${page} จาก ${totalPages||1}`;e.prev.disabled=page<=1;e.next.disabled=page>=totalPages;
         result.items.forEach(item=>{const button=node("button",`${item.rating} ดาว · ${item.reviewer_name} · ${item.status}\n${item.comment}`,"admin-review-card");button.type="button";button.setAttribute("data-review-id",item.review_id);button.addEventListener("click",()=>{const state=controller.state(),options={};if(state.selected&&state.selected.review_id!==item.review_id&&state.draftDirty){if(!global.confirm("ละทิ้งคำตอบที่ยังไม่ได้บันทึกหรือไม่?"))return;options.discardDraft=true;}lastListReviewId=item.review_id;controller.loadDetail(item.review_id,options).catch(()=>{});});e.list.appendChild(button);});
         if(!result.items.length)e.list.appendChild(node("p","ไม่พบรีวิว"));
-        if(result.warning)view.status(result.warning.code,false);
+        view.status(result.warning?result.warning.code:"LOADED",false);
       },
       detail(record,draft,options){
         e.detail.hidden=false;const title=e.detail.querySelector("[data-review-detail-title]");title.textContent=`${record.rating} ดาว · ${record.reviewer_name}`;e.detail.querySelector("[data-review-detail-meta]").textContent=`${record.place_id} · ${record.status} · ${record.created_at}`;e.detail.querySelector("[data-review-comment]").textContent=record.comment;e.currentReply.textContent=record.admin_reply||"ยังไม่มีคำตอบ";e.reply.value=draft;e.reply.disabled=!!options.pending;e.actions.replaceChildren();

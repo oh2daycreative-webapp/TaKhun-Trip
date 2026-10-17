@@ -24,7 +24,10 @@
   const TOKEN_PATTERN = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
   const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
   const PLACE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
-  const TRANSIENT_CODES = Object.freeze(["TIMEOUT", "NETWORK_ERROR", "HTTP_ERROR", "MALFORMED_RESPONSE", "SERVER_ERROR"]);
+  // REDIRECT_BOUNCE (F-13): the API client already re-sent a bounced read once; here it is only reported.
+  const TRANSIENT_CODES = Object.freeze(["TIMEOUT", "NETWORK_ERROR", "HTTP_ERROR", "MALFORMED_RESPONSE", "SERVER_ERROR", "REDIRECT_BOUNCE"]);
+  const REVALIDATION_CODES = Object.freeze(["TIMEOUT", "NETWORK_ERROR", "HTTP_ERROR", "MALFORMED_RESPONSE"]);
+  const REVALIDATION_DELAY_MS = 1500;
   const APPLICATION_CODES = Object.freeze(["NOT_FOUND", "CONFLICT"]);
   const AUTH_INVALID_CODES = Object.freeze(["UNAUTHORIZED", "VALIDATION_ERROR", "FORBIDDEN"]);
   const SAFE_API_CODES = Object.freeze([
@@ -39,7 +42,8 @@
     "HTTP_ERROR",
     "MALFORMED_RESPONSE",
     "NOT_FOUND",
-    "CONFLICT"
+    "CONFLICT",
+    "REDIRECT_BOUNCE"
   ]);
   let validationGeneration = 0;
 
@@ -307,13 +311,29 @@
     return { status: "authenticated", admin: safeLoginAdmin(admin), expires_at: session.expires_at, redirect };
   }
 
+  // F-02: a browser fetch wrapper (e.g. antivirus script injection) can drop the first request of a page.
+  // Session validation is read-only, so a transport-level failure gets exactly one more attempt.
+  async function requestValidation(token, generation) {
+    try {
+      return await global.TakhunAdminApi.validateSession(token);
+    } catch (error) {
+      if (generation !== validationGeneration || !REVALIDATION_CODES.includes(apiCode(error))) throw error;
+      await new Promise((resolve) => {
+        if (typeof global.setTimeout === "function") global.setTimeout(resolve, REVALIDATION_DELAY_MS);
+        else resolve();
+      });
+      if (generation !== validationGeneration) throw error;
+      return global.TakhunAdminApi.validateSession(token);
+    }
+  }
+
   async function validateCurrentSession() {
     const generation = ++validationGeneration;
     const local = readSession();
     if (!local) return { status: "unauthenticated" };
     let response;
     try {
-      response = await global.TakhunAdminApi.validateSession(local.token);
+      response = await requestValidation(local.token, generation);
     } catch (error) {
       if (generation !== validationGeneration) return { status: "stale" };
       const code = apiCode(error);

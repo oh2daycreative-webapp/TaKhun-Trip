@@ -15,6 +15,7 @@
   const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
   let initialized = false;
   let guardBusy = false;
+  let reloadRequested = false;
   let logoutBusy = false;
   let drawerOpen = false;
   let elements = null;
@@ -189,13 +190,15 @@
     elements.loginLink.hidden = true;
   }
 
-  function showRetry() {
+  function showRetry(result) {
     global.document.body.classList.add("admin-auth-pending");
     setHidden(elements.shell, true);
     setHidden(elements.content, true);
     elements.skip.hidden = true;
     elements.guard.hidden = false;
-    elements.guardMessage.textContent = "ตรวจสอบสิทธิ์ไม่สำเร็จ กรุณาลองอีกครั้งหรือกลับหน้าเข้าสู่ระบบ";
+    // F-02c: show only the fixed client error code so a failure can be diagnosed.
+    const code = result && typeof result.code === "string" && /^[A-Z_]{1,40}$/.test(result.code) ? ` (${result.code})` : "";
+    elements.guardMessage.textContent = `ตรวจสอบสิทธิ์ไม่สำเร็จ กรุณาลองอีกครั้งหรือกลับหน้าเข้าสู่ระบบ${code}`;
     elements.retry.hidden = false;
     elements.loginLink.hidden = false;
   }
@@ -225,13 +228,29 @@
         onRetry: showRetry
       });
     } catch (_guardError) {
-      showRetry();
+      showRetry(null);
       return { status: "unconfirmed" };
     } finally {
       guardBusy = false;
       elements.retry.disabled = false;
       elements.retry.setAttribute("aria-busy", "false");
     }
+  }
+
+  // F-02b: page modules stop their own setup when the first guard is not authenticated, so re-running only the
+  // guard reveals an empty page. Retry reloads the page (re-runs every module's init); nothing is unsaved here
+  // because protected content was never shown.
+  function retryPage() {
+    if (guardBusy || reloadRequested) return;
+    const location = global.location;
+    if (location && typeof location.reload === "function") {
+      reloadRequested = true;
+      elements.retry.disabled = true;
+      elements.retry.setAttribute("aria-busy", "true");
+      location.reload();
+      return;
+    }
+    runGuard();
   }
 
   async function handleLogout() {
@@ -250,7 +269,7 @@
     elements.opener.addEventListener("click", openDrawer);
     elements.close.addEventListener("click", closeDrawer);
     elements.backdrop.addEventListener("click", closeDrawer);
-    elements.retry.addEventListener("click", runGuard);
+    elements.retry.addEventListener("click", retryPage);
     elements.logout.addEventListener("click", handleLogout);
     global.document.addEventListener("keydown", handleKeydown);
     if (typeof global.matchMedia === "function") {

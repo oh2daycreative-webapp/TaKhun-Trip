@@ -280,11 +280,28 @@ async function proveContractRejects(check) {
   await assert.rejects(check, (error) => error instanceof assert.AssertionError);
 }
 
+// Independent timeout expectations (D-01/F-02): reads 12 s, session 30 s, every other action (writes) 45 s.
+const READ_TIMEOUT_MS = 12000;
+const SESSION_TIMEOUT_MS = 30000;
+const MUTATION_TIMEOUT_MS = 45000;
+const EXPECTED_SESSION_ACTIONS = Object.freeze(["adminLogin", "adminValidateSession", "adminLogout"]);
+const EXPECTED_READ_ACTIONS = Object.freeze([
+  "adminGetDashboard", "adminGetSettings", "adminGetPlaces", "adminGetPlaceDetail", "adminGetPlaceMediaOptions",
+  "adminGetGalleryMediaOptions", "adminInspectPlaceDependencies", "adminGetProducts", "adminGetProductDetail",
+  "adminGetEvents", "adminGetEventDetail", "adminGetRoutes", "adminGetRouteDetail", "adminGetGallery",
+  "adminGetGalleryDetail", "adminGetReviews", "adminGetReviewDetail"
+]);
+function expectedTimeout(action) {
+  if (EXPECTED_SESSION_ACTIONS.includes(action)) return SESSION_TIMEOUT_MS;
+  if (EXPECTED_READ_ACTIONS.includes(action)) return READ_TIMEOUT_MS;
+  return MUTATION_TIMEOUT_MS;
+}
+
 function assertSingleRequestCleanup(harness) {
   assert.equal(harness.controllers.length, 1);
   assert.equal(harness.calls.length, 1);
   assert.equal(harness.timers.length, 1);
-  assert.equal(harness.timers[0].delay, 12000);
+  assert.equal(harness.timers[0].delay, expectedTimeout(JSON.parse(harness.calls[0].options.body).action));
   assert.deepEqual(harness.clearedTimerIds, [harness.timers[0].id]);
   assert.equal(harness.timers[0].cleared, true);
   assert.equal(harness.timers.filter((timer) => !timer.cleared).length, 0);
@@ -342,7 +359,7 @@ async function assertAbortErrorSingleFetch(source = productionSource, observatio
   const pending = harness.api.validateSession(TOKEN);
   assert.equal(harness.controllers.length, 1);
   assert.equal(harness.timers.length, 1);
-  assert.equal(harness.timers[0].delay, 12000);
+  assert.equal(harness.timers[0].delay, SESSION_TIMEOUT_MS);
   harness.timers[0].callback();
   assertSafeError(await captureError(pending), "TIMEOUT", [TOKEN]);
   assert.equal(harness.controllers[0].signal.aborted, true);
@@ -689,8 +706,47 @@ test("login preserves credential strings and uses exact POST transport", async (
     payload: { username, password }
   });
   assert.equal(harness.calls[0].options.signal, harness.controllers[0].signal);
-  assert.deepEqual(harness.timers.map(({ delay, cleared }) => ({ delay, cleared })), [{ delay: 12000, cleared: true }]);
+  assert.deepEqual(harness.timers.map(({ delay, cleared }) => ({ delay, cleared })), [{ delay: SESSION_TIMEOUT_MS, cleared: true }]);
   assertNoSecretTransport(harness, [username, password]);
+});
+
+// F-13 (2026-10-16): the Apps Script echo redirect can bounce back to /exec as a GET without the body; the backend
+// then answers UNKNOWN_ACTION although the POST already ran. Reads get exactly one more attempt; writes never.
+const BOUNCED = { ok: false, error: { code: "UNKNOWN_ACTION", message: "ไม่พบ action ที่เรียก" } };
+
+test("F-13 a bounced read is attempted exactly once more and then succeeds", async () => {
+  for (const [method, invoke] of [
+    ["validateSession", (api) => api.validateSession(TOKEN)],
+    ["getPlaceDetail", (api) => validInvocation(api, "getPlaceDetail")],
+    ["getPlaces", (api) => validInvocation(api, "getPlaces")],
+    ["inspectPlaceDependencies", (api) => validInvocation(api, "inspectPlaceDependencies")]
+  ]) {
+    const good = method === "validateSession" ? success({ admin: ADMIN, expires_at: EXPIRES_AT }) : success(successForMethod(method));
+    const responses = [BOUNCED, good];
+    const harness = loadAdminApi({ fetchImpl: async () => textResponse(responses.shift()) });
+    await invoke(harness.api);
+    assert.equal(harness.calls.length, 2, method);
+    assert.equal(harness.calls[0].options.body, harness.calls[1].options.body, `${method}: same request`);
+  }
+});
+
+test("F-13 a read that bounces twice fails as REDIRECT_BOUNCE after exactly two requests", async () => {
+  const harness = loadAdminApi({ fetchImpl: async () => textResponse(BOUNCED) });
+  assertSafeError(await captureError(harness.api.validateSession(TOKEN)), "REDIRECT_BOUNCE", [TOKEN]);
+  assert.equal(harness.calls.length, 2);
+});
+
+test("F-13 a bounced write is never repeated and reports REDIRECT_BOUNCE (outcome unconfirmed)", async () => {
+  for (const method of ["createPlace", "savePlaceDraft", "publishPlace", "unpublishPlace", "archivePlace", "restorePlace"]) {
+    const harness = loadAdminApi({ fetchImpl: async () => textResponse(BOUNCED) });
+    assertSafeError(await captureError(validInvocation(harness.api, method)), "REDIRECT_BOUNCE", [TOKEN]);
+    assert.equal(harness.calls.length, 1, `${method}: exactly one POST`);
+  }
+  for (const invoke of [(api) => api.login("operator", "PasswordSentinel"), (api) => api.logout(TOKEN)]) {
+    const harness = loadAdminApi({ fetchImpl: async () => textResponse(BOUNCED) });
+    assertSafeError(await captureError(invoke(harness.api)), "REDIRECT_BOUNCE", [TOKEN, "PasswordSentinel"]);
+    assert.equal(harness.calls.length, 1, "session writes are never repeated by the API client");
+  }
 });
 
 test("validateSession and logout preserve a dash-prefixed token in body only", async () => {
@@ -723,14 +779,14 @@ test("clears the exact timeout after HTTP JSON text and network failures", async
     const harness = loadAdminApi({ fetchImpl: async () => fixture.response });
     const error = await captureError(harness.api.validateSession(TOKEN));
     assertSafeError(error, fixture.code, [TOKEN, "server-secret"]);
-    assert.deepEqual(harness.timers.map(({ delay, cleared }) => ({ delay, cleared })), [{ delay: 12000, cleared: true }]);
+    assert.deepEqual(harness.timers.map(({ delay, cleared }) => ({ delay, cleared })), [{ delay: SESSION_TIMEOUT_MS, cleared: true }]);
   }
   const harness = loadAdminApi({ fetchImpl: async () => { throw new Error(`network ${TOKEN}`); } });
   assertSafeError(await captureError(harness.api.logout(TOKEN)), "NETWORK_ERROR", [TOKEN]);
   assert.equal(harness.timers[0].cleared, true);
 });
 
-test("aborts at 12000 ms maps AbortError safely and never retries", async () => {
+test("session validation aborts at 30000 ms, maps AbortError safely and never retries", async () => {
   const observation = {};
   await assertAbortErrorSingleFetch(productionSource, observation);
   assert.equal(observation.fetchCount, 1);
@@ -882,7 +938,7 @@ test("simultaneous requests isolate controllers timers bodies and failures", asy
   assert.equal(harness.controllers.length, 2);
   assert.notEqual(harness.controllers[0], harness.controllers[1]);
   assert.notEqual(harness.controllers[0].signal, harness.controllers[1].signal);
-  assert.deepEqual(harness.timers.map((timer) => timer.delay), [12000, 12000]);
+  assert.deepEqual(harness.timers.map((timer) => timer.delay), [SESSION_TIMEOUT_MS, SESSION_TIMEOUT_MS]);
   pending[0].reject(new Error(`first failed ${TOKEN}`));
   assertSafeError(await captureError(first), "NETWORK_ERROR", [TOKEN]);
   assert.equal(harness.calls.length, 2);
@@ -977,6 +1033,68 @@ test("Create non-OK HTTP response is indeterminate even with an application-shap
   const harness=loadAdminApi({fetchImpl:async()=>({ok:false,status:503,text:async()=>{bodyReads++;return JSON.stringify({ok:false,error:{code:"SERVER_ERROR",message:"private"}});}})});
   assertSafeError(await captureError(validInvocation(harness.api,"createPlace")),"HTTP_ERROR");
   assert.equal(bodyReads,0);
+});
+
+async function assertTimeoutClasses(source = productionSource) {
+  const delayFor = async (invoke, fetchImpl = async () => textResponse(success({}))) => {
+    const harness = loadAdminApi({ source, fetchImpl });
+    try { await invoke(harness.api); } catch (_outcomeIrrelevant) { /* only the armed timer delay matters here */ }
+    assert.equal(harness.timers.length, 1);
+    return harness.timers[0].delay;
+  };
+  for (const [method, action] of Object.entries(PLACE_METHODS)) {
+    const delay = await delayFor((api) => validInvocation(api, method), async () => textResponse(success(successForMethod(method))));
+    assert.equal(delay, expectedTimeout(action), `${method} timeout`);
+  }
+  assert.equal(await delayFor((api) => api.createPlace(TOKEN, { content: editableContent() })), 45000, "create is a write");
+  assert.equal(await delayFor((api) => api.getPlaces(TOKEN, {})), 12000, "list is a read");
+  assert.equal(await delayFor((api) => api.login("operator", "correct horse battery")), 30000, "login is session");
+  assert.equal(await delayFor((api) => api.validateSession(TOKEN)), 30000, "validation is session");
+  assert.equal(await delayFor((api) => api.logout(TOKEN)), 30000, "logout is session");
+  assert.equal(await delayFor((api) => api.getDashboard(TOKEN)), 12000, "dashboard is a read");
+  assert.equal(await delayFor((api) => api.getSettings(TOKEN)), 12000, "settings read is a read");
+}
+
+test("timeout classes: reads 12000 ms, session 30000 ms, writes 45000 ms", async () => {
+  await assertTimeoutClasses();
+});
+
+test("every read action token in the client is classified explicitly (no stale or missing entries)", async () => {
+  const readTokens = new Set([...productionSource.matchAll(/"(adminGet[A-Za-z]+|adminInspect[A-Za-z]+)"/g)].map((match) => match[1]));
+  for (const token of readTokens) assert.ok(EXPECTED_READ_ACTIONS.includes(token), `unclassified read ${token}`);
+  for (const token of EXPECTED_READ_ACTIONS) assert.ok(readTokens.has(token), `stale read entry ${token}`);
+});
+
+test("a write aborts only at 45000 ms, maps to TIMEOUT once and never retries", async () => {
+  let fetchCount = 0;
+  const harness = loadAdminApi({
+    fetchImpl: async (_url, options) => {
+      fetchCount += 1;
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => { const error = new Error(`aborted ${TOKEN}`); error.name = "AbortError"; reject(error); });
+      });
+    }
+  });
+  const pending = harness.api.createPlace(TOKEN, { content: editableContent() });
+  assert.equal(harness.timers.length, 1);
+  assert.equal(harness.timers[0].delay, MUTATION_TIMEOUT_MS);
+  assert.equal(harness.controllers[0].signal.aborted, false);
+  harness.timers[0].callback();
+  assertSafeError(await captureError(pending), "TIMEOUT", [TOKEN]);
+  assert.equal(fetchCount, 1);
+  assert.equal(harness.controllers[0].abortCount, 1);
+  assert.equal(harness.timers[0].cleared, true);
+});
+
+test("timeout-class mutations are rejected (single short budget; new actions defaulting to read)", async () => {
+  await proveContractRejects(() => assertTimeoutClasses(mutatedSource(
+    "global.setTimeout(() => controller.abort(), requestTimeoutMs(body.action))",
+    "global.setTimeout(() => controller.abort(), READ_TIMEOUT_MS)"
+  )));
+  await proveContractRejects(() => assertTimeoutClasses(mutatedSource(
+    "    return MUTATION_TIMEOUT_MS;\n  }",
+    "    return READ_TIMEOUT_MS;\n  }"
+  )));
 });
 
 (async () => {

@@ -967,14 +967,73 @@ test("validation distinguishes unauthorized from transient unconfirmed outcomes"
     assert.equal(calls, 1);
     assert.equal(storage.values.has(STORAGE_KEY), false);
   }
-  for (const code of ["TIMEOUT", "NETWORK_ERROR", "HTTP_ERROR", "MALFORMED_RESPONSE", "SERVER_ERROR"]) {
+  // F-02 (2026-10-16): transport-level failures get exactly one re-validation; a backend SERVER_ERROR does not.
+  for (const [code, expectedCalls] of [["TIMEOUT", 2], ["NETWORK_ERROR", 2], ["HTTP_ERROR", 2], ["MALFORMED_RESPONSE", 2], ["SERVER_ERROR", 1]]) {
     const storage = makeStorage({ initial: JSON.stringify(SESSION) });
     let calls = 0;
     const harness = loadAuth({ storage, api: { validateSession: async () => { calls += 1; throw apiError(code); } } });
     assert.deepEqual(plain(await harness.auth.validateCurrentSession()), { status: "unconfirmed", code });
-    assert.equal(calls, 1);
+    assert.equal(calls, expectedCalls, code);
     assert.deepEqual(storedSession(storage), SESSION);
   }
+});
+
+test("F-13 a validation that still bounces is unconfirmed with its code, keeps the session and is not re-sent here", async () => {
+  const storage = makeStorage({ initial: JSON.stringify(SESSION) });
+  let calls = 0;
+  const harness = loadAuth({ storage, api: { validateSession: async () => { calls += 1; throw apiError("REDIRECT_BOUNCE"); } } });
+  harness.context.setTimeout = () => { throw new Error("no delayed re-validation for a bounce"); };
+  assert.deepEqual(plain(await harness.auth.validateCurrentSession()), { status: "unconfirmed", code: "REDIRECT_BOUNCE" });
+  assert.equal(calls, 1, "the API client owns the single bounce retry");
+  assert.deepEqual(storedSession(storage), SESSION);
+});
+
+test("F-02 one re-validation after a transport failure recovers the session after 1500 ms", async () => {
+  for (const code of ["TIMEOUT", "NETWORK_ERROR", "HTTP_ERROR", "MALFORMED_RESPONSE"]) {
+    const storage = makeStorage({ initial: JSON.stringify(SESSION) });
+    const delays = [];
+    let calls = 0;
+    const harness = loadAuth({ storage, api: { validateSession: async () => { calls += 1; if (calls === 1) throw apiError(code); return validServerSession(); } } });
+    harness.context.setTimeout = (callback, delay) => { delays.push(delay); callback(); return 1; };
+    const states = [];
+    const result = await harness.auth.guardProtectedPage({ onAuthenticated: () => states.push("revealed"), onRetry: () => states.push("retry") });
+    assert.equal(result.status, "authenticated", code);
+    assert.equal(calls, 2);
+    assert.deepEqual(delays, [1500]);
+    assert.deepEqual(states, ["revealed"]);
+  }
+});
+
+test("F-02 re-validation never runs for auth-invalid or application codes and never more than once", async () => {
+  for (const code of ["UNAUTHORIZED", "VALIDATION_ERROR", "FORBIDDEN", "NOT_FOUND", "CONFLICT", "RATE_LIMITED"]) {
+    const storage = makeStorage({ initial: JSON.stringify(SESSION) });
+    let calls = 0;
+    const harness = loadAuth({ storage, api: { validateSession: async () => { calls += 1; throw apiError(code); } } });
+    harness.context.setTimeout = () => { throw new Error("no delay expected"); };
+    await harness.auth.validateCurrentSession();
+    assert.equal(calls, 1, code);
+  }
+  const storage = makeStorage({ initial: JSON.stringify(SESSION) });
+  let calls = 0;
+  const harness = loadAuth({ storage, api: { validateSession: async () => { calls += 1; throw apiError("NETWORK_ERROR"); } } });
+  harness.context.setTimeout = (callback) => { callback(); return 1; };
+  assert.deepEqual(plain(await harness.auth.validateCurrentSession()), { status: "unconfirmed", code: "NETWORK_ERROR" });
+  assert.equal(calls, 2, "exactly one extra attempt");
+});
+
+test("F-02 a newer validation during the delay makes the older one stale without a second request", async () => {
+  const storage = makeStorage({ initial: JSON.stringify(SESSION) });
+  let calls = 0;
+  let release;
+  const harness = loadAuth({ storage, api: { validateSession: async () => { calls += 1; if (calls === 1) throw apiError("TIMEOUT"); return validServerSession(); } } });
+  harness.context.setTimeout = (callback) => { release = callback; return 1; };
+  const older = harness.auth.validateCurrentSession();
+  await new Promise((resolve) => setImmediate(resolve));
+  const newer = await harness.auth.validateCurrentSession();
+  release();
+  assert.deepEqual(plain(await older), { status: "stale" });
+  assert.equal(newer.status, "authenticated");
+  assert.equal(calls, 2, "older validation did not send its re-validation");
 });
 
 test("NOT_FOUND and CONFLICT remain safe application outcomes without invalidating the session", async () => {
@@ -1573,7 +1632,14 @@ test("login page delegates return sanitization and has no alternate secret or na
 test("production source excludes alternate auth persistence retries and secret sinks", async () => {
   assert.doesNotMatch(productionSource, /localStorage|document\s*\.\s*cookie|indexedDB|window\s*\.\s*name|\bAuthorization\b|\beval\s*\(|new\s+Function|console\s*\./i);
   assert.doesNotMatch(productionSource, /URLSearchParams\s*\([^)]*token|location\s*\.(?:search|hash)[\s\S]{0,120}token/i);
-  assert.doesNotMatch(productionSource, /setInterval|setTimeout/i);
+  // F-02 (owner-approved 2026-10-16): antivirus fetch wrappers can drop the first request of a page, so session
+  // validation (read-only) may wait 1.5 s and re-validate exactly ONCE, only after a transport-level failure
+  // (NETWORK_ERROR/TIMEOUT/HTTP_ERROR/MALFORMED_RESPONSE), never after UNAUTHORIZED. Every other timer stays forbidden.
+  assert.doesNotMatch(productionSource, /setInterval/i);
+  assert.equal((productionSource.match(/setTimeout/g) || []).length, 2, "only the guarded re-validation delay");
+  assert.match(productionSource, /const REVALIDATION_CODES = Object\.freeze\(\["TIMEOUT", "NETWORK_ERROR", "HTTP_ERROR", "MALFORMED_RESPONSE"\]\);/);
+  assert.match(productionSource, /const REVALIDATION_DELAY_MS = 1500;/);
+  assert.equal((productionSource.match(/TakhunAdminApi\.validateSession\(/g) || []).length, 2, "one first attempt + one re-validation");
   assert.match(productionSource, /TAKHUN_ADMIN_SESSION/);
   assert.match(productionSource, /sessionStorage/);
 });

@@ -60,7 +60,7 @@
             <h2>รายการเส้นทาง</h2>
             <button class="button" type="button" data-route-create>สร้างเส้นทางใหม่</button>
           </div>
-          <form class="admin-routes__filters" data-route-filters>
+          <form autocomplete="off" class="admin-routes__filters" data-route-filters>
             <label>ค้นหา <input type="search" name="keyword" maxlength="200" autocomplete="off"></label>
             <label>สถานะ
               <select name="status"><option value="">ทุกสถานะ</option><option value="draft">ฉบับร่าง</option><option value="published">เผยแพร่</option><option value="hidden">ซ่อน</option><option value="archived">เก็บถาวร</option><option value="deleted">ลบแล้ว</option></select>
@@ -82,7 +82,7 @@
           <div class="admin-routes__toolbar"><h2 data-route-editor-title>รายละเอียดเส้นทาง</h2><button class="button" type="button" data-route-back>กลับรายการเส้นทาง</button></div>
           <p data-route-identity></p>
           <p class="content-notice" data-route-editor-status role="status" aria-live="assertive" aria-atomic="true"></p>
-          <form class="admin-routes__editor" data-route-editor novalidate>
+          <form autocomplete="off" class="admin-routes__editor" data-route-editor novalidate>
             <fieldset data-route-content-fields><legend>ข้อมูลเส้นทาง</legend>
               <div class="content-grid">
                 <label class="content-field">ชื่อภาษาไทย * <input name="name_th" required maxlength="20000"></label>

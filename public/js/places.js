@@ -8,9 +8,10 @@
     return { records: [], filters: { keyword: "", district: "", category: "", route_group: "" }, page: 1, status: "idle", error: null };
   }
 
+  // F-07: live published places (no bundled snapshot fallback).
   async function loadPlaces() {
-    if (!global.TakhunPlaceData?.listPlaces) throw new Error("Canonical place content is unavailable.");
-    return global.TakhunPlaceData.listPlaces();
+    if (!global.TakhunPlaceData?.loadPublishedPlaces) throw new Error("Live place content is unavailable.");
+    return global.TakhunPlaceData.loadPublishedPlaces();
   }
 
   function getFilterOptions(records) {

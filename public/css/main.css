@@ -124,6 +124,7 @@ th { font-weight: var(--font-weight-semibold); }
 .button:hover { transform: translateY(-2px); box-shadow: 0 12px 26px rgba(0, 121, 107, .22); }
 .button svg, .text-link svg { width: 19px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
 .button:disabled { cursor: not-allowed; opacity: .65; }
+.button[hidden] { display: none; } /* F-06: .button's display must not override the hidden attribute ("แสดงเพิ่มเติม" stayed visible) */
 input { min-height: 44px; padding: .65rem .8rem; border: 1px solid #cbd5e1; border-radius: 12px; }
 textarea, select { min-height: 44px; padding: .65rem .8rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); }
 textarea { min-height: 7rem; resize: vertical; }

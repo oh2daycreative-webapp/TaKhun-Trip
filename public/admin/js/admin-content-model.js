@@ -74,7 +74,7 @@
   function createController(kind, role, api, token) {
     const d = domain(kind);
     const state = { record: null, busy: false, blocked: false, unknown: false, conflict: false, message: '', auditWarning: false };
-    const unknownCodes = ['TIMEOUT', 'NETWORK_ERROR', 'HTTP_ERROR', 'MALFORMED_RESPONSE', 'OUTCOME_UNKNOWN', 'SERVER_ERROR'];
+    const unknownCodes = ['TIMEOUT', 'NETWORK_ERROR', 'HTTP_ERROR', 'MALFORMED_RESPONSE', 'OUTCOME_UNKNOWN', 'SERVER_ERROR', 'REDIRECT_BOUNCE'];
     function reset() { if (state.busy || state.blocked) return false; Object.assign(state, { record: null, unknown: false, conflict: false, message: '', auditWarning: false }); return true; }
     async function load(id) {
       if (state.busy) return false;

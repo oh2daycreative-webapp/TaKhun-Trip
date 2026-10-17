@@ -2,7 +2,13 @@
 
 (function createAdminApiClient(global) {
   const CONTENT_TYPE = "text/plain;charset=utf-8";
-  const REQUEST_TIMEOUT_MS = 12000;
+  // Apps Script round trips include the /exec redirect and script-lock waits; a committed create was measured
+  // at 11.6 s server time alone, so writes and session calls receive longer client budgets than reads.
+  // A timeout still maps to TIMEOUT after exactly one fetch, which callers treat as "cannot confirm".
+  const READ_TIMEOUT_MS = 12000;
+  const SESSION_TIMEOUT_MS = 30000;
+  const MUTATION_TIMEOUT_MS = 45000;
+  const SESSION_ACTIONS = Object.freeze(["adminLogin", "adminValidateSession", "adminLogout"]);
   const SAFE_MESSAGE = "Admin API request failed.";
   const BACKEND_ERROR_CODES = Object.freeze([
     "VALIDATION_ERROR",
@@ -540,14 +546,39 @@
       throw safeError("MALFORMED_RESPONSE");
     }
     if (reviewAction && result.error.code === "INVALID_TRANSITION") throw safeError("INVALID_TRANSITION");
+    // F-13: this client only sends known actions, so UNKNOWN_ACTION means the Apps Script echo redirect bounced
+    // back to /exec as a body-less request. The POST itself may already have run on the server.
+    if (result.error.code === "UNKNOWN_ACTION") throw safeError("REDIRECT_BOUNCE");
     const code = BACKEND_ERROR_CODES.includes(result.error.code) || domain && ["INVALID_TRANSITION", "DUPLICATE_ID"].includes(result.error.code) ? result.error.code : "SERVER_ERROR";
     throw safeError(code);
   }
 
+  // Unknown actions receive the longest budget so a new write can never inherit the short read timeout.
+  function requestTimeoutMs(action) {
+    if (SESSION_ACTIONS.includes(action)) return SESSION_TIMEOUT_MS;
+    if (typeof action === "string" && (action.startsWith("adminGet") || action === "adminInspectPlaceDependencies")) return READ_TIMEOUT_MS;
+    return MUTATION_TIMEOUT_MS;
+  }
+
+  // F-13: a read is side-effect free, so a redirect bounce gets exactly one more attempt. A write is never
+  // repeated: the caller receives REDIRECT_BOUNCE and must treat the outcome as unconfirmed.
+  function isReadAction(action) {
+    return action === "adminValidateSession" || requestTimeoutMs(action) === READ_TIMEOUT_MS;
+  }
+
   async function request(body) {
+    try {
+      return await requestOnce(body);
+    } catch (error) {
+      if (!error || error.code !== "REDIRECT_BOUNCE" || !isReadAction(body.action)) throw error;
+      return requestOnce(body);
+    }
+  }
+
+  async function requestOnce(body) {
     const endpoint = apiEndpoint();
     const controller = typeof global.AbortController === "function" ? new global.AbortController() : null;
-    const timer = controller ? global.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS) : null;
+    const timer = controller ? global.setTimeout(() => controller.abort(), requestTimeoutMs(body.action)) : null;
     const options = {
       method: "POST",
       headers: { "Content-Type": CONTENT_TYPE },

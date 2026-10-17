@@ -212,6 +212,28 @@ async function controllerTests() {
     assert.equal(controller.getSnapshot().focusTarget, "", "an invalid deep link must not steal focus");
   }
 
+  // F-08 (2026-10-16): result cards show translated labels, never raw codes such as "nature" / "ban_ta_khun".
+  assert.match(source, /appendMeta\(body, "search\.meta_category", codeLabel\("places\.categories", item\.category\)\)/);
+  assert.match(source, /appendMeta\(body, "search\.meta_district", codeLabel\("places\.districts", item\.district\)\)/);
+  assert.match(source, /appendMeta\(body, "search\.meta_category", codeLabel\("products\.categories", item\.category\)\)/);
+  const i18nContext = { document: { documentElement: {}, addEventListener() {}, querySelectorAll() { return []; }, readyState: "complete" },
+    localStorage: { getItem() { return null; }, setItem() {} }, navigator: { language: "th" }, CustomEvent: function CustomEvent() {} };
+  i18nContext.window = i18nContext;
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../public/js/i18n.js"), "utf8"), i18nContext, { filename: "i18n.js" });
+  const backend = (file, name) => JSON.parse(fs.readFileSync(path.join(__dirname, "../apps-script", file), "utf8").match(new RegExp(`var ${name} = (\\[[^\\]]*\\])`))[1]);
+  const coverage = [["places.categories", backend("AdminPlaceService.gs", "AdminPlaceService_CATEGORIES_")],
+    ["places.districts", backend("ProductService.gs", "ProductService_DISTRICTS_")],
+    ["products.categories", backend("ProductService.gs", "ProductService_CATEGORIES_")]];
+  for (const lang of ["th", "en"]) {
+    i18nContext.TakhunI18n.setCurrentLang(lang);
+    for (const [namespace, codes] of coverage) {
+      for (const code of codes) {
+        const key = `${namespace}.${code}`;
+        assert.notEqual(i18nContext.TakhunI18n.t(key), key, `${lang}: missing label ${key}`);
+      }
+    }
+  }
+
   process.stdout.write("Search behavior verification passed.\n");
 }
 

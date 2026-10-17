@@ -321,7 +321,7 @@ function transactionFixture(action, options = {}) {
   }
   if (action === "UNPUBLISH") {
     return {
-      places: [place("TX-PLACE", { entity_version: 2, published_version: 2, name_th: "retained published" })],
+      places: [place("TX-PLACE", { entity_version: 2, published_version: 2, name_th: "retained published", ...(options.placeOverrides || {}) })],
       drafts: options.unpublishWithDraft ? [draft("TX-PLACE", 2, 2, { name_th: "preserved working draft" })] : []
     };
   }
@@ -333,7 +333,7 @@ function transactionFixture(action, options = {}) {
   }
   if (action === "RESTORE") {
     return {
-      places: [place("TX-PLACE", { status: "archived", entity_version: 4, published_version: 3 })],
+      places: [place("TX-PLACE", { status: "archived", entity_version: 4, published_version: 3, ...(options.placeOverrides || {}) })],
       drafts: options.restoreWithDraft ? [draft("TX-PLACE", 4, 3, { name_th: "retained archived draft" })] : []
     };
   }
@@ -545,7 +545,9 @@ function loadTransactionBackend(action, options = {}) {
       }
       const sheet = sheets[name];
       for (const header of requiredHeaders) assert.equal(sheet.headers.includes(header), true);
-      const row = sheet.headers.map((header) => Object.prototype.hasOwnProperty.call(record, header) ? record[header] : "");
+      // F-09: like real Sheets, a JavaScript array cannot be stored in a cell; it is stored as text.
+      const stored = (value) => options.sheetsCoercion && Array.isArray(value) ? value.join(",") : value;
+      const row = sheet.headers.map((header) => Object.prototype.hasOwnProperty.call(record, header) ? stored(record[header]) : "");
       sheet.rows.push(row);
       sheet.formulas.push(new Set());
       if (name === "places" && options.failPlaceAppendAfterWrite) throw new Error("synthetic Place append internals");
@@ -1508,7 +1510,9 @@ test("Save failure selectively compensates touched fields without destroying unt
   assert.equal(runtime.sheets.place_drafts.rows[0][DRAFT_HEADERS.indexOf("created_at")], "");
   const actionWrites = runtime.calls.writes.filter((write) => write.phase === "action" && write.name !== "activity_logs");
   assert.equal(actionWrites.every((write) => write.method === "update"), true, "Save must use selective existing-row mutation");
-  assert.equal(actionWrites.every((write) => Object.keys(write.record).length === 1), true, "each selective action helper call writes one field");
+  // D-01b (2026-10-16): one selective helper call per sheet replaces one call per field (47 full-sheet
+  // reads made a draft save take 28-50 s). The touched field set and order are unchanged.
+  assert.deepEqual(actionWrites.map((write) => write.name), ["places", "place_drafts"], "one selective action helper call per sheet");
   const placeActionFields = actionWrites.filter((write) => write.name === "places").flatMap((write) => Object.keys(write.record));
   const draftActionFields = actionWrites.filter((write) => write.name === "place_drafts").flatMap((write) => Object.keys(write.record));
   assert.deepEqual(placeActionFields, ["entity_version", "updated_at", "updated_by"]);
@@ -1518,11 +1522,13 @@ test("Save failure selectively compensates touched fields without destroying unt
   }
   const restoreWrites = runtime.calls.writes.filter((write) => write.phase === "restore" && write.name !== "activity_logs");
   assert.equal(restoreWrites.every((write) => write.method === "update"), true, "Save compensation must remain selective");
-  assert.equal(restoreWrites.every((write) => Object.keys(write.record).length === 1), true, "each selective restore helper call writes one field");
-  assert.deepEqual(
-    restoreWrites.map((write) => [write.name, Object.keys(write.record)[0]]),
-    draftActionFields.map((field) => ["place_drafts", field]).concat(placeActionFields.map((field) => ["places", field]))
-  );
+  assert.deepEqual(restoreWrites.map((write) => write.name), ["place_drafts", "places"], "one selective restore helper call per sheet, drafts first");
+  const restoredDraftFields = Object.keys(restoreWrites[0].record);
+  const restoredPlaceFields = Object.keys(restoreWrites[1].record);
+  assert.equal(restoredDraftFields.every((field) => draftActionFields.includes(field)), true, "compensation stays within the touched draft fields");
+  assert.equal(restoredPlaceFields.every((field) => placeActionFields.includes(field)), true, "compensation stays within the touched Place fields");
+  for (const changed of ["description_th", "draft_version", "updated_at", "updated_by"]) assert.equal(restoredDraftFields.includes(changed), true, `draft ${changed} restored`);
+  for (const changed of ["entity_version", "updated_at", "updated_by"]) assert.equal(restoredPlaceFields.includes(changed), true, `Place ${changed} restored`);
 
   const verificationFailure = loadTransactionBackend("UPDATE_DRAFT", {
     formulaCells: { places: { description_th: "" }, place_drafts: { cover_image_url: "" } },
@@ -1575,8 +1581,10 @@ test("Save field-boundary failure compensates only attempted fields and preserve
   const draftRestoreFields = draftBoundary.calls.writes
     .filter((write) => write.phase === "restore" && write.name === "place_drafts")
     .flatMap((write) => Object.keys(write.record));
-  assert.deepEqual(draftActionFields, ["name_th"], "only the attempted draft field may enter the action call");
-  assert.deepEqual(draftRestoreFields, ["name_th"], "only the attempted draft field may enter compensation");
+  // D-01b: the single action call carries the full ordered field list; the failure stops after name_th,
+  // so compensation must rewrite only the cell that actually changed and leave later formula cells alone.
+  assert.deepEqual(draftActionFields, [...CONTENT_KEYS, "draft_version", "updated_at", "updated_by"], "one ordered action call for the draft");
+  assert.deepEqual(draftRestoreFields, ["name_th"], "only the changed draft field may enter compensation");
   assert.equal(draftBoundary.calls.events.at(-1), "releaseLock");
   const draftFinalRestoreRead = Math.max(
     draftBoundary.calls.events.lastIndexOf("read:places:restore"),
@@ -1601,8 +1609,8 @@ test("Save field-boundary failure compensates only attempted fields and preserve
   const placeRestoreFields = placeBoundary.calls.writes
     .filter((write) => write.phase === "restore" && write.name === "places")
     .flatMap((write) => Object.keys(write.record));
-  assert.deepEqual(placeActionFields, ["entity_version"], "only the attempted Place field may enter the action call");
-  assert.deepEqual(placeRestoreFields, ["entity_version"], "only the attempted Place field may enter compensation");
+  assert.deepEqual(placeActionFields, ["entity_version", "updated_at", "updated_by"], "one ordered action call for the Place");
+  assert.deepEqual(placeRestoreFields, ["entity_version"], "only the changed Place field may enter compensation");
   assert.equal(populatedRows(placeBoundary, "activity_logs").length, 0);
   assert.equal(placeBoundary.calls.events.at(-1), "releaseLock");
 });
@@ -2032,10 +2040,37 @@ test("Create and Save success and failure access only business sheets and do not
       }
       assert.ok(opened.length > 0);
       assert.deepEqual(opened.filter((name) => !["places", "place_drafts", "activity_logs"].includes(name)), []);
-      assert.deepEqual(logs, []);
+      // F-10 (owner-approved 2026-10-16): a fail-closed write logs exactly ONE structured line (fixed codes,
+      // operation, rollback outcome, optional field name + value kinds) so production failures are diagnosable;
+      // success logs nothing; no value, id, token or free-text message is ever logged.
+      if (!fail) {
+        assert.deepEqual(logs, []);
+      } else {
+        assert.equal(logs.length, 1);
+        assert.equal(logs[0].length, 1);
+        const entry = JSON.parse(logs[0][0]);
+        assert.deepEqual(Object.keys(entry).filter((key) => !["event", "operation", "code", "rollback", "error_name", "verify_mismatch"].includes(key)), []);
+        assert.equal(entry.event, "ADMIN_PLACE_FAIL_CLOSED");
+        assert.equal(entry.operation, action);
+        assert.match(entry.code, /^[A-Z][A-Z0-9_]*$/);
+        assert.equal(entry.rollback, "restored");
+        assert.doesNotMatch(logs[0][0], /TOKEN|ADM-|TX-PLACE|private|@/);
+      }
       assert.equal(runtime.lock.released, 1);
     }
   }
+});
+
+test("F-10 a read-back mismatch logs sheet, field and value kinds only", () => {
+  const runtime = loadTransactionBackend("UPDATE_DRAFT", { corruptDraftAfterUpdate: true });
+  const logs = [];
+  runtime.context.console = { error(...args) { logs.push(args); } };
+  assertError(callSave(runtime), "SERVER_ERROR");
+  assert.equal(logs.length, 1);
+  const entry = JSON.parse(logs[0][0]);
+  assert.equal(entry.code, "ADMIN_PLACE_WRITE_VERIFY");
+  assert.deepEqual(entry.verify_mismatch, { sheet: "place_drafts", field: "description_th", expected_kind: "empty", actual_kind: "string" });
+  assert.doesNotMatch(logs[0][0], /synthetic|corrupted/);
 });
 
 
@@ -2453,6 +2488,34 @@ test("Unpublish preserves or reconstructs one draft synchronizes versions hides 
     assert.equal(runtime.calls.propertyWrites.filter((entry) => entry.phase === "action").length, 1);
     assert.equal(sheetRecord(runtime, "activity_logs").action, "UNPUBLISH");
     assertError(publicPlaceDetail(runtime), "NOT_FOUND");
+  }
+});
+
+test("F-09 unpublish/restore without a draft stores the place's stored values, so Sheets-like storage verifies", () => {
+  // Real Sheets stores a JavaScript array as text; the old code wrote projectContent_ (arrays, unescaped text)
+  // into the new draft row, the strict read-back failed and every such unpublish/restore rolled back.
+  const placeOverrides = { tags: "nature|lake", nearby_place_ids: "", description_th: "'=formula-looking detail" };
+  for (const action of ["UNPUBLISH", "RESTORE"]) {
+    const runtime = loadTransactionBackend(action, { sheetsCoercion: true, placeOverrides });
+    const result = callLifecycle(runtime, action);
+    assert.equal(result.ok, true, action);
+    const draftRow = sheetRecord(runtime, "place_drafts");
+    assert.equal(draftRow.tags, "nature|lake", `${action}: list stays in storage form`);
+    assert.equal(draftRow.nearby_place_ids, "");
+    assert.equal(draftRow.description_th, "'=formula-looking detail", `${action}: escaped text stays escaped`);
+    assert.equal(typeof draftRow.is_featured, "boolean");
+    assert.equal(sheetRecord(runtime, "activity_logs").action, action);
+
+    // The same storage with the OLD draft content (API projection) fails closed — this test detects F-09.
+    const old = loadTransactionBackend(action, { sheetsCoercion: true, placeOverrides });
+    old.context.AdminPlaceService_storedContent_ = old.context.AdminPlaceService_projectContent_;
+    const logs = [];
+    old.context.console = { error(...args) { logs.push(args); } };
+    assertError(callLifecycle(old, action), "SERVER_ERROR");
+    const entry = JSON.parse(logs[0][0]);
+    assert.equal(entry.code, "ADMIN_PLACE_WRITE_VERIFY");
+    assert.deepEqual(entry.verify_mismatch, { sheet: "place_drafts", field: "tags", expected_kind: "array", actual_kind: "string" });
+    assert.equal(entry.operation, action);
   }
 });
 

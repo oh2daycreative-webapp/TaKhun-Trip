@@ -36,7 +36,7 @@
         if (global.confirm("ตรวจสอบรายการและรายละเอียดแล้วว่าไม่มีรายการที่สร้างครั้งก่อนใช่หรือไม่? หากพบรายการแล้วให้เปิดรายการนั้นแทน")) { marker(false); return showList(); }
       }));
     }
-    const form = node("form", undefined, "content-filters");
+    const form = node("form", undefined, "content-filters"); form.setAttribute("autocomplete", "off"); // F-03
     const keyword = node("input"); keyword.type = "search"; keyword.maxLength = 200; keyword.value = filters.keyword;
     const status = node("select"); append(status, option("", "ทุกสถานะ")); Object.keys(model.statuses).forEach(s => append(status, option(s, model.statuses[s]))); status.value = filters.status;
     const category = node("select"); append(category, option("", "ทุกประเภท")); domain.categories.forEach(c => append(category, option(c, model.categoryLabels[c] || c))); category.value = filters[domain.category] || "";
@@ -126,7 +126,7 @@
     }); append(host, reconcileFound); }
     append(host, node("p", "ช่องที่มี * จำเป็นต้องกรอก · การแก้ไขรายการที่เผยแพร่แล้วมีผลต่อเว็บไซต์ทันที"));
     editorStatus = statusNode(); append(host, editorStatus);
-    editorForm = node("form", undefined, "content-editor"); editorForm.noValidate = true;
+    editorForm = node("form", undefined, "content-editor"); editorForm.noValidate = true; editorForm.setAttribute("autocomplete", "off"); // F-03: no browser autofill of personal data into content
     const grid = node("div", undefined, "content-grid");
     for (const field of domain.fields) {
       const input = inputFor(field, content), id = "content-field-" + field;
