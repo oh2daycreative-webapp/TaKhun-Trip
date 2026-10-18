@@ -8,7 +8,8 @@ const files = { routes: "public/admin/js/admin-routes.js", reviews: "public/admi
 const helpers = {};
 for (const [name, file] of Object.entries(files)) {
   const source = fs.readFileSync(path.join(root, file), "utf8");
-  const match = /function thaiDateTime\(value\)\{.*?\}\}\n/s.exec(source);
+  // Line-ending independent: a Windows checkout has CRLF.
+  const match = /function thaiDateTime\(value\)\{.*?\}\}(?=\r?\n)/s.exec(source);
   assert.ok(match, `${file} defines thaiDateTime`);
   helpers[name] = match[0];
 }
