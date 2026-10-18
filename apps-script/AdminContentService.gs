@@ -72,6 +72,15 @@ function AdminContentService_text_(value, limit) {
   return text;
 }
 
+// F-19: a phone typed as +66… is stored in national form (0…), so no stored phone starts with "+"
+// (a leading + can be read by Sheets as a formula). Other + numbers are still rejected by the text guard.
+function AdminContentService_phone_(value) {
+  if (typeof value !== "string") return value;
+  var text = value.trim();
+  if (!/^\+66/.test(text)) return value;
+  return "0" + text.slice(3).replace(/^[\s.\-]*(?:\(0\)|0)?[\s.\-]*/, "");
+}
+
 function AdminContentService_url_(value) {
   var text = AdminContentService_text_(value, 2048);
   if (!text) return "";

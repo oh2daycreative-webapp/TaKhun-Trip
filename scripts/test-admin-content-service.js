@@ -531,5 +531,18 @@ test("Event calendar leap-century boundaries and equal-time rejection", () => {
   const h = harness(); error(h.call("createEvent", "editor", content("Event", { start_time: "10:00", end_time: "10:00" })), "VALIDATION_ERROR"); assert.equal(h.effects.length, 0);
 });
 
+// F-19: +66 phones are stored in national form; other leading + still fails validation before any write.
+for (const [kind, field, idKey] of [["Product", "phone", "product_id"], ["Event", "contact_phone", "event_id"]]) {
+  test(kind + " " + field + " +66 is stored as 0… and other + numbers are rejected", () => {
+    const h = harness();
+    const created = h.call("create" + kind, "editor", content(kind, { [field]: "+66 81 234 5678" }));
+    assert.equal(created.ok, true, JSON.stringify(created));
+    assert.equal(h.call("adminGet" + kind + "Detail", "viewer", { [idKey]: created.data[idKey] }).data.content[field], "081 234 5678");
+    const before = h.tables.activity_logs.length;
+    error(h.call("create" + kind, "editor", content(kind, { [field]: "+1 650 555 0100" })), "VALIDATION_ERROR");
+    assert.equal(h.tables.activity_logs.length, before);
+  });
+}
+
 if (require.main === module) console.log(`${checks} Admin content checks passed.`);
 module.exports = { harness, content, productFields, eventFields, test, error };

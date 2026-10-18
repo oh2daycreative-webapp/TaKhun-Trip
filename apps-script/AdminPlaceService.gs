@@ -751,6 +751,15 @@ function AdminPlaceService_requireExactKeys_(source, required) {
   if (Object.keys(source).length !== required.length) throw new Error("VALIDATION_ERROR");
 }
 
+// F-19: a phone typed as +66… is stored in national form (0…), so no stored phone starts with "+"
+// (a leading + can be read by Sheets as a formula). Other + numbers are still rejected by the text guard.
+function AdminPlaceService_phone_(value) {
+  if (typeof value !== "string") return value;
+  var text = value.trim();
+  if (!/^\+66/.test(text)) return value;
+  return "0" + text.slice(3).replace(/^[\s.\-]*(?:\(0\)|0)?[\s.\-]*/, "");
+}
+
 function AdminPlaceService_normalizeEditableContent_(content) {
   var source = AdminPlaceService_plainObject_(content, false);
   AdminPlaceService_requireExactKeys_(source, AdminPlaceService_CONTENT_HEADERS_);
@@ -776,6 +785,8 @@ function AdminPlaceService_normalizeEditableContent_(content) {
       else throw new Error("VALIDATION_ERROR");
     } else if (AdminPlaceService_URL_HEADERS_.indexOf(header) !== -1) {
       normalized[header] = AdminPlaceService_normalizeUrl_(value);
+    } else if (header === "phone") {
+      normalized[header] = AdminPlaceService_normalizeText_(AdminPlaceService_phone_(value));
     } else {
       normalized[header] = AdminPlaceService_normalizeText_(value);
     }

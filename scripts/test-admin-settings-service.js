@@ -146,11 +146,13 @@ test("historical apostrophes and valid +66 phones round-trip as literal logical 
 test("request validation accepts the approved fields and rejects coercion unsafe forms", () => {
   const { context } = load();
   const validate = required(context, "AdminSettingsService_validateRequestSettings_");
-  assert.deepEqual(plain(validate(logical())), logical());
+  // F-19: +66 phones are stored in national form; other + numbers stay rejected.
+  assert.deepEqual(plain(validate(logical())), logical({ main_phone: "077 123 456" }));
+  for (const [typed, stored] of [["+66 81 234 5678", "081 234 5678"], ["+66812345678", "0812345678"], ["+66 (0)77 123 456", "077 123 456"], ["+66077123456", "077123456"], ["081 234 5678", "081 234 5678"]]) assert.equal(plain(validate(logical({ main_phone: typed }))).main_phone, stored);
+  for (const rejected of ["+1 650 555 0100", "+44 20 7946 0000"]) assert.throws(() => validate(logical({ main_phone: rejected })), /VALIDATION_ERROR/);
   for (const candidate of [
     logical({ default_language: "TH" }),
     logical({ reviews_enabled: "true" }),
-    logical({ main_phone: "+66077123456" }),
     logical({ main_phone: "077-call-now" }),
     logical({ main_email: "a@@example.com" }),
     logical({ facebook_url: "https://user@example.com/path" }),
@@ -176,7 +178,7 @@ test("super admin full replacement writes only changed value and timestamp cells
   assert.equal(response.ok, true);
   assert.equal(response.data.changed, true);
   assert.equal(response.data.audit_status, "recorded");
-  assert.deepEqual(response.data.settings, replacement);
+  assert.deepEqual(response.data.settings, { ...replacement, main_phone: "081 234 5678" });
   assert.notEqual(response.data.revision, current.data.revision);
   assert.equal(harness.cacheValues.has("public:getSettings"), false);
   assert.deepEqual(harness.writes.map((write) => write.field), ["setting_value", "updated_at", "setting_value", "updated_at"]);
