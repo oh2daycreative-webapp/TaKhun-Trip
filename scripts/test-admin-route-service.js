@@ -1494,7 +1494,7 @@ for (const unsafe of ["formulaField", "badFormatField"]) {
       expected_revision: created.revision,
       content: routeContent({ name_th: "Unsafe destination" })
     });
-    error(result, "SERVER_ERROR");
+    error(result, "WRITE_REJECTED"); // F-20: rejected before any write
     assert.equal(h.effects.length, effectsBefore, "unsafe reordered physical cell must fail before mutation");
   });
 }

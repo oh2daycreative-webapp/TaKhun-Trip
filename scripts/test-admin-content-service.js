@@ -165,8 +165,9 @@ for (const kind of ["Product", "Event"]) {
     const h = harness({ releaseFail: true }); create(h); assert.equal(h.tables[table].length, 2);
   });
   test(kind + " preflight lock/schema/formats/cache failures do not mutate", () => {
-    for (const options of [{ lockFail: true }, { badFormat: true }, { cacheRemoveFail: true }]) {
-      const h = harness(options); error(h.call("create" + kind, "editor", content(kind)), "SERVER_ERROR"); assert.equal(h.effects.length, 0);
+    // F-20: lock busy and pre-write format rejections are definite "nothing saved" codes, not uncertain SERVER_ERROR.
+    for (const [options, code] of [[{ lockFail: true }, "CONTENT_LOCK"], [{ badFormat: true }, "WRITE_REJECTED"], [{ cacheRemoveFail: true }, "SERVER_ERROR"]]) {
+      const h = harness(options); error(h.call("create" + kind, "editor", content(kind)), code); assert.equal(h.effects.length, 0);
     }
     const h = harness(); h.tables[table][0].pop(); error(h.call("create" + kind, "editor", content(kind)), "SERVER_ERROR"); assert.equal(h.effects.length, 0);
   });
@@ -229,7 +230,7 @@ test("boolean formats and formulas fail before mutations; unrelated columns are 
   for (const kind of ["Product", "Event"]) {
     const table = kind.toLowerCase() + "s", idKey = kind.toLowerCase() + "_id";
     for (const options of [{ booleanFormat: "@" }, { booleanFormat: "General" }, { formula: true }]) {
-      const h = harness(options); error(h.call("create" + kind, "editor", content(kind)), "SERVER_ERROR"); assert.equal(h.effects.length, 0);
+      const h = harness(options); error(h.call("create" + kind, "editor", content(kind)), "WRITE_REJECTED"); assert.equal(h.effects.length, 0); // F-20
     }
     const h = harness({ booleanFormat: "0.###############" });
     const first = h.call("create" + kind, "editor", content(kind)).data;
@@ -543,6 +544,26 @@ for (const [kind, field, idKey] of [["Product", "phone", "product_id"], ["Event"
     assert.equal(h.tables.activity_logs.length, before);
   });
 }
+
+// F-17 / F-20: failed writes log one structured line (codes only, never values); pre-write rejections are WRITE_REJECTED.
+test("F-17 fail-closed writes log fixed codes only, with the cause of an uncertain outcome", () => {
+  const captured = [], original = console.error;
+  console.error = (line) => captured.push(line);
+  try {
+    const rejected = harness({ badFormat: true });
+    error(rejected.call("createProduct", "editor", content("Product", { name_th: "SECRET-NAME" })), "WRITE_REJECTED");
+    const uncertain = harness({ corruptWrite: "products" });
+    error(uncertain.call("createProduct", "editor", content("Product", { name_th: "SECRET-NAME" })), "OUTCOME_UNKNOWN");
+    const thrown = harness({ failWrite: "products" });
+    error(thrown.call("createProduct", "editor", content("Product")), "OUTCOME_UNKNOWN");
+  } finally { console.error = original; }
+  const entries = captured.map((line) => JSON.parse(line));
+  assert.deepEqual(entries[0], { event: "ADMIN_WRITE_FAIL_CLOSED", service: "content", public_code: "WRITE_REJECTED", code: "CONTENT_FORMAT" });
+  assert.deepEqual(entries[1], { event: "ADMIN_WRITE_FAIL_CLOSED", service: "content", public_code: "OUTCOME_UNKNOWN", code: "OUTCOME_UNKNOWN", cause_code: "CONTENT_VERIFY" });
+  assert.deepEqual(entries[2], { event: "ADMIN_WRITE_FAIL_CLOSED", service: "content", public_code: "OUTCOME_UNKNOWN", code: "OUTCOME_UNKNOWN", cause_code: "UNCLASSIFIED" });
+  assert.equal(entries.length, 3);
+  assert.doesNotMatch(captured.join("\n"), /SECRET-NAME|PRIVATE WRITE DETAILS/);
+});
 
 if (require.main === module) console.log(`${checks} Admin content checks passed.`);
 module.exports = { harness, content, productFields, eventFields, test, error };

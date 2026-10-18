@@ -55,6 +55,10 @@ async function main() {
     const count = calls.length; await c.mutate(product); c.reset(); await c.mutate(product); assert.equal(calls.length, count);
     failure = null; await c.load('PROD-1'); assert.equal(c.state.blocked, false);
   }
+  // F-20: a pre-write rejection is a definite 'nothing saved' — clear Thai message, not blocked as uncertain, retry allowed.
+  { status = 'draft'; await c.load('PROD-1'); failure = 'WRITE_REJECTED'; const count = calls.length; await c.mutate(product);
+    assert.equal(c.state.blocked, false); assert.equal(c.state.unknown, false); assert.match(c.state.message, /^ไม่ได้บันทึกข้อมูล/);
+    failure = null; await c.mutate(product); assert.equal(calls.length - count, 2); }
   const fresh = model.createController('products', 'editor', api, 'TOKEN'); failure = 'TIMEOUT'; await fresh.mutate(product); fresh.reset(); assert.equal(fresh.state.blocked, true); failure = null;
   failure = 'SERVER_ERROR'; await fresh.load('PROD-1'); assert.equal(fresh.state.blocked, true); assert.equal(fresh.state.record, null); assert.ok(!fresh.state.message.includes('SECRET')); failure = null;
   status = 'draft'; await c.load('PROD-1'); const preserved = c.state.record;

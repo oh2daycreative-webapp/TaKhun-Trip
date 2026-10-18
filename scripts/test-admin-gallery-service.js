@@ -242,7 +242,7 @@ test("Gallery audit UUID collision fails before cache invalidation or entity mut
   const h = load({ rows: [], manifest: [manifestItem("gallery-new")], audits: [existing], forcedUuid: collision });
   const payload = { media_id: "gallery-new", title_th: "Image", title_en: "", category: "dam_lake", related_place_id: "", caption_th: "", caption_en: "", credit: "", sort_order: "" };
   const result = plain(h.context.createGalleryItem_("TOKEN", payload));
-  assert.equal(result.ok, false); assert.equal(result.error.code, "SERVER_ERROR");
+  assert.equal(result.ok, false); assert.equal(result.error.code, "WRITE_REJECTED"); // F-20: nothing was written
   assert.deepEqual({ invalidations: h.calls.invalidations, entityWrites: h.calls.entityWrites, rows: h.data.length, audits: h.audits.length }, { invalidations: 0, entityWrites: 0, rows: 0, audits: 1 });
 });
 

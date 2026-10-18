@@ -19,6 +19,7 @@
     "NOT_FOUND",
     "CONFLICT",
     "CONTENT_LOCK"
+    ,"WRITE_REJECTED"
     ,"SETTINGS_SCHEMA",
     "OUTCOME_UNKNOWN"
   ]);
