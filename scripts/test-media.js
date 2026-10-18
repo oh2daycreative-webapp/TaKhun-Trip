@@ -11,9 +11,12 @@ const sharp = require("sharp");
 const root = path.resolve(__dirname, "..");
 const requiredIds = [
   "home-hero-ratchaprapha", "home-hero-heart-mountain",
-  "place-btk-001-cover", "place-btk-002-cover", "place-btk-003-cover",
-  "place-btk-004-cover", "place-btk-005-cover", "place-krn-002-cover",
-  "place-pnm-001-cover", "route-btk-core-cover", "route-btk-heart-cover",
+  // 2026-10-19: covers rebound from the retired static ids to the re-entered live place ids (same image bytes).
+  "place-btk-001-cover",
+  "place-plc-4e11d45a-c022-4919-873c-5823aeb03bf7-cover", "place-plc-7cde51bf-ba6e-4d2c-88d2-a65ec6c413cd-cover",
+  "place-plc-434d36e8-dd78-4e33-aa5f-a6d9ce43e933-cover", "place-plc-e40bad37-fdbb-4615-a622-3f789adae731-cover",
+  "place-plc-7f088e4c-4f9b-4e11-a8cf-46faa839bb47-cover", "place-plc-b8dc6205-69c8-4a6e-b485-fd87850a13f0-cover",
+  "route-btk-core-cover", "route-btk-heart-cover",
   "route-krn-nature-cover", "product-btk-durian-cover",
   "product-btk-honey-cover", "product-btk-textile-cover",
   "event-heart-of-hills-2026-cover", "shared-about-project",
