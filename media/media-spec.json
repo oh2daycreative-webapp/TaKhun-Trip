@@ -72,6 +72,20 @@
       "fallback": "cover"
     },
     {
+      "media_id": "place-plc-23f91739-de8c-4f07-8705-11d88ee1b739-cover",
+      "entity_type": "place",
+      "entity_id": "PLC-23f91739-de8c-4f07-8705-11d88ee1b739",
+      "source_file": "places/place-plc-23f91739-de8c-4f07-8705-11d88ee1b739-cover.jpg",
+      "role": "cover",
+      "ratio": "3:2",
+      "required": true,
+      "alt_th": "OASIS Forest Garden",
+      "alt_en": "OASIS Forest Garden",
+      "profile": "cover",
+      "focal_position": "centre",
+      "fallback": "cover"
+    },
+    {
       "media_id": "place-plc-434d36e8-dd78-4e33-aa5f-a6d9ce43e933-cover",
       "entity_type": "place",
       "entity_id": "PLC-434d36e8-dd78-4e33-aa5f-a6d9ce43e933",
@@ -95,6 +109,34 @@
       "required": true,
       "alt_th": "วิสาหกิจชุมชนท่องเที่ยวบ้านเชี่ยวหลาน",
       "alt_en": "Ban Chiao Lan Community Tourism Enterprise",
+      "profile": "cover",
+      "focal_position": "centre",
+      "fallback": "cover"
+    },
+    {
+      "media_id": "place-plc-68d2338f-a8f2-4d6d-bdbc-4ab8ac8ab39e-cover",
+      "entity_type": "place",
+      "entity_id": "PLC-68d2338f-a8f2-4d6d-bdbc-4ab8ac8ab39e",
+      "source_file": "places/place-plc-68d2338f-a8f2-4d6d-bdbc-4ab8ac8ab39e-cover.jpg",
+      "role": "cover",
+      "ratio": "3:2",
+      "required": true,
+      "alt_th": "พระธาตุหินนิลเปา",
+      "alt_en": "Phra That Hin Nin Pao",
+      "profile": "cover",
+      "focal_position": "centre",
+      "fallback": "cover"
+    },
+    {
+      "media_id": "place-plc-6d706013-ce22-46a6-b2e1-061a8da902b7-cover",
+      "entity_type": "place",
+      "entity_id": "PLC-6d706013-ce22-46a6-b2e1-061a8da902b7",
+      "source_file": "places/place-plc-6d706013-ce22-46a6-b2e1-061a8da902b7-cover.jpg",
+      "role": "cover",
+      "ratio": "3:2",
+      "required": true,
+      "alt_th": "อุทยานธรรมเขานาในหลวง",
+      "alt_en": "Khao Na Nai Luang Dharma Park",
       "profile": "cover",
       "focal_position": "centre",
       "fallback": "cover"

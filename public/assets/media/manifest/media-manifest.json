@@ -200,6 +200,40 @@
       ]
     },
     {
+      "media_id": "place-plc-23f91739-de8c-4f07-8705-11d88ee1b739-cover",
+      "entity_type": "place",
+      "entity_id": "PLC-23f91739-de8c-4f07-8705-11d88ee1b739",
+      "role": "cover",
+      "ratio": "3:2",
+      "required": true,
+      "alt_th": "OASIS Forest Garden",
+      "alt_en": "OASIS Forest Garden",
+      "fallback": "assets/media/placeholders/cover.svg",
+      "outputs": [
+        {
+          "width": 480,
+          "height": 320,
+          "path": "assets/media/generated/places/place-plc-23f91739-de8c-4f07-8705-11d88ee1b739-cover-480.webp",
+          "bytes": 57826,
+          "sha256": "316b82d162ad6bffd5cf8876c675a19ec6a23edcf47c735ce15328c698e52379"
+        },
+        {
+          "width": 800,
+          "height": 533,
+          "path": "assets/media/generated/places/place-plc-23f91739-de8c-4f07-8705-11d88ee1b739-cover-800.webp",
+          "bytes": 141350,
+          "sha256": "948cbdc8691ad51800584a1212f5a1f8a72c28f7fd186e7d60532e4c547a5979"
+        },
+        {
+          "width": 1200,
+          "height": 800,
+          "path": "assets/media/generated/places/place-plc-23f91739-de8c-4f07-8705-11d88ee1b739-cover-1200.webp",
+          "bytes": 268320,
+          "sha256": "f8f5761b83cce901382faf71c5bfa03106a83f8d143bddb8ab8240035a0aa71b"
+        }
+      ]
+    },
+    {
       "media_id": "place-plc-434d36e8-dd78-4e33-aa5f-a6d9ce43e933-cover",
       "entity_type": "place",
       "entity_id": "PLC-434d36e8-dd78-4e33-aa5f-a6d9ce43e933",
@@ -278,6 +312,88 @@
           "path": "assets/media/generated/places/place-plc-4e11d45a-c022-4919-873c-5823aeb03bf7-cover-1600.webp",
           "bytes": 229114,
           "sha256": "e5f8f372e4fcf5c53296e7151628ea4b57481eff193dcf59555ae996b6895ca2"
+        }
+      ]
+    },
+    {
+      "media_id": "place-plc-68d2338f-a8f2-4d6d-bdbc-4ab8ac8ab39e-cover",
+      "entity_type": "place",
+      "entity_id": "PLC-68d2338f-a8f2-4d6d-bdbc-4ab8ac8ab39e",
+      "role": "cover",
+      "ratio": "3:2",
+      "required": true,
+      "alt_th": "พระธาตุหินนิลเปา",
+      "alt_en": "Phra That Hin Nin Pao",
+      "fallback": "assets/media/placeholders/cover.svg",
+      "outputs": [
+        {
+          "width": 480,
+          "height": 320,
+          "path": "assets/media/generated/places/place-plc-68d2338f-a8f2-4d6d-bdbc-4ab8ac8ab39e-cover-480.webp",
+          "bytes": 28086,
+          "sha256": "76ef1738cf9364b36afad54f064a42c2547b52c550572872e4857b42237f2039"
+        },
+        {
+          "width": 800,
+          "height": 533,
+          "path": "assets/media/generated/places/place-plc-68d2338f-a8f2-4d6d-bdbc-4ab8ac8ab39e-cover-800.webp",
+          "bytes": 71702,
+          "sha256": "b6c8241070104d129e5848ed6fbe3e0dfca95bbefacb38f6bdd40c84ecf1b28b"
+        },
+        {
+          "width": 1200,
+          "height": 800,
+          "path": "assets/media/generated/places/place-plc-68d2338f-a8f2-4d6d-bdbc-4ab8ac8ab39e-cover-1200.webp",
+          "bytes": 149744,
+          "sha256": "e86b27a61ca22fd2312f14a9f04f783a397ce6b6a50586ce127948ac9781a903"
+        },
+        {
+          "width": 1600,
+          "height": 1067,
+          "path": "assets/media/generated/places/place-plc-68d2338f-a8f2-4d6d-bdbc-4ab8ac8ab39e-cover-1600.webp",
+          "bytes": 247660,
+          "sha256": "9683b3fbb7eb1e2ef367d29fb56f70140fbff41443bfbb885c08f0b25090fdfd"
+        }
+      ]
+    },
+    {
+      "media_id": "place-plc-6d706013-ce22-46a6-b2e1-061a8da902b7-cover",
+      "entity_type": "place",
+      "entity_id": "PLC-6d706013-ce22-46a6-b2e1-061a8da902b7",
+      "role": "cover",
+      "ratio": "3:2",
+      "required": true,
+      "alt_th": "อุทยานธรรมเขานาในหลวง",
+      "alt_en": "Khao Na Nai Luang Dharma Park",
+      "fallback": "assets/media/placeholders/cover.svg",
+      "outputs": [
+        {
+          "width": 480,
+          "height": 320,
+          "path": "assets/media/generated/places/place-plc-6d706013-ce22-46a6-b2e1-061a8da902b7-cover-480.webp",
+          "bytes": 28424,
+          "sha256": "afbca88153a7b83e92c9e1721ff681b81d81ea7b04405b9f654dc05298010cf6"
+        },
+        {
+          "width": 800,
+          "height": 533,
+          "path": "assets/media/generated/places/place-plc-6d706013-ce22-46a6-b2e1-061a8da902b7-cover-800.webp",
+          "bytes": 73872,
+          "sha256": "c1665172b27d702265b6780a5d4026e673d1163210d06dda3729c21e2cabab3d"
+        },
+        {
+          "width": 1200,
+          "height": 800,
+          "path": "assets/media/generated/places/place-plc-6d706013-ce22-46a6-b2e1-061a8da902b7-cover-1200.webp",
+          "bytes": 155160,
+          "sha256": "71b62a41d7b101e60dbb39a3a89b6f27221b30a9e8131e392f4e027a2524c517"
+        },
+        {
+          "width": 1600,
+          "height": 1067,
+          "path": "assets/media/generated/places/place-plc-6d706013-ce22-46a6-b2e1-061a8da902b7-cover-1600.webp",
+          "bytes": 254818,
+          "sha256": "deab4395f4204363bb7359c2eac129a105bfe0797085789f97e0199e287560fa"
         }
       ]
     },
