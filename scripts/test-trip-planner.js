@@ -81,12 +81,15 @@ test("normalizes enums, identifiers, duplicates, and storage shape", () => {
   assert.equal(record.updated_at, "2026-07-13T00:00:00.000Z");
 });
 
-test("migrates version 1 storage and removes stale or mock relations", () => {
-  const storage = { getItem() { return JSON.stringify({ version: 1, route_id: "MOCK-ROUTE-001", places: [{ place_id: "MOCK-PLACE-001" }, { place_id: "BTK-004" }, { place_id: "STALE" }] }); } };
+test("migrates version 1 storage, removes mock relations and keeps live ids (F-25)", () => {
+  const storage = { getItem() { return JSON.stringify({ version: 1, route_id: "MOCK-ROUTE-001", places: [{ place_id: "MOCK-PLACE-001" }, { place_id: "BTK-004" }, { place_id: "PLC-4e11d45a-c022-4919-873c-5823aeb03bf7" }] }); } };
   const result = api.readStoredPlan(storage);
   assert.equal(result.migrated, true);
   assert.equal(result.plan.route_id, "");
-  assert.deepEqual(plain(result.plan.places.map((place) => place.place_id)), ["BTK-004"]);
+  assert.deepEqual(plain(result.plan.places.map((place) => place.place_id)), ["BTK-004", "PLC-4e11d45a-c022-4919-873c-5823aeb03bf7"]);
+  const live = api.readStoredPlan({ getItem: () => JSON.stringify({ version: 2, route_id: "ROUTE-001", places: [{ place_id: "PLC-7cde51bf-ba6e-4d2c-88d2-a65ec6c413cd" }] }) });
+  assert.equal(live.plan.route_id, "ROUTE-001");
+  assert.deepEqual(plain(live.plan.places.map((place) => place.place_id)), ["PLC-7cde51bf-ba6e-4d2c-88d2-a65ec6c413cd"]);
 });
 
 test("survives malformed or blocked storage and persists the existing key", () => {

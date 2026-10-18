@@ -28,9 +28,10 @@
   }
 
   function serializeFavorites(value) { return JSON.stringify(sanitizeFavorites(value)); }
-  function filterCanonicalFavorites(value, records = global.TakhunContentData?.listPlaces?.() || []) {
-    const canonical = new Set((Array.isArray(records) ? records : []).map((item) => String(item?.place_id || "").trim()).filter(Boolean));
-    return sanitizeFavorites(value).filter((id) => !id.startsWith("MOCK-") && (!canonical.size || canonical.has(id)));
+  // F-25: places now come from the live API (new ids like PLC-...), so the old static list cannot decide which saved
+  // ids are valid. Only demo MOCK- ids are dropped; a removed place shows as unavailable when its detail is loaded.
+  function filterCanonicalFavorites(value) {
+    return sanitizeFavorites(value).filter((id) => !id.startsWith("MOCK-"));
   }
   function removeFavorite(value, placeId) { const id = String(placeId || "").trim(); return sanitizeFavorites(value).filter((item) => item !== id); }
   const encoded = (value) => encodeURIComponent(String(value || ""));
