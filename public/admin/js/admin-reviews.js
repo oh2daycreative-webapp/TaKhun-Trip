@@ -7,10 +7,12 @@
   function codedError(code){const error=new Error(code.toLowerCase());error.code=code;return error;}
   function forbidden(){return codedError("FORBIDDEN");}
   function createController(token,role,api,view){
-    let listGeneration=0,detailGeneration=0,selected=null,pendingMutation=null,blocked=false;
+    let listGeneration=0,detailGeneration=0,selected=null,pendingMutation=null,blocked=false,lastFilters={};
     const drafts=Object.create(null);
     const allowed=permissions(role);
-    async function loadList(filters={}){const generation=++listGeneration;try{const result=await api.getReviews(token,filters);if(generation!==listGeneration)return null;view.list(result);return result;}catch(error){if(generation===listGeneration)view.status(error&&error.code||"SERVER_ERROR",true);throw error;}}
+    async function loadList(filters={}){lastFilters=filters;const generation=++listGeneration;try{const result=await api.getReviews(token,filters);if(generation!==listGeneration)return null;view.list(result);return result;}catch(error){if(generation===listGeneration)view.status(error&&error.code||"SERVER_ERROR",true);throw error;}}
+    // F-24: after a successful action, reload the list with the same filters (quietly: the action message stays).
+    function refreshList(){const generation=++listGeneration;Promise.resolve().then(()=>api.getReviews(token,lastFilters)).then(result=>{if(generation===listGeneration)view.list(result);},()=>{});}
     function draftFor(reviewId,serverValue){if(!drafts[reviewId])drafts[reviewId]={value:String(serverValue||""),dirty:false};return drafts[reviewId];}
     function render(focus){if(!selected)return;const draft=draftFor(selected.review_id,selected.admin_reply);view.detail(selected,draft.value,{actions:allowed.slice(),blocked,pending:!!pendingMutation,focus:!!focus});}
     async function loadDetail(reviewId,options={}){
@@ -43,7 +45,7 @@
       pendingMutation=Promise.resolve(request).then(result=>{
         const preserveDraft=draft.dirty&&(action==="approve"||action==="hide");
         selected=result;blocked=false;drafts[result.review_id]=preserveDraft?{value:draft.value,dirty:true}:{value:result.admin_reply,dirty:false};
-        view.status(result.audit_status==="unconfirmed"?"AUDIT_UNCONFIRMED":"SUCCESS",false);return result;
+        view.status(result.audit_status==="unconfirmed"?"AUDIT_UNCONFIRMED":"SUCCESS",false);refreshList();return result;
       },error=>{if(error&&(["CONFLICT"].concat(UNCERTAIN)).includes(error.code))blocked=true;view.status(error&&error.code||"SERVER_ERROR",true);throw error;}).finally(()=>{pendingMutation=null;render(false);});
       render(false);
       return pendingMutation;
