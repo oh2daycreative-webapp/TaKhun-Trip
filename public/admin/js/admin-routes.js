@@ -16,6 +16,8 @@
   let deleteAuditWarning = "", mutationMessageGeneration = 0;
   let uncertainMarkerKey = "", uncertainGeneration = 0, uncertainReadyGeneration = -1;
 
+  // F-22: show timestamps as Thai local date/time ("yyyy-MM-dd HH:mm:ss" = Bangkok wall time; ISO = UTC instant).
+  function thaiDateTime(value){if(value===undefined||value===null||value==="")return "-";const text=String(value);const local=/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(text);const date=local?new Date(Date.UTC(+local[1],+local[2]-1,+local[3],+local[4]-7,+local[5],+local[6])):new Date(text);if(Number.isNaN(date.getTime()))return text;try{return new Intl.DateTimeFormat("th-TH",{dateStyle:"medium",timeStyle:"short",timeZone:"Asia/Bangkok"}).format(date);}catch(_error){return text;}}
   function q(selector) { return global.document.querySelector(selector); }
   function node(tag, text, className) { const item = global.document.createElement(tag); if (text !== undefined) item.textContent = text; if (className) item.className = className; return item; }
   function button(text, handler) { const item = node("button", text, "button"); item.type = "button"; item.addEventListener("click", handler); return item; }
@@ -75,7 +77,7 @@
       result.items.forEach(item => {
         const card = node("article", undefined, "content-card"), title = node("h3", item.name_th || item.route_id), summary = node("p", item.travel_style || "ไม่ระบุรูปแบบ", "content-summary");
         const status = node("span", STATUS_LABELS[item.status] || item.status, `content-badge content-badge--${item.status}`);
-        const updated = node("p", `แก้ไขล่าสุด ${item.updated_at || "-"}`), open = button(canWrite ? "แก้ไข" : "ดูรายละเอียด", () => openEditor(item.route_id));
+        const updated = node("p", `แก้ไขล่าสุด ${thaiDateTime(item.updated_at)}`), open = button(canWrite ? "แก้ไข" : "ดูรายละเอียด", () => openEditor(item.route_id));
         card.append(title, summary, status, updated, open); elements.list.appendChild(card);
       });
       renderPagination(result);

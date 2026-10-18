@@ -149,6 +149,8 @@ if ($LASTEXITCODE -ne 0) { throw "Media pipeline verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Canonical content data verification failed." }
 & node (Join-Path $PSScriptRoot "test-content-integration.js")
 if ($LASTEXITCODE -ne 0) { throw "Public content integration verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-timestamps.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin timestamp verification failed." }
 & node (Join-Path $PSScriptRoot "test-redirects.js")
 if ($LASTEXITCODE -ne 0) { throw "Redirect rules verification failed." }
 & node (Join-Path $PSScriptRoot "test-home.js")
