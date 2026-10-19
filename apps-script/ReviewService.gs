@@ -25,7 +25,21 @@ function getReviews_(parameters) {
   });
 }
 
+// Reviews switch (owner decision 2026-10-19): Admin → ตั้งค่า → "เปิดรีวิว" (settings.reviews_enabled).
+// Only an explicit true accepts new reviews; false, a missing value or a settings read failure refuses them
+// before any lock or write. getSettings_ is the cached public read and is invalidated by every Settings save.
+function ReviewService_reviewsEnabled_() {
+  try {
+    if (typeof getSettings_ !== "function") return false;
+    var settings = getSettings_({});
+    return !!(settings && settings.ok === true && settings.data && settings.data.reviews_enabled === true);
+  } catch (_settingsReadError) {
+    return false;
+  }
+}
+
 function submitReview_(payload) {
+  if (!ReviewService_reviewsEnabled_()) return ReviewService_error_("REVIEWS_DISABLED", "ขณะนี้ปิดรับรีวิว");
   var normalized = ReviewService_normalizeSubmission_(payload);
   if (!normalized.ok) return normalized.response;
   var placeId = normalized.payload.place_id;

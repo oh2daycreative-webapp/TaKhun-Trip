@@ -12,6 +12,7 @@ function AdminProductService_validate_(record) {
     if (["contact_url", "google_maps_url", "image_url"].indexOf(field) >= 0) normalized[field] = AdminContentService_url_(value);
     else if (field === "is_featured") { if (typeof value !== "boolean") throw new Error("VALIDATION_ERROR"); }
     else if (field === "sort_order") { if (value !== "" && (!Number.isSafeInteger(value) || value < 0)) throw new Error("VALIDATION_ERROR"); }
+    else if (field === "phone") normalized[field] = AdminContentService_text_(AdminContentService_phone_(value));
     else if (field !== "latitude" && field !== "longitude") normalized[field] = AdminContentService_text_(value);
   });
   if (!normalized.name_th || !normalized.description_th || ProductService_CATEGORIES_.indexOf(normalized.category) < 0) throw new Error("VALIDATION_ERROR");

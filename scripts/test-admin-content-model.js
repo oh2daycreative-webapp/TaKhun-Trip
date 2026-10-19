@@ -11,7 +11,13 @@ const product = { name_th: 'สินค้า', description_th: 'รายล�
 const event = { title_th: 'งาน', description_th: 'รายละเอียด', location_th: 'สถานที่', event_type: 'festival', event_date: '2028-02-29' };
 assert.equal(Object.keys(model.validate('products', product).errors).length, 0);
 assert.equal(Object.keys(model.validate('events', event).errors).length, 0);
-for (const [field, value] of [['name_th', '=SUM(A1)'], ['phone', '+661234'], ['name_th', '\ud800'], ['name_th', 'x\u0001'], ['category', 'FOOD'], ['district', 'bad'], ['is_featured', 'false'], ['sort_order', '1.2'], ['latitude', '91'], ['latitude', '0'], ['related_place_id', 'bad id'], ['tags', 'a|a']]) {
+// F-19 (client): +66 phones become 0… before validation, like the server; other + numbers stay rejected.
+assert.equal(model.validate('products', { ...product, phone: '+66 81 234 5678' }).content.phone, '081 234 5678');
+assert.equal(model.validate('products', { ...product, phone: '+66 81 234 5678' }).errors.phone, undefined);
+assert.equal(model.validate('products', { ...product, phone: ' +66 (0)77-123-456 ' }).content.phone, '077-123-456');
+assert.equal(model.validate('events', { ...event, contact_phone: '+6681 234 5678' }).content.contact_phone, '081 234 5678');
+assert.ok(model.validate('events', { ...event, contact_phone: '+1 650 555 0100' }).errors.contact_phone);
+for (const [field, value] of [['name_th', '=SUM(A1)'], ['phone', '+1 650 555 0100'], ['name_th', '+66 not a phone field'], ['name_th', '\ud800'], ['name_th', 'x\u0001'], ['category', 'FOOD'], ['district', 'bad'], ['is_featured', 'false'], ['sort_order', '1.2'], ['latitude', '91'], ['latitude', '0'], ['related_place_id', 'bad id'], ['tags', 'a|a']]) {
   assert.ok(model.validate('products', { ...product, [field]: value }).errors[field], field + ' rejects ' + value);
 }
 for (const url of ['javascript:alert(1)', 'https://user@example.com', 'https://127.1', 'https://01.2.3.4', 'https://example.123', 'https://example.com:65536', 'https://example.com/%0a']) assert.ok(model.validate('products', { ...product, image_url: url }).errors.image_url, url);
@@ -55,6 +61,10 @@ async function main() {
     const count = calls.length; await c.mutate(product); c.reset(); await c.mutate(product); assert.equal(calls.length, count);
     failure = null; await c.load('PROD-1'); assert.equal(c.state.blocked, false);
   }
+  // F-20: a pre-write rejection is a definite 'nothing saved' — clear Thai message, not blocked as uncertain, retry allowed.
+  { status = 'draft'; await c.load('PROD-1'); failure = 'WRITE_REJECTED'; const count = calls.length; await c.mutate(product);
+    assert.equal(c.state.blocked, false); assert.equal(c.state.unknown, false); assert.match(c.state.message, /^ไม่ได้บันทึกข้อมูล/);
+    failure = null; await c.mutate(product); assert.equal(calls.length - count, 2); }
   const fresh = model.createController('products', 'editor', api, 'TOKEN'); failure = 'TIMEOUT'; await fresh.mutate(product); fresh.reset(); assert.equal(fresh.state.blocked, true); failure = null;
   failure = 'SERVER_ERROR'; await fresh.load('PROD-1'); assert.equal(fresh.state.blocked, true); assert.equal(fresh.state.record, null); assert.ok(!fresh.state.message.includes('SECRET')); failure = null;
   status = 'draft'; await c.load('PROD-1'); const preserved = c.state.record;

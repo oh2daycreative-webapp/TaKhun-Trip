@@ -146,11 +146,13 @@ test("historical apostrophes and valid +66 phones round-trip as literal logical 
 test("request validation accepts the approved fields and rejects coercion unsafe forms", () => {
   const { context } = load();
   const validate = required(context, "AdminSettingsService_validateRequestSettings_");
-  assert.deepEqual(plain(validate(logical())), logical());
+  // F-19: +66 phones are stored in national form; other + numbers stay rejected.
+  assert.deepEqual(plain(validate(logical())), logical({ main_phone: "077 123 456" }));
+  for (const [typed, stored] of [["+66 81 234 5678", "081 234 5678"], ["+66812345678", "0812345678"], ["+66 (0)77 123 456", "077 123 456"], ["+66077123456", "077123456"], ["081 234 5678", "081 234 5678"]]) assert.equal(plain(validate(logical({ main_phone: typed }))).main_phone, stored);
+  for (const rejected of ["+1 650 555 0100", "+44 20 7946 0000"]) assert.throws(() => validate(logical({ main_phone: rejected })), /VALIDATION_ERROR/);
   for (const candidate of [
     logical({ default_language: "TH" }),
     logical({ reviews_enabled: "true" }),
-    logical({ main_phone: "+66077123456" }),
     logical({ main_phone: "077-call-now" }),
     logical({ main_email: "a@@example.com" }),
     logical({ facebook_url: "https://user@example.com/path" }),
@@ -176,7 +178,7 @@ test("super admin full replacement writes only changed value and timestamp cells
   assert.equal(response.ok, true);
   assert.equal(response.data.changed, true);
   assert.equal(response.data.audit_status, "recorded");
-  assert.deepEqual(response.data.settings, replacement);
+  assert.deepEqual(response.data.settings, { ...replacement, main_phone: "081 234 5678" });
   assert.notEqual(response.data.revision, current.data.revision);
   assert.equal(harness.cacheValues.has("public:getSettings"), false);
   assert.deepEqual(harness.writes.map((write) => write.field), ["setting_value", "updated_at", "setting_value", "updated_at"]);
@@ -280,6 +282,30 @@ test("audit destination preflight failure is mutation-free and remains distinct 
   assert.equal(response.error.code, "SERVER_ERROR");
   assert.deepEqual(harness.writes, []);
   assert.equal(harness.cacheValues.has("public:getSettings"), true);
+});
+
+test("production-style cells (boolean value, date updated_at) save the reviews switch and verify", () => {
+  // Production settings: setting_value is a real boolean in a TEXT cell; updated_at is a DATE_TIME cell, so Sheets turns
+  // the written "yyyy-MM-dd HH:mm:ss" back into a Date (harness time zone = the formatDate stub, UTC).
+  for (const valueCell of ["text", "boolean"]) {
+    const rows = tableRows().map((row) => ({ ...row, values: { ...row.values,
+      setting_value: ["reviews_enabled", "events_enabled"].includes(row.values.setting_key) ? row.values.setting_value === "TRUE" : row.values.setting_value,
+      updated_at: new Date("2026-07-15T11:00:00.000Z") } }));
+    const harness = load({ role: "super_admin", rows });
+    harness.context.AdminSettingsService_setCell_ = (entry, field, value) => {
+      harness.writes.push({ row: entry.sourceRowNumber, field, value });
+      if (field === "updated_at") entry.values[field] = new Date(String(value).replace(" ", "T") + "Z");
+      else entry.values[field] = valueCell === "boolean" && (value === "TRUE" || value === "FALSE") ? value === "TRUE" : value;
+    };
+    const current = plain(required(harness.context, "adminGetSettings_")("token"));
+    assert.equal(current.data.settings.reviews_enabled, true);
+    const response = plain(required(harness.context, "updateSettings_")("token", { expected_revision: current.data.revision, settings: { ...current.data.settings, reviews_enabled: false } }));
+    assert.equal(response.ok, true, `${valueCell}: ${JSON.stringify(response.error || {})}`);
+    assert.equal(response.data.changed, true);
+    assert.equal(response.data.settings.reviews_enabled, false);
+    assert.deepEqual(harness.writes.map((write) => write.field), ["setting_value", "updated_at"], valueCell);
+    assert.equal(harness.writes[0].value, "FALSE");
+  }
 });
 
 if (process.exitCode) process.exit(process.exitCode);

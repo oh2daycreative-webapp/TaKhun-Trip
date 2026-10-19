@@ -3697,5 +3697,14 @@ test("dependency read and validation sites preserve original thrown codes", () =
   ]) assert.throws(run, error => error.message === code);
 });
 
+test("F-19 Save Draft stores a +66 phone in national form; other + numbers keep the escaped text storage", () => {
+  const valid = loadTransactionBackend("UPDATE_DRAFT");
+  assert.equal(callSave(valid, writeContent({ phone: "+66 81 234 5678" })).ok, true);
+  assert.equal(sheetRecord(valid, "place_drafts").phone, "081 234 5678");
+  const other = loadTransactionBackend("UPDATE_DRAFT");
+  assert.equal(callSave(other, writeContent({ phone: "+1 650 555 0100" })).ok, true);
+  assert.equal(sheetRecord(other, "place_drafts").phone, "'+1 650 555 0100");
+});
+
 if (process.exitCode) process.exit(process.exitCode);
 process.stdout.write("Admin Place service verification passed.\n");

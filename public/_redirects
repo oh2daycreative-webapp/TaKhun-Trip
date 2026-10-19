@@ -1,0 +1,3 @@
+# F-18: the Admin entry URL opens the login page (Cloudflare Pages redirects).
+/admin /admin/login 302
+/admin/ /admin/login 302

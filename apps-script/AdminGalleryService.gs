@@ -20,6 +20,20 @@ var AdminGalleryService_TRANSITIONS_ = {
 var AdminGalleryService_AUDIT_HEADERS_ = ["log_id", "admin_id", "action", "entity_type", "entity_id", "description", "created_at", "audit_id", "actor_admin_id", "occurred_at"];
 var AdminGalleryService_MANIFEST_ID_PATTERN_ = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+// F-17: one structured line in Executions per failed write, like F-10 for Places.
+// Fixed internal codes and fixed code-authored texts only - never values, names or credentials.
+function AdminGalleryService_logFailClosed_(service, error, publicCode) {
+  try {
+    var message = error && typeof error.message === "string" ? error.message : "";
+    var entry = { event: "ADMIN_WRITE_FAIL_CLOSED", service: service, public_code: publicCode,
+      code: /^[A-Z][A-Z0-9_]{0,63}$/.test(message) ? message : "UNCLASSIFIED" };
+    if (entry.code === "UNCLASSIFIED" && /^[A-Za-z][A-Za-z .]{0,79}$/.test(message)) entry.detail = message;
+    if (entry.code === "UNCLASSIFIED" && error && /^[A-Za-z]{1,40}$/.test(String(error.name))) entry.error_name = error.name;
+    if (error && typeof error.cause_code === "string") entry.cause_code = /^[A-Z][A-Z0-9_]{0,63}$/.test(error.cause_code) ? error.cause_code : "UNCLASSIFIED";
+    if (typeof console !== "undefined" && console && typeof console.error === "function") console.error(JSON.stringify(entry));
+  } catch (_logError) { /* Logging never changes the client-safe outcome. */ }
+}
+
 function AdminGalleryService_execute_(token, write, operation) {
   var lock = null;
   var acquired = false;
@@ -38,10 +52,14 @@ function AdminGalleryService_execute_(token, write, operation) {
       VALIDATION_ERROR: "Invalid request data.", NOT_FOUND: "Record not found.",
       CONFLICT: "Content changed. Reload before editing.", DUPLICATE_ID: "Identifier already exists.",
       INVALID_TRANSITION: "This lifecycle change is not permitted.", CONTENT_LOCK: "Content is busy. Try again.",
+      WRITE_REJECTED: "Nothing was saved: the sheet destination is not ready. Contact the maintainer.",
       OUTCOME_UNKNOWN: "The result is uncertain. Reload and reconcile; do not retry automatically."
     };
     var code = error && error.message;
+    // F-20: these guards only run before any write, so the outcome is a definite "nothing saved".
+    if (["GALLERY_FORMAT", "GALLERY_FORMULA", "GALLERY_AUDIT_COLLISION"].indexOf(code) >= 0) code = "WRITE_REJECTED";
     if (!Object.prototype.hasOwnProperty.call(messages, code)) code = "SERVER_ERROR";
+    if (["SERVER_ERROR", "WRITE_REJECTED", "OUTCOME_UNKNOWN", "CONTENT_LOCK"].indexOf(code) >= 0) AdminGalleryService_logFailClosed_("gallery", error, code);
     var safe = { code: code, message: messages[code] || "The request could not be completed." };
     if (code === "OUTCOME_UNKNOWN") {
       safe.retryable = false;
@@ -305,6 +323,7 @@ function AdminGalleryService_write_(admin, table, entry, record, action) {
     AdminGalleryService_verify_(table.headers, record.media_id, rowNumber, intended);
   } catch (_entityError) {
     var uncertain = new Error("OUTCOME_UNKNOWN");
+    uncertain.cause_code = _entityError && _entityError.message;
     uncertain.media_id = record.media_id;
     throw uncertain;
   }

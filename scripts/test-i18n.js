@@ -167,3 +167,20 @@ test("all public pages declare translated metadata", () => {
     assert.match(html, /meta\s+name="description"[^>]*data-i18n-attr="content:pages\.[^"]+\.description"/, `${page} description`);
   }
 });
+
+// F-16: the public site shows live data, so no visible text may call it sample/demo data.
+test("F-16 no public text calls live content sample or demo data", () => {
+  const exposed = source.replace("  let currentLang = DEFAULT_LANG;", "  global.__messages = I18N_MESSAGES;\n  let currentLang = DEFAULT_LANG;");
+  const context = { window: {} }; context.window.window = context.window;
+  vm.runInNewContext(exposed, context);
+  const allowed = new Set(["th.gallery.video_thumbnail_alt"]); // "ภาพตัวอย่างวิดีโอ" = video thumbnail, not demo data
+  const offenders = [];
+  (function walk(node, prefix) {
+    for (const [key, value] of Object.entries(node)) {
+      const at = `${prefix}.${key}`;
+      if (value && typeof value === "object") walk(value, at);
+      else if (typeof value === "string" && /ตัวอย่าง|สาธิต|\b[Ss]ample\b|\b[Dd]emo\b|\b[Mm]ock\b/.test(value) && !allowed.has(at.slice(1))) offenders.push(`${at.slice(1)}: ${value}`);
+    }
+  })(context.window.__messages, "");
+  assert.deepEqual(offenders, []);
+});

@@ -16,6 +16,8 @@
   let deleteAuditWarning = "", mutationMessageGeneration = 0;
   let uncertainMarkerKey = "", uncertainGeneration = 0, uncertainReadyGeneration = -1;
 
+  // F-22: show timestamps as Thai local date/time ("yyyy-MM-dd HH:mm:ss" = Bangkok wall time; ISO = UTC instant).
+  function thaiDateTime(value){if(value===undefined||value===null||value==="")return "-";const text=String(value);const local=/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(text);const date=local?new Date(Date.UTC(+local[1],+local[2]-1,+local[3],+local[4]-7,+local[5],+local[6])):new Date(text);if(Number.isNaN(date.getTime()))return text;try{return new Intl.DateTimeFormat("th-TH",{dateStyle:"medium",timeStyle:"short",timeZone:"Asia/Bangkok"}).format(date);}catch(_error){return text;}}
   function q(selector) { return global.document.querySelector(selector); }
   function node(tag, text, className) { const item = global.document.createElement(tag); if (text !== undefined) item.textContent = text; if (className) item.className = className; return item; }
   function button(text, handler) { const item = node("button", text, "button"); item.type = "button"; item.addEventListener("click", handler); return item; }
@@ -23,7 +25,7 @@
   function announce(text, editor) { (editor ? elements.editorStatus : elements.listStatus).textContent = !editor && deleteAuditWarning ? (text ? `${text} · ${deleteAuditWarning}` : deleteAuditWarning) : text; }
   function beginMutationMessage() { deleteAuditWarning = ""; return ++mutationMessageGeneration; }
   function safeMessage(error) {
-    return ({ UNAUTHORIZED: "กรุณาเข้าสู่ระบบอีกครั้ง", FORBIDDEN: "บัญชีนี้ไม่มีสิทธิ์ทำรายการ", VALIDATION_ERROR: "ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง", NOT_FOUND: "ไม่พบเส้นทาง", CONFLICT: "ข้อมูลบนเซิร์ฟเวอร์เปลี่ยนแล้ว กรุณาโหลดข้อมูลล่าสุดเพื่อกระทบยอด", INVALID_TRANSITION: "ไม่สามารถเปลี่ยนเป็นสถานะนี้ได้", OUTCOME_UNKNOWN: "ยังยืนยันผลรายการไม่ได้ กรุณากระทบยอดก่อนทำรายการใหม่", REDIRECT_BOUNCE: "ไม่แน่ใจผลการบันทึก กรุณาตรวจสอบรายการก่อนทำซ้ำ", NETWORK_ERROR: "การเชื่อมต่อขัดข้อง ผลรายการอาจยังไม่แน่นอน", TIMEOUT: "หมดเวลารอผล ผลรายการอาจยังไม่แน่นอน" })[error && error.code] || "ไม่สามารถทำรายการได้ในขณะนี้";
+    return ({ WRITE_REJECTED: "ไม่ได้บันทึกข้อมูล: ระบบหยุดก่อนบันทึกเพราะชีตปลายทางยังไม่พร้อม (ไม่มีข้อมูลถูกเขียน) กรุณาแจ้งผู้ดูแลระบบ", UNAUTHORIZED: "กรุณาเข้าสู่ระบบอีกครั้ง", FORBIDDEN: "บัญชีนี้ไม่มีสิทธิ์ทำรายการ", VALIDATION_ERROR: "ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง", NOT_FOUND: "ไม่พบเส้นทาง", CONFLICT: "ข้อมูลบนเซิร์ฟเวอร์เปลี่ยนแล้ว กรุณาโหลดข้อมูลล่าสุดเพื่อกระทบยอด", INVALID_TRANSITION: "ไม่สามารถเปลี่ยนเป็นสถานะนี้ได้", OUTCOME_UNKNOWN: "ยังยืนยันผลรายการไม่ได้ กรุณากระทบยอดก่อนทำรายการใหม่", REDIRECT_BOUNCE: "ไม่แน่ใจผลการบันทึก กรุณาตรวจสอบรายการก่อนทำซ้ำ", NETWORK_ERROR: "การเชื่อมต่อขัดข้อง ผลรายการอาจยังไม่แน่นอน", TIMEOUT: "หมดเวลารอผล ผลรายการอาจยังไม่แน่นอน" })[error && error.code] || "ไม่สามารถทำรายการได้ในขณะนี้";
   }
   function readMarker() { try { const value = global.sessionStorage.getItem(MARKER); return value ? JSON.parse(value) : null; } catch (_error) { return null; } }
   function resetUncertainReadiness(marker) { uncertainMarkerKey = marker ? JSON.stringify(marker) : ""; uncertainGeneration += 1; uncertainReadyGeneration = -1; if (elements) elements.uncertainComplete.hidden = true; }
@@ -75,7 +77,7 @@
       result.items.forEach(item => {
         const card = node("article", undefined, "content-card"), title = node("h3", item.name_th || item.route_id), summary = node("p", item.travel_style || "ไม่ระบุรูปแบบ", "content-summary");
         const status = node("span", STATUS_LABELS[item.status] || item.status, `content-badge content-badge--${item.status}`);
-        const updated = node("p", `แก้ไขล่าสุด ${item.updated_at || "-"}`), open = button(canWrite ? "แก้ไข" : "ดูรายละเอียด", () => openEditor(item.route_id));
+        const updated = node("p", `แก้ไขล่าสุด ${thaiDateTime(item.updated_at)}`), open = button(canWrite ? "แก้ไข" : "ดูรายละเอียด", () => openEditor(item.route_id));
         card.append(title, summary, status, updated, open); elements.list.appendChild(card);
       });
       renderPagination(result);

@@ -149,6 +149,10 @@ if ($LASTEXITCODE -ne 0) { throw "Media pipeline verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Canonical content data verification failed." }
 & node (Join-Path $PSScriptRoot "test-content-integration.js")
 if ($LASTEXITCODE -ne 0) { throw "Public content integration verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-timestamps.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin timestamp verification failed." }
+& node (Join-Path $PSScriptRoot "test-redirects.js")
+if ($LASTEXITCODE -ne 0) { throw "Redirect rules verification failed." }
 & node (Join-Path $PSScriptRoot "test-home.js")
 if ($LASTEXITCODE -ne 0) { throw "Home behavior verification failed." }
 & (Join-Path $PSScriptRoot "test-public-shell.ps1")
@@ -159,6 +163,8 @@ if ($LASTEXITCODE -ne 0) { throw "Search behavior verification failed." }
 & (Join-Path $PSScriptRoot "test-places.ps1")
 & node (Join-Path $PSScriptRoot "test-reviews.js")
 if ($LASTEXITCODE -ne 0) { throw "Public Reviews behavior verification failed." }
+& node (Join-Path $PSScriptRoot "test-reviews-switch.js")
+if ($LASTEXITCODE -ne 0) { throw "Reviews switch (reviews_enabled) verification failed." }
 & (Join-Path $PSScriptRoot "test-reviews.ps1")
 & (Join-Path $PSScriptRoot "test-place-detail.ps1")
 & (Join-Path $PSScriptRoot "test-map.ps1")

@@ -44,7 +44,10 @@ function load(options = {}) {
     LockService:{getScriptLock:()=>lock}, Utilities:{getUuid:()=>`uuid-${state.audits.length+1}`,formatDate:()=>"2026-10-11 12:34:56"}, Session:{getScriptTimeZone:()=>"Asia/Bangkok"},
     CryptoService_utf8Bytes_(value){ return [...Buffer.from(value,"utf8")]; }, CryptoService_sha256_(bytes){ return [...crypto.createHash("sha256").update(Buffer.from(bytes)).digest()]; },
     SheetService_readTable_:table, SheetService_getSheet_:name=>sheets[name], SheetService_prepareAppendDestination_:()=>({}),
-    SheetService_replaceObjectAtRow_(name,row,record){ if(options.failWrite)throw Error("sheet failed"); const index=row-2; state[name][index]={...state[name][index],...plain(record)}; state.writes++; if(options.corruptWrite)state[name][index].status="pending"; },
+    SheetService_replaceObjectAtRow_(name,row,record){ if(options.failWrite)throw Error("sheet failed"); const index=row-2; const written=plain(record);
+      // sheetsSemantics: like setValues — a leading apostrophe marks text and is not stored; a bare =… becomes a live formula.
+      if(options.sheetsSemantics)for(const [key,value] of Object.entries(written)){ if(typeof value!=="string")continue; if(value.startsWith("'"))written[key]=value.slice(1); else if(value.startsWith("=")){state.formulas=(state.formulas||0)+1;written[key]="#FORMULA-RESULT";} }
+      state[name][index]={...state[name][index],...written}; state.writes++; if(options.corruptWrite)state[name][index].status="pending"; },
     SheetService_appendObjectWithRow_(name,headers,record){ if(options.auditFail)throw Error("audit failed"); state.audits.push(plain(record)); },
     SpreadsheetApp:{flush(){state.flushes++; if(options.flushFail&&state.flushes===1)throw Error("flush failed");}},
     PlaceService_cacheEpoch_:()=>state.epoch, PlaceService_bumpCacheEpoch_(){ if(options.cacheFail)throw Error("cache failed"); state.epoch++;state.bumps++;return state.epoch; }
@@ -151,6 +154,45 @@ test("verified entity uncertainty audit warning and cache freshness remain disti
   const audit=load({role:"editor",auditFail:true});let rev=detail(audit,"REV-A").data.revision;let result=call(audit,"hideReview_",{review_id:"REV-A",expected_revision:rev});assert.equal(result.ok,true);assert.equal(result.data.audit_status,"unconfirmed");
   const cache=load({role:"editor"});rev=detail(cache,"REV-A").data.revision;call(cache,"replyReview_",{review_id:"REV-A",expected_revision:rev,admin_reply:"fresh"});assert.equal(cache.state.bumps,1);rev=detail(cache,"REV-P").data.revision;call(cache,"replyReview_",{review_id:"REV-P",expected_revision:rev,admin_reply:"not public yet"});assert.equal(cache.state.bumps,1);rev=detail(cache,"REV-P").data.revision;call(cache,"approveReview_",{review_id:"REV-P",expected_revision:rev});assert.equal(cache.state.bumps,2);
   const cacheFailure=load({role:"editor",cacheFail:true});rev=detail(cacheFailure,"REV-A").data.revision;assert.equal(call(cacheFailure,"hideReview_",{review_id:"REV-A",expected_revision:rev}).error.code,"SERVER_ERROR");assert.equal(cacheFailure.state.writes,0);
+});
+
+// F-23: Sheets drops the apostrophe that the public submit adds, so a stored review reads back as bare "=…".
+// Every admin rewrite must re-escape it, never turn it into a live formula, and still verify and keep revisions stable.
+test("F-23 admin rewrites never turn stored formula-like review text into a live formula", () => {
+  const injected = () => [{ review_id:"REV-X", place_id:"P-1", reviewer_name:"=HYPERLINK(\"https://example.com\")", is_anonymous:false, rating:4, comment:"=IMPORTXML(\"https://example.com\",\"//a\")", admin_reply:"", status:"pending", created_at:"2026-10-01 10:00:00", updated_at:"2026-10-01 10:00:00", approved_at:"", approved_by:"" }];
+  const actions = [
+    ["deleteReview_", "super_admin", {}, "deleted"],
+    ["approveReview_", "reviewer", {}, "approved"],
+    ["hideReview_", "reviewer", {}, "hidden"],
+    ["replyReview_", "editor", { admin_reply:"=thanks" }, "pending"]
+  ];
+  for (const [action, role, extra, status] of actions) {
+    const env = load({ role, sheetsSemantics:true, reviews:injected() });
+    const before = detail(env, "REV-X").data;
+    const result = call(env, action, { review_id:"REV-X", expected_revision:before.revision, ...extra });
+    assert.equal(result.ok, true, `${action}: ${JSON.stringify(result.error)}`);
+    assert.equal(env.state.formulas || 0, 0, `${action} created a live formula`);
+    const stored = env.state.reviews[0];
+    assert.equal(stored.reviewer_name, "=HYPERLINK(\"https://example.com\")", `${action} changed reviewer_name`);
+    assert.equal(stored.comment, "=IMPORTXML(\"https://example.com\",\"//a\")", `${action} changed comment`);
+    assert.equal(stored.status, status);
+    assert.equal(result.data.audit_status, "recorded");
+    const after = detail(env, "REV-X").data;
+    assert.equal(result.data.revision, after.revision, `${action}: returned revision must match the next read`);
+    assert.equal(after.comment, "=IMPORTXML(\"https://example.com\",\"//a\")");
+    if (action === "replyReview_") { assert.equal(stored.admin_reply, "=thanks"); assert.equal(after.admin_reply, "=thanks"); }
+  }
+});
+
+test("F-23 a rewrite that really produced a formula result is reported as OUTCOME_UNKNOWN", () => {
+  // Simulate a sheet that ignores the apostrophe marker: the verify must fail closed, not report success.
+  const env = load({ role:"super_admin", reviews:[{ review_id:"REV-X", place_id:"P-1", reviewer_name:"Bob", is_anonymous:false, rating:4, comment:"=1+1", admin_reply:"", status:"pending", created_at:"2026-10-01 10:00:00", updated_at:"2026-10-01 10:00:00", approved_at:"", approved_by:"" }] });
+  const rev = detail(env, "REV-X").data.revision;
+  const original = env.context.SheetService_replaceObjectAtRow_;
+  env.context.SheetService_replaceObjectAtRow_ = (name, row, record) => { original(name, row, record); env.state.reviews[row - 2].comment = 2; };
+  const result = call(env, "deleteReview_", { review_id:"REV-X", expected_revision:rev });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "OUTCOME_UNKNOWN");
 });
 
 if(process.exitCode)process.exit(process.exitCode);

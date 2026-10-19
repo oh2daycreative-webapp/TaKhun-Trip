@@ -89,17 +89,11 @@
   function clearPlan() { return createPlan(); }
   function toStorageRecord(plan, now = new Date().toISOString()) { const clean = normalizePlan(plan); return { version: VERSION, duration_type: clean.duration_type, travel_style: clean.travel_style, route_id: clean.route_id, place_ids: clean.places.map((place) => place.place_id), places: clean.places, updated_at: now }; }
 
-  function canonicalIds(listMethod, idField) {
-    try { return new Set((global.TakhunContentData?.[listMethod]?.() || []).map((item) => String(item?.[idField] || "").trim()).filter(Boolean)); }
-    catch (_error) { return new Set(); }
-  }
-
   function migrateStoredPlan(value) {
     const clean = normalizePlan(value);
-    const placeIds = canonicalIds("listPlaces", "place_id");
-    const routeIds = canonicalIds("listRoutes", "route_id");
-    const canonicalPlaces = clean.places.filter((place) => !place.place_id.startsWith("MOCK-") && (!placeIds.size || placeIds.has(place.place_id)));
-    const canonicalRoute = !clean.route_id.startsWith("MOCK-") && (!routeIds.size || routeIds.has(clean.route_id)) ? clean.route_id : "";
+    // F-25: live ids (PLC-..., ROUTE-...) are not in the old static data; only demo MOCK- relations are removed.
+    const canonicalPlaces = clean.places.filter((place) => !place.place_id.startsWith("MOCK-"));
+    const canonicalRoute = !clean.route_id.startsWith("MOCK-") ? clean.route_id : "";
     return { ...clean, route_id: canonicalRoute, places: canonicalPlaces };
   }
 

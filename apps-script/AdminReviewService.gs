@@ -15,6 +15,20 @@ var AdminReviewService_AUDIT_HEADERS_ = [
 var AdminReviewService_MAX_REPLY_POINTS_ = 2000;
 var AdminReviewService_MAX_REPLY_BYTES_ = 8000;
 
+// F-17: one structured line in Executions per failed write, like F-10 for Places.
+// Fixed internal codes and fixed code-authored texts only - never values, names or credentials.
+function AdminReviewService_logFailClosed_(service, error, publicCode) {
+  try {
+    var message = error && typeof error.message === "string" ? error.message : "";
+    var entry = { event: "ADMIN_WRITE_FAIL_CLOSED", service: service, public_code: publicCode,
+      code: /^[A-Z][A-Z0-9_]{0,63}$/.test(message) ? message : "UNCLASSIFIED" };
+    if (entry.code === "UNCLASSIFIED" && /^[A-Za-z][A-Za-z .]{0,79}$/.test(message)) entry.detail = message;
+    if (entry.code === "UNCLASSIFIED" && error && /^[A-Za-z]{1,40}$/.test(String(error.name))) entry.error_name = error.name;
+    if (error && typeof error.cause_code === "string") entry.cause_code = /^[A-Z][A-Z0-9_]{0,63}$/.test(error.cause_code) ? error.cause_code : "UNCLASSIFIED";
+    if (typeof console !== "undefined" && console && typeof console.error === "function") console.error(JSON.stringify(entry));
+  } catch (_logError) { /* Logging never changes the client-safe outcome. */ }
+}
+
 function AdminReviewService_errorResponse_(error) {
   var messages = {
     UNAUTHORIZED: "Sign in to continue.",
@@ -28,6 +42,7 @@ function AdminReviewService_errorResponse_(error) {
   };
   var code = error && error.message;
   if (!Object.prototype.hasOwnProperty.call(messages, code)) code = "SERVER_ERROR";
+  if (["SERVER_ERROR", "OUTCOME_UNKNOWN", "CONTENT_LOCK"].indexOf(code) >= 0) AdminReviewService_logFailClosed_("review", error, code);
   var safe = { code: code, message: messages[code] || "The request could not be completed." };
   if (code === "OUTCOME_UNKNOWN") {
     safe.retryable = false;
@@ -134,6 +149,19 @@ function AdminReviewService_reply_(value) {
 
 function AdminReviewService_escapeText_(value) { return /^[=+\-@]/.test(value) ? "'" + value : value; }
 function AdminReviewService_unescapeText_(value) { return /^'[=+\-@]/.test(value) ? value.slice(1) : value; }
+
+// F-23: Sheets consumes the apostrophe the public submit adds, so stored text can read back as a bare "=…".
+// Every full-row rewrite re-escapes free-text fields (idempotent) so setValues never creates a live formula.
+var AdminReviewService_TEXT_FIELDS_ = ["reviewer_name", "comment", "admin_reply", "approved_by"];
+function AdminReviewService_storageRow_(record) {
+  var stored = {};
+  Object.keys(record).forEach(function (field) {
+    var value = record[field];
+    stored[field] = AdminReviewService_TEXT_FIELDS_.indexOf(field) >= 0 && typeof value === "string" ?
+      AdminReviewService_escapeText_(AdminReviewService_unescapeText_(value)) : value;
+  });
+  return stored;
+}
 
 function AdminReviewService_table_() {
   return SheetService_readTable_(AdminReviewService_SHEET_, AdminReviewService_HEADERS_);
@@ -289,8 +317,15 @@ function AdminReviewService_verify_(reviewId, rowNumber, intended) {
   var entry = AdminReviewService_find_(AdminReviewService_table_(), reviewId);
   if (entry.sourceRowNumber !== rowNumber) throw new Error("REVIEW_VERIFY");
   AdminReviewService_HEADERS_.forEach(function (field) {
-    if (entry.values[field] !== intended[field]) throw new Error("REVIEW_VERIFY");
+    var actual = entry.values[field], expected = intended[field];
+    // Escaped text may read back with or without its apostrophe; compare the meaning, never a formula result.
+    if (AdminReviewService_TEXT_FIELDS_.indexOf(field) >= 0 && typeof actual === "string" && typeof expected === "string") {
+      actual = AdminReviewService_unescapeText_(actual);
+      expected = AdminReviewService_unescapeText_(expected);
+    }
+    if (actual !== expected) throw new Error("REVIEW_VERIFY");
   });
+  return entry.values;
 }
 
 function AdminReviewService_audit_(admin, action, record, timestamp) {
@@ -328,17 +363,21 @@ function AdminReviewService_write_(admin, action, payload, transform) {
   SheetService_prepareAppendDestination_(SheetService_getSheet_("activity_logs"), auditTable.headers, auditTable.headers);
   var publicChanged = current.status === "approved" || record.status === "approved";
   if (publicChanged) PlaceService_bumpCacheEpoch_();
+  var stored = AdminReviewService_storageRow_(record);
+  var readBack;
   try {
-    SheetService_replaceObjectAtRow_(AdminReviewService_SHEET_, entry.sourceRowNumber, record);
+    SheetService_replaceObjectAtRow_(AdminReviewService_SHEET_, entry.sourceRowNumber, stored);
     SpreadsheetApp.flush();
-    AdminReviewService_verify_(record.review_id, entry.sourceRowNumber, record);
+    readBack = AdminReviewService_verify_(record.review_id, entry.sourceRowNumber, stored);
   } catch (_entityError) {
     var uncertain = new Error("OUTCOME_UNKNOWN");
+    uncertain.cause_code = _entityError && _entityError.message;
     uncertain.review_id = record.review_id;
     throw uncertain;
   }
-  var result = AdminReviewService_projection_(record);
-  result.audit_status = AdminReviewService_audit_(admin, action, record, record.updated_at);
+  // Project the row as it now reads, so the returned revision equals the next list/detail revision.
+  var result = AdminReviewService_projection_(readBack);
+  result.audit_status = AdminReviewService_audit_(admin, action, readBack, record.updated_at);
   return result;
 }
 

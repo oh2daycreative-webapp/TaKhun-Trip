@@ -41,6 +41,8 @@ for (const id of ["", "bad id", "../bad", "A/B", "<script>", "A".repeat(65)]) as
 }
 
 assert.deepEqual(plain(api.parseFavoritesStorage('["BTK-001","BTK-001"," BTK-002 "]').ids), ["BTK-001", "BTK-002"]);
+// F-25: live place ids survive the favorites filter; only demo MOCK- ids are dropped.
+assert.deepEqual(plain(api.filterCanonicalFavorites(["BTK-001", "PLC-4e11d45a-c022-4919-873c-5823aeb03bf7", "MOCK-PLACE-001"])), ["BTK-001", "PLC-4e11d45a-c022-4919-873c-5823aeb03bf7"]);
 assert.equal(api.parseFavoritesStorage('["BTK-001"]').recovered, false);
 assert.deepEqual(plain(api.parseFavoritesStorage("not json")), { ids: [], recovered: true });
 assert.deepEqual(plain(api.parseFavoritesStorage('{"ids":[]}')), { ids: [], recovered: true });

@@ -11,6 +11,7 @@ function AdminEventService_validate_(record) {
     var value = record[field];
     if (["register_url", "google_maps_url", "image_url"].indexOf(field) >= 0) normalized[field] = AdminContentService_url_(value);
     else if (field === "is_featured") { if (typeof value !== "boolean") throw new Error("VALIDATION_ERROR"); }
+    else if (field === "contact_phone") normalized[field] = AdminContentService_text_(AdminContentService_phone_(value));
     else if (field !== "latitude" && field !== "longitude") normalized[field] = AdminContentService_text_(value);
   });
   if (!normalized.title_th || !normalized.description_th || !normalized.location_th || EventService_TYPES_.indexOf(normalized.event_type) < 0 || !EventService_dateParts_(normalized.event_date)) throw new Error("VALIDATION_ERROR");

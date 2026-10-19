@@ -10,6 +10,20 @@ var AdminContentService_TRANSITIONS_ = {
 };
 var AdminContentService_AUDIT_HEADERS_ = ["log_id", "admin_id", "action", "entity_type", "entity_id", "description", "created_at", "audit_id", "actor_admin_id", "occurred_at"];
 
+// F-17: one structured line in Executions per failed write, like F-10 for Places.
+// Fixed internal codes and fixed code-authored texts only - never values, names or credentials.
+function AdminContentService_logFailClosed_(service, error, publicCode) {
+  try {
+    var message = error && typeof error.message === "string" ? error.message : "";
+    var entry = { event: "ADMIN_WRITE_FAIL_CLOSED", service: service, public_code: publicCode,
+      code: /^[A-Z][A-Z0-9_]{0,63}$/.test(message) ? message : "UNCLASSIFIED" };
+    if (entry.code === "UNCLASSIFIED" && /^[A-Za-z][A-Za-z .]{0,79}$/.test(message)) entry.detail = message;
+    if (entry.code === "UNCLASSIFIED" && error && /^[A-Za-z]{1,40}$/.test(String(error.name))) entry.error_name = error.name;
+    if (error && typeof error.cause_code === "string") entry.cause_code = /^[A-Z][A-Z0-9_]{0,63}$/.test(error.cause_code) ? error.cause_code : "UNCLASSIFIED";
+    if (typeof console !== "undefined" && console && typeof console.error === "function") console.error(JSON.stringify(entry));
+  } catch (_logError) { /* Logging never changes the client-safe outcome. */ }
+}
+
 function AdminContentService_execute_(token, write, operation) {
   var lock = null, acquired = false;
   try {
@@ -26,11 +40,15 @@ function AdminContentService_execute_(token, write, operation) {
       UNAUTHORIZED: "Sign in to continue.", FORBIDDEN: "This role cannot perform this action.",
       VALIDATION_ERROR: "Invalid request data.", NOT_FOUND: "Record not found.",
       CONFLICT: "Content changed. Reload before editing.", DUPLICATE_ID: "Identifier already exists.",
-      INVALID_TRANSITION: "This lifecycle change is not permitted.",
+      INVALID_TRANSITION: "This lifecycle change is not permitted.", CONTENT_LOCK: "Content is busy. Try again.",
+      WRITE_REJECTED: "Nothing was saved: the sheet destination is not ready. Contact the maintainer.",
       OUTCOME_UNKNOWN: "The result is uncertain. Reload and reconcile; do not retry automatically."
     };
     var code = error && error.message;
+    // F-20: these guards only run before any write, so the outcome is a definite "nothing saved".
+    if (["CONTENT_FORMAT", "CONTENT_FORMULA", "CONTENT_AUDIT_COLLISION"].indexOf(code) >= 0) code = "WRITE_REJECTED";
     if (!Object.prototype.hasOwnProperty.call(messages, code)) code = "SERVER_ERROR";
+    if (["SERVER_ERROR", "WRITE_REJECTED", "OUTCOME_UNKNOWN", "CONTENT_LOCK"].indexOf(code) >= 0) AdminContentService_logFailClosed_("content", error, code);
     var safe = { code: code, message: messages[code] || "The request could not be completed." };
     if (code === "OUTCOME_UNKNOWN") {
       safe.retryable = false;
@@ -70,6 +88,15 @@ function AdminContentService_text_(value, limit) {
   if (/^[=+@\-']/.test(text)) throw new Error("VALIDATION_ERROR");
   try { CryptoService_utf8Bytes_(text); } catch (_invalidUnicode) { throw new Error("VALIDATION_ERROR"); }
   return text;
+}
+
+// F-19: a phone typed as +66… is stored in national form (0…), so no stored phone starts with "+"
+// (a leading + can be read by Sheets as a formula). Other + numbers are still rejected by the text guard.
+function AdminContentService_phone_(value) {
+  if (typeof value !== "string") return value;
+  var text = value.trim();
+  if (!/^\+66/.test(text)) return value;
+  return "0" + text.slice(3).replace(/^[\s.\-]*(?:\(0\)|0)?[\s.\-]*/, "");
 }
 
 function AdminContentService_url_(value) {
@@ -278,6 +305,7 @@ function AdminContentService_write_(domain, admin, table, entry, record, action)
     AdminContentService_verify_(domain.table, table.headers, domain.id, record[domain.id], rowNumber, intended);
   } catch (_writeError) {
     var uncertain = new Error("OUTCOME_UNKNOWN");
+    uncertain.cause_code = _writeError && _writeError.message;
     uncertain.entity_type = domain.entity; uncertain.entity_id = record[domain.id]; throw uncertain;
   }
   var auditStatus = "recorded";

@@ -221,6 +221,11 @@
     review_previous_label: "Go to previous review page", review_next_label: "Go to next review page"
   });
 
+  // F-16: live data — no "sample/demo" wording left on public pages.
+  Object.assign(I18N_MESSAGES.th.place_detail, { review_summary: "คะแนน {rating} จาก {count} รีวิว" });
+  Object.assign(I18N_MESSAGES.en.place_detail, { review_summary: "Rated {rating} from {count} reviews", favorite_removed: "Place removed from saved places." });
+  Object.assign(I18N_MESSAGES.en.places, { favorite_removed: "Place removed from saved places." });
+
   let currentLang = DEFAULT_LANG;
   let initialized = false;
 

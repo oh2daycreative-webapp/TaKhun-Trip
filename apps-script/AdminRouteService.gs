@@ -444,14 +444,24 @@ function AdminRouteService_execute_(token, write, operation) {
       DUPLICATE_ID: "Identifier already exists.",
       INVALID_TRANSITION: "This lifecycle change is not permitted.",
       CONTENT_LOCK: "Content is busy. Try again.",
+      WRITE_REJECTED: "Nothing was saved: the sheet destination is not ready. Contact the maintainer.",
       OUTCOME_UNKNOWN:
         "The result is uncertain. Reload and reconcile; do not retry automatically."
     };
 
     var code = error && error.message;
 
+    // F-20: these guards only run before any write (later failures become OUTCOME_UNKNOWN).
+    if (["ROUTE_FORMAT", "ROUTE_FORMULA", "ROUTE_AUDIT_COLLISION"].indexOf(code) >= 0) {
+      code = "WRITE_REJECTED";
+    }
+
     if (!Object.prototype.hasOwnProperty.call(messages, code)) {
       code = "SERVER_ERROR";
+    }
+
+    if (["SERVER_ERROR", "WRITE_REJECTED", "OUTCOME_UNKNOWN", "CONTENT_LOCK"].indexOf(code) >= 0) {
+      AdminRouteService_logFailClosed_("route", error, code);
     }
 
     var safe = {
@@ -1232,6 +1242,20 @@ function AdminRouteService_verifyAggregate_(
   };
 }
 
+// F-17: one structured line in Executions per failed write, like F-10 for Places.
+// Fixed internal codes and fixed code-authored texts only - never values, names or credentials.
+function AdminRouteService_logFailClosed_(service, error, publicCode) {
+  try {
+    var message = error && typeof error.message === "string" ? error.message : "";
+    var entry = { event: "ADMIN_WRITE_FAIL_CLOSED", service: service, public_code: publicCode,
+      code: /^[A-Z][A-Z0-9_]{0,63}$/.test(message) ? message : "UNCLASSIFIED" };
+    if (entry.code === "UNCLASSIFIED" && /^[A-Za-z][A-Za-z .]{0,79}$/.test(message)) entry.detail = message;
+    if (entry.code === "UNCLASSIFIED" && error && /^[A-Za-z]{1,40}$/.test(String(error.name))) entry.error_name = error.name;
+    if (error && typeof error.cause_code === "string") entry.cause_code = /^[A-Z][A-Z0-9_]{0,63}$/.test(error.cause_code) ? error.cause_code : "UNCLASSIFIED";
+    if (typeof console !== "undefined" && console && typeof console.error === "function") console.error(JSON.stringify(entry));
+  } catch (_logError) { /* Logging never changes the client-safe outcome. */ }
+}
+
 function AdminRouteService_outcomeUnknown_(routeId) {
   var error = new Error("OUTCOME_UNKNOWN");
   error.entity_type = "route";
@@ -1601,7 +1625,9 @@ function AdminRouteService_writePlan_(plan, admin, action) {
 
   } catch (_writeError) {
     if (mutationStarted) {
-      throw AdminRouteService_outcomeUnknown_(routeId);
+      var uncertain = AdminRouteService_outcomeUnknown_(routeId);
+      uncertain.cause_code = _writeError && _writeError.message;
+      throw uncertain;
     }
 
     throw _writeError;

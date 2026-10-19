@@ -70,8 +70,23 @@ function AdminSettingsService_email_(value, request) {
   return value;
 }
 
+// F-19: a phone typed as +66… is stored in national form (0…), so no stored phone starts with "+"
+// (a leading + can be read by Sheets as a formula). Other + numbers are still rejected by the text guard.
+function AdminSettingsService_thaiPhone_(value) {
+  if (typeof value !== "string") return value;
+  var text = value.trim();
+  if (!/^\+66/.test(text)) return value;
+  return "0" + text.slice(3).replace(/^[\s.\-]*(?:\(0\)|0)?[\s.\-]*/, "");
+}
+
+// A stored legacy +66 phone equals its national form, so unrelated saves neither rewrite nor fail to verify it.
+function AdminSettingsService_same_(key, stored, requested) {
+  return stored === requested || (key === "main_phone" && AdminSettingsService_thaiPhone_(stored) === requested);
+}
+
 function AdminSettingsService_phone_(value, request) {
   value = AdminSettingsService_text_(value, 0, 40, 80, request, true);
+  if (request) value = AdminSettingsService_thaiPhone_(value);
   if (!value) return value;
   if (!/^[+0-9 .()\-]+$/.test(value) || (value.match(/\(/g) || []).length !== (value.match(/\)/g) || []).length) throw new Error(request ? "VALIDATION_ERROR" : "SETTINGS_SCHEMA");
   var compact = value.replace(/[ .()\-]/g, "");
@@ -239,7 +254,7 @@ function AdminSettingsService_write_(admin, payload) {
   var current = AdminSettingsService_canonical_(table.rows);
   var currentRevision = AdminSettingsService_revision_(current);
   if (currentRevision !== payload.expected_revision) throw new Error("CONFLICT");
-  var changedKeys = AdminSettingsService_KEYS_.filter(function (key) { return current.settings[key] !== payload.settings[key]; });
+  var changedKeys = AdminSettingsService_KEYS_.filter(function (key) { return !AdminSettingsService_same_(key, current.settings[key], payload.settings[key]); });
   if (!changedKeys.length) return { settings: current.settings, revision: currentRevision, changed: false, audit_status: "not_applicable" };
 
   var timestamp = AdminSettingsService_nextTimestamp_(current);
@@ -259,7 +274,7 @@ function AdminSettingsService_write_(admin, payload) {
     SpreadsheetApp.flush();
     var verified = AdminSettingsService_canonical_(SettingsService_readTable_().rows);
     AdminSettingsService_KEYS_.forEach(function (key) {
-      if (verified.settings[key] !== payload.settings[key] || verified.entries[key].sourceRowNumber !== current.entries[key].sourceRowNumber) throw new Error("SETTINGS_VERIFY");
+      if (!AdminSettingsService_same_(key, verified.settings[key], payload.settings[key]) || verified.entries[key].sourceRowNumber !== current.entries[key].sourceRowNumber) throw new Error("SETTINGS_VERIFY");
       if (changedKeys.indexOf(key) >= 0 && verified.timestamps[key] !== timestamp) throw new Error("SETTINGS_VERIFY");
     });
     var revision = AdminSettingsService_revision_(verified);
