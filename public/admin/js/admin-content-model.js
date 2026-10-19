@@ -17,6 +17,12 @@
     encodeURIComponent(result); // Reject unpaired UTF-16 surrogates, like the server UTF-8 boundary.
     return result;
   }
+  // F-19 (client): a phone typed as +66… is sent as 0…, the same rule as AdminContentService_phone_ on the server.
+  // Any other leading + still fails text() (formula guard).
+  function phone(value) {
+    if (typeof value !== 'string' || !/^\+66/.test(value.trim())) return text(value);
+    return text('0' + value.trim().slice(3).replace(/^[\s.\-]*(?:\(0\)|0)?[\s.\-]*/, ''));
+  }
   function url(value) {
     const result = text(value, 2048);
     if (!result) return result;
@@ -45,7 +51,7 @@
           const n = value.trim() === '' ? '' : Number(value);
           if (n !== '' && (!Number.isFinite(n) || (field === 'sort_order' ? !Number.isSafeInteger(n) || n < 0 : Math.abs(n) > (field === 'latitude' ? 90 : 180)))) throw new Error();
           content[field] = n;
-        } else content[field] = field.endsWith('_url') ? url(value) : text(value);
+        } else content[field] = field.endsWith('_url') ? url(value) : field === 'phone' || field === 'contact_phone' ? phone(value) : text(value);
       } catch (_invalid) { bad(field); }
     });
     d.required.forEach(field => { if (!content[field]) bad(field); });
