@@ -53,6 +53,8 @@ function load(options = {}) {
     Utilities: { getUuid: () => "123e4567-e89b-12d3-a456-426614174000", formatDate: (_date, zone, pattern) => { assert.equal(zone, "Asia/Bangkok"); assert.equal(pattern, "yyyy-MM-dd HH:mm:ss"); return "2026-07-15 14:30:00"; } },
     Session: { getScriptTimeZone: () => "Asia/Bangkok" },
     CryptoService_utf8Bytes_: (value) => [...Buffer.from(value, "utf8")],
+    // Public settings read used by the reviews switch; reviews are on unless a test says otherwise.
+    getSettings_() { reads.push("settings"); if (options.settingsError) throw new Error("settings secret"); return options.settings || { ok: true, data: { reviews_enabled: true }, message: "success" }; },
     readSheetObjects_(name) { reads.push(name); if (name === "reviews") return reviewRows; if (name === "places") return placeRows; throw new Error("unexpected sheet"); },
     appendSheetObject_(name, required, record) { appended.push({ name, required: [...required], record: { ...record } }); if (options.appendError) throw new Error("sheet secret"); }
   };
@@ -118,6 +120,29 @@ test("submitReview rejects invalid input unpublished places and releases after a
   assert.equal(plain(required(load().context, "submitReview_")({ place_id: "P-2", rating: 5, comment: "x" })).error.code, "NOT_FOUND");
   const timeout = load({ lock: { released: 0, tryLock() { return false; }, releaseLock() { this.released += 1; } } }); assert.throws(() => required(timeout.context, "submitReview_")({ place_id: "P-1", rating: 5, comment: "x" })); assert.equal(timeout.lock.released, 0);
   const failed = load({ appendError: true }); assert.throws(() => required(failed.context, "submitReview_")({ place_id: "P-1", rating: 5, comment: "x" })); assert.equal(failed.lock.released, 1);
+});
+
+test("submitReview honours the reviews_enabled switch and refuses before lock or append when off or unreadable", () => {
+  const cases = [
+    { settings: { ok: true, data: { reviews_enabled: false }, message: "success" } },
+    { settings: { ok: true, data: {}, message: "success" } },
+    { settings: { ok: true, data: { reviews_enabled: "TRUE" }, message: "success" } },
+    { settings: { ok: false, error: { code: "SERVER_ERROR" } } },
+    { settingsError: true }
+  ];
+  for (const options of cases) {
+    const env = load(options);
+    const result = plain(required(env.context, "submitReview_")({ place_id: "P-1", reviewer_name: "Alice", rating: 5, comment: "safe" }));
+    assert.deepEqual(result, { ok: false, error: { code: "REVIEWS_DISABLED", message: "ขณะนี้ปิดรับรีวิว" } }, JSON.stringify(options));
+    assert.equal(env.lock.acquired, false, JSON.stringify(options));
+    assert.equal(env.appended.length, 0, JSON.stringify(options));
+    assert.deepEqual(env.reads, ["settings"], JSON.stringify(options));
+  }
+  const enabled = load({ settings: { ok: true, data: { reviews_enabled: true }, message: "success" } });
+  assert.equal(plain(required(enabled.context, "submitReview_")({ place_id: "P-1", rating: 5, comment: "safe" })).ok, true);
+  assert.equal(enabled.appended.length, 1);
+  // Public reads stay available for the Admin and existing approved reviews.
+  assert.equal(plain(load({ settings: { ok: true, data: { reviews_enabled: false }, message: "success" } }).context.getReviews_({ place_id: "P-1" })).ok, true);
 });
 
 test("submitReview accepts an empty name but rejects Admin-incompatible text before lock or append", () => {
@@ -246,7 +271,8 @@ test("public submission performs its authoritative Place check only after winnin
   const contendedLock = { attempts: 0, releases: 0, tryLock(ms) { assert.equal(ms, 10000); this.attempts += 1; return false; }, releaseLock() { this.releases += 1; } };
   const contended = load({ lock: contendedLock });
   assert.throws(() => contended.context.submitReview_({ place_id: "P-1", rating: 5, comment: "safe" }), /Review write is temporarily unavailable/);
-  assert.deepEqual(contended.reads, []);
+  // Only the (cached) reviews switch is read before the lock; the Place check still waits for the lock.
+  assert.deepEqual(contended.reads, ["settings"]);
   assert.equal(contended.appended.length, 0);
 
   const places = [{ place_id: "P-1", status: "published" }];

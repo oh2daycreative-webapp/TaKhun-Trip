@@ -165,7 +165,19 @@
       if (external) { link.target = "_blank"; link.rel = "noopener noreferrer"; }
       actions.append(link);
     }
-    mount.replaceChildren(badges, title, shortDescription, review, actions);
+    // No summary line while reviews are off (summary stays null) or still loading.
+    mount.replaceChildren(badges, title, shortDescription, ...(review.textContent ? [review] : []), actions);
+  }
+
+  // Reviews switch: Admin → ตั้งค่า → "เปิดรีวิว" (public settings reviews_enabled). Only an explicit true shows
+  // the review section and summary; false, a missing value or a failed settings read keeps them hidden.
+  async function reviewsEnabled() {
+    try {
+      const settings = await global.TakhunApi.getSettings({ mock: () => ({ reviews_enabled: true }) });
+      return settings?.reviews_enabled === true;
+    } catch (_error) {
+      return false;
+    }
   }
 
   function renderTextSections(place, lang) {
@@ -280,6 +292,7 @@
     };
     let currentPlace = null;
     let currentReviewSummary = null;
+    const reviewsSection = global.document.querySelector("[data-detail-reviews]");
     const reviewsController = global.TakhunReviews.createController({
       mounts: reviewMounts,
       elements: reviewElements,
@@ -306,12 +319,16 @@
         currentPlace = null;
         currentReviewSummary = null;
         reviewsController.setPlace(null);
+        if (reviewsSection) reviewsSection.hidden = true;
         const placeId = parsePlaceId(global.location.search);
         if (!validatePlaceId(placeId)) { currentPlace = null; global.document.title = t("place_detail.not_found_page_title"); setPageState(mounts, "not-found", root); return; }
         const lang = global.TakhunI18n?.getCurrentLang?.() || "th";
+        const reviewsOn = reviewsEnabled();
         currentPlace = await global.TakhunApi.getPlaceDetail(placeId, { lang }, { mock: () => findPublishedPlace(placeId) });
         if (!currentPlace) { global.document.title = t("place_detail.not_found_page_title"); setPageState(mounts, "not-found", root); return; }
         renderCached();
+        if (!(await reviewsOn)) return;
+        if (reviewsSection) reviewsSection.hidden = false;
         await reviewsController.setPlace(currentPlace);
       } catch (error) {
         currentPlace = null;
