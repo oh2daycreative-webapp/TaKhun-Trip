@@ -284,5 +284,29 @@ test("audit destination preflight failure is mutation-free and remains distinct 
   assert.equal(harness.cacheValues.has("public:getSettings"), true);
 });
 
+test("production-style cells (boolean value, date updated_at) save the reviews switch and verify", () => {
+  // Production settings: setting_value is a real boolean in a TEXT cell; updated_at is a DATE_TIME cell, so Sheets turns
+  // the written "yyyy-MM-dd HH:mm:ss" back into a Date (harness time zone = the formatDate stub, UTC).
+  for (const valueCell of ["text", "boolean"]) {
+    const rows = tableRows().map((row) => ({ ...row, values: { ...row.values,
+      setting_value: ["reviews_enabled", "events_enabled"].includes(row.values.setting_key) ? row.values.setting_value === "TRUE" : row.values.setting_value,
+      updated_at: new Date("2026-07-15T11:00:00.000Z") } }));
+    const harness = load({ role: "super_admin", rows });
+    harness.context.AdminSettingsService_setCell_ = (entry, field, value) => {
+      harness.writes.push({ row: entry.sourceRowNumber, field, value });
+      if (field === "updated_at") entry.values[field] = new Date(String(value).replace(" ", "T") + "Z");
+      else entry.values[field] = valueCell === "boolean" && (value === "TRUE" || value === "FALSE") ? value === "TRUE" : value;
+    };
+    const current = plain(required(harness.context, "adminGetSettings_")("token"));
+    assert.equal(current.data.settings.reviews_enabled, true);
+    const response = plain(required(harness.context, "updateSettings_")("token", { expected_revision: current.data.revision, settings: { ...current.data.settings, reviews_enabled: false } }));
+    assert.equal(response.ok, true, `${valueCell}: ${JSON.stringify(response.error || {})}`);
+    assert.equal(response.data.changed, true);
+    assert.equal(response.data.settings.reviews_enabled, false);
+    assert.deepEqual(harness.writes.map((write) => write.field), ["setting_value", "updated_at"], valueCell);
+    assert.equal(harness.writes[0].value, "FALSE");
+  }
+});
+
 if (process.exitCode) process.exit(process.exitCode);
 process.stdout.write("Admin Settings service model verification passed.\n");
