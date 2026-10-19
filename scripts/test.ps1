@@ -163,6 +163,8 @@ if ($LASTEXITCODE -ne 0) { throw "Search behavior verification failed." }
 & (Join-Path $PSScriptRoot "test-places.ps1")
 & node (Join-Path $PSScriptRoot "test-reviews.js")
 if ($LASTEXITCODE -ne 0) { throw "Public Reviews behavior verification failed." }
+& node (Join-Path $PSScriptRoot "test-home-states.js")
+if ($LASTEXITCODE -ne 0) { throw "Home empty states / footer verification failed." }
 & node (Join-Path $PSScriptRoot "test-reviews-switch.js")
 if ($LASTEXITCODE -ne 0) { throw "Reviews switch (reviews_enabled) verification failed." }
 & (Join-Path $PSScriptRoot "test-reviews.ps1")
