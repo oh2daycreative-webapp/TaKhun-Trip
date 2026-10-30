@@ -120,9 +120,13 @@ function MediaUploadService_response_(code, reason) {
 
 // Auth + write role, then the operation. Errors become fixed codes with Thai messages; nothing else leaks.
 function MediaUploadService_executeWrite_(token, operation) {
+  return MediaUploadService_execute_(token, MediaUploadService_WRITE_ROLES_, operation);
+}
+
+function MediaUploadService_execute_(token, roles, operation) {
   try {
     var admin = AuthService_requireAdmin_(token);
-    if (!admin || MediaUploadService_WRITE_ROLES_.indexOf(admin.role) === -1) throw new Error("FORBIDDEN");
+    if (!admin || roles.indexOf(admin.role) === -1) throw new Error("FORBIDDEN");
     return { ok: true, data: operation(admin) };
   } catch (error) {
     var code = error && typeof error.message === "string" ? error.message : "";
@@ -145,11 +149,21 @@ function MediaUploadService_uploadTable_() {
   return table;
 }
 
-function MediaUploadService_requirePlace_(placeId) {
+// Writes need a place that exists and is not archived; reads (allowArchived) only need it to exist.
+function MediaUploadService_requirePlace_(placeId, allowArchived) {
   var table;
   try { table = SheetService_readTable_("places", ["place_id", "status"]); } catch (_placesError) { throw new Error("SERVER_ERROR"); }
   var match = table.rows.filter(function (entry) { return entry.values.place_id === placeId; });
-  if (match.length !== 1 || String(match[0].values.status) === "archived") throw new Error("NOT_FOUND");
+  if (match.length !== 1 || (!allowArchived && String(match[0].values.status) === "archived")) throw new Error("NOT_FOUND");
+}
+
+// {place_id} with exactly that key.
+function MediaUploadService_placePayload_(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload) || Object.keys(payload).length !== 1 ||
+      typeof payload.place_id !== "string" || !MediaUploadService_PLACE_ID_PATTERN_.test(payload.place_id)) {
+    throw new Error("VALIDATION_ERROR");
+  }
+  return payload.place_id;
 }
 
 function MediaUploadService_activeForPlace_(table, placeId) {
@@ -340,5 +354,39 @@ function adminUploadPlaceImage_(token, payload) {
     }
     if (!result.duplicate) result.files_verified = MediaUploadService_ensureStored_(bytesByKey);
     return result;
+  });
+}
+
+// ---- task 6a: read ----
+
+var MediaUploadService_READ_ROLES_ = ["super_admin", "editor", "reviewer", "viewer"];
+
+function MediaUploadService_sortedActive_(table, placeId) {
+  return MediaUploadService_activeForPlace_(table, placeId).slice().sort(function (left, right) {
+    return (Number(left.values.sort_order) || 0) - (Number(right.values.sort_order) || 0) || left.sourceRowNumber - right.sourceRowNumber;
+  });
+}
+
+// adminGetPlaceUploads_: the place's active photos in order, the switch state and the limits. Read-only, no R2.
+function adminGetPlaceUploads_(token, payload) {
+  return MediaUploadService_execute_(token, MediaUploadService_READ_ROLES_, function (admin) {
+    var placeId = MediaUploadService_placePayload_(payload);
+    MediaUploadService_requirePlace_(placeId, true);
+    var table = MediaUploadService_uploadTable_();
+    var settings = MediaUploadSchema_settings_();
+    var today = MediaUploadService_bangkokDay_(new Date().toISOString());
+    var todayCount = table.rows.filter(function (entry) { return MediaUploadService_bangkokDay_(String(entry.values.created_at)) === today; }).length;
+    return {
+      enabled: settings.enabled,
+      can_write: MediaUploadService_WRITE_ROLES_.indexOf(admin.role) !== -1,
+      limits: {
+        per_place: MediaUploadSchema_PER_PLACE_LIMIT_, daily_left: Math.max(0, settings.dailyLimit - todayCount),
+        max_bytes_large: MediaImageCheck_MAX_LARGE_BYTES_, max_bytes_small: MediaImageCheck_MAX_SMALL_BYTES_
+      },
+      items: MediaUploadService_sortedActive_(table, placeId).map(function (entry) { return MediaUploadService_item_(entry.values); }),
+      delete_pending: table.rows.filter(function (entry) {
+        return entry.values.entity_type === "place" && entry.values.entity_id === placeId && entry.values.object_state === "delete_pending";
+      }).length
+    };
   });
 }

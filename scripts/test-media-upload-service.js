@@ -489,6 +489,62 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
     }
   });
 
+  await test("owner rule (3): the activity_logs fix touches only the new audit row (rows added at the end, one row formatted)", () => {
+    const env = load();
+    const audit = env.sheets.activity_logs;
+    for (let i = 0; i < 999; i += 1) audit.values.push(["L", "A", "X", "place", "P", "d", "t", `AU-${i}`, "A", "t"]);
+    audit.formats[500][3] = "0"; // an existing row that is not plain text must stay as it is
+    const res = upload(env);
+    assert.equal(res.ok, true);
+    assert.equal(res.data.audit_status, "recorded");
+    const auditWrites = env.log.filter((e) => e[1] === "activity_logs");
+    assert.deepEqual(auditWrites.map((e) => e[0]), ["insertRowsAfter", "setNumberFormat", "setValues"]);
+    assert.deepEqual(auditWrites[1].slice(2), [1001, 1, 1, 10, "@"], "format only row 1001");
+    assert.equal(audit.formats[500][3], "0");
+  });
+
+  // ---- task 6a: adminGetPlaceUploads (read) ----
+  const read = (env, body = { place_id: PLACE_ID }, token = "good-token") => JSON.parse(JSON.stringify(env.context.adminGetPlaceUploads_(token, body)));
+
+  await test("6a read: every admin role can read; items are the place's active photos in sort order; captions unescaped", () => {
+    const uploads = [
+      active(2, { upload_id: "UPL-b", caption_th: "'=ทะเล", is_cover: "true", key_large: "kL2", key_small: "kS2", format: "jpeg", width_large: 1000, height_large: 750, width_small: 800, height_small: 600 }),
+      active(1, { upload_id: "UPL-a", is_cover: "false" }),
+      active(3, { upload_id: "UPL-gone", status: "deleted", object_state: "delete_pending" }),
+      active(4, { upload_id: "UPL-other", entity_id: "BTK-001" })
+    ];
+    for (const role of ["super_admin", "editor", "reviewer", "viewer"]) {
+      const env = load({ admin: { admin_id: "ADM-x", role }, uploads });
+      const res = read(env);
+      assert.equal(res.ok, true, role);
+      assert.deepEqual(res.data.items.map((i) => i.upload_id), ["UPL-a", "UPL-b"]);
+      assert.equal(res.data.items[1].caption_th, "=ทะเล");
+      assert.equal(res.data.items[1].is_cover, true);
+      assert.equal(res.data.items[1].format, "jpeg");
+      assert.equal(res.data.can_write, role === "super_admin" || role === "editor");
+      assert.equal(res.data.delete_pending, 1);
+      assert.deepEqual([env.fetches.length, writes(env).length, env.lockEvents.length], [0, 0, 0], "read is read-only, no R2");
+    }
+  });
+
+  await test("6a read: switch state and limits (per place 20, daily left, byte caps)", () => {
+    const todayRows = [active(1, { created_at: "2026-10-30T01:00:00.000Z" }), active(2, { entity_id: "BTK-001", created_at: "2026-10-30T02:00:00.000Z" })];
+    const on = read(load({ uploads: todayRows, props: { ...PROPS, MEDIA_UPLOAD_DAILY_LIMIT: "5" } }));
+    assert.equal(on.data.enabled, true);
+    assert.deepEqual(on.data.limits, { per_place: 20, daily_left: 3, max_bytes_large: 2097152, max_bytes_small: 614400 });
+    const off = read(load({ props: { ...PROPS, MEDIA_UPLOAD_ENABLED: "false" } }));
+    assert.equal(off.data.enabled, false);
+    assert.equal(off.data.limits.daily_left, 100);
+  });
+
+  await test("6a read: errors (bad payload, unknown place, no session, sheet missing); archived places can still be read", () => {
+    for (const body of [null, {}, { place_id: "" }, { place_id: PLACE_ID, extra: 1 }]) assert.equal(read(load(), body).error.code, "VALIDATION_ERROR");
+    assert.equal(read(load(), { place_id: "PLC-NOPE" }).error.code, "NOT_FOUND");
+    assert.equal(read(load(), undefined, "bad").error.code, "UNAUTHORIZED");
+    assert.equal(read(load({ noUploadSheet: true })).error.code, "SERVER_ERROR");
+    assert.equal(read(load({ places: [[PLACE_ID, "x", "archived"]] })).ok, true);
+  });
+
   if (process.exitCode) process.exit(process.exitCode);
   process.stdout.write(`${passed} MediaUploadService tests passed\n`);
 })();
