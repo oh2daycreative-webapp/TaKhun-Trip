@@ -288,6 +288,8 @@ if ($LASTEXITCODE -ne 0) { throw "Apps Script static verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Apps Script load-order verification failed." }
 & node (Join-Path $PSScriptRoot "test-r2-sigv4.js")
 if ($LASTEXITCODE -ne 0) { throw "R2 SigV4 signing verification failed." }
+& node (Join-Path $PSScriptRoot "test-media-image-check.js")
+if ($LASTEXITCODE -ne 0) { throw "Media image byte-check verification failed." }
 & node (Join-Path $PSScriptRoot "test-routes.js")
 if ($LASTEXITCODE -ne 0) { throw "Routes behavior verification failed." }
 & node (Join-Path $PSScriptRoot "test-trip-planner.js")
