@@ -45,7 +45,7 @@ const router = sources.find(({ name }) => name === "Router.gs").source;
 const apiResponse = sources.find(({ name }) => name === "ApiResponse.gs").source;
 const publicGetActions = [
   "getCategories", "getEventDetail", "getEvents", "getGallery", "getHomeData", "getMapPlaces",
-  "getPlaceDetail", "getPlaces", "getProductDetail", "getProducts", "getReviews", "getRouteDetail",
+  "getPlaceDetail", "getPlaceUploads", "getPlaces", "getProductDetail", "getProducts", "getReviews", "getRouteDetail",
   "getRoutes", "getSettings", "getTripTemplates", "searchAll"
 ];
 const safeServerError = {

@@ -294,6 +294,8 @@ if ($LASTEXITCODE -ne 0) { throw "Media image byte-check verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "media_uploads schema verification failed." }
 & node (Join-Path $PSScriptRoot "test-media-upload-service.js")
 if ($LASTEXITCODE -ne 0) { throw "Media upload service verification failed." }
+& node (Join-Path $PSScriptRoot "test-media-upload-public.js")
+if ($LASTEXITCODE -ne 0) { throw "Media upload public read verification failed." }
 & node (Join-Path $PSScriptRoot "test-routes.js")
 if ($LASTEXITCODE -ne 0) { throw "Routes behavior verification failed." }
 & node (Join-Path $PSScriptRoot "test-trip-planner.js")

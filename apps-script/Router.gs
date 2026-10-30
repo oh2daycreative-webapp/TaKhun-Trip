@@ -18,6 +18,8 @@ function routeRequest_(method, event) {
           return createJsonResponse_(getPlaceDetail_(parameters));
         case "getMapPlaces":
           return createJsonResponse_(getMapPlaces_(parameters));
+        case "getPlaceUploads":
+          return createJsonResponse_(getPlaceUploads_(parameters));
         case "getRoutes":
           return createJsonResponse_(getRoutes_(parameters));
         case "getRouteDetail":
