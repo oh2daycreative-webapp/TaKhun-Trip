@@ -658,6 +658,86 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
     assert.deepEqual(none.fetches, []);
   });
 
+  // ---- task 6c: adminSavePlaceUploads (order, cover, captions) ----
+  const save = (env, body, token = "good-token") => JSON.parse(JSON.stringify(env.context.adminSavePlaceUploads_(token, body)));
+  const three = () => load({ uploads: [photo("UPL-a", 1, { is_cover: "true" }), photo("UPL-b", 2), photo("UPL-c", 3), photo("UPL-x", 1, { entity_id: "BTK-001", is_cover: "true" })] });
+  const body = (extra) => ({ place_id: PLACE_ID, expected_ids: ["UPL-a", "UPL-b", "UPL-c"], order: ["UPL-a", "UPL-b", "UPL-c"], cover_id: "UPL-a", captions: {}, ...extra });
+  const actions = (env) => audits(env).map((r) => [r[AUDIT_HEADERS.indexOf("action")], r[AUDIT_HEADERS.indexOf("description")]]);
+
+  await test("6c save: new order -> sort_order 1..n on the changed rows only, audit MEDIA_REORDER, no R2 (criterion 5)", () => {
+    const env = three();
+    const res = save(env, body({ order: ["UPL-c", "UPL-a", "UPL-b"] }));
+    assert.equal(res.ok, true, JSON.stringify(res));
+    assert.deepEqual(res.data.items.map((i) => [i.upload_id, i.sort_order]), [["UPL-c", 1], ["UPL-a", 2], ["UPL-b", 3]]);
+    assert.deepEqual(res.data.changed, ["MEDIA_REORDER"]);
+    assert.deepEqual(actions(env), [["MEDIA_REORDER", "UPL-c,UPL-a,UPL-b"]]);
+    assert.equal(field(env, "UPL-x", "sort_order"), "1", "other place untouched");
+    assert.deepEqual(env.fetches, []);
+    assert.equal(env.lockEvents.filter((e) => e[0] === "tryLock").length, 1);
+  });
+
+  await test("6c save: cover -> exactly one is_cover per place; null clears it; audit MEDIA_SET_COVER (criterion 7)", () => {
+    const env = three();
+    assert.deepEqual(save(env, body({ cover_id: "UPL-b" })).data.changed, ["MEDIA_SET_COVER"]);
+    const covers = () => ["UPL-a", "UPL-b", "UPL-c"].map((id) => field(env, id, "is_cover") === "true");
+    assert.deepEqual(covers(), [false, true, false]);
+    assert.equal(field(env, "UPL-a", "is_cover"), "false", "the old cover is written as false");
+    assert.equal(field(env, "UPL-x", "is_cover"), "true", "other place's cover untouched");
+    const cleared = save(env, body({ cover_id: null }));
+    assert.deepEqual(cleared.data.changed, ["MEDIA_SET_COVER"]);
+    assert.deepEqual(covers(), [false, false, false]);
+    assert.deepEqual(actions(env), [["MEDIA_SET_COVER", "UPL-b"], ["MEDIA_SET_COVER", "none"]]);
+  });
+
+  await test("6c save: captions TH/EN (escaped when starting with = + - @), audit MEDIA_CAPTION; all three changes in one save", () => {
+    const env = three();
+    const res = save(env, body({ order: ["UPL-b", "UPL-a", "UPL-c"], cover_id: "UPL-c", captions: { "UPL-a": { th: "=ทะเลสาบ", en: "Lake" } } }));
+    assert.equal(res.ok, true, JSON.stringify(res));
+    assert.deepEqual(res.data.changed, ["MEDIA_REORDER", "MEDIA_SET_COVER", "MEDIA_CAPTION"]);
+    assert.equal(res.data.items.find((i) => i.upload_id === "UPL-a").caption_th, "=ทะเลสาบ");
+    assert.equal(field(env, "UPL-a", "caption_en"), "Lake");
+    assert.deepEqual(actions(env).map((a) => a[0]), ["MEDIA_REORDER", "MEDIA_SET_COVER", "MEDIA_CAPTION"]);
+    assert.equal(field(env, "UPL-a", "updated_by"), "ADM-editor");
+  });
+
+  await test("6c save: nothing changed -> no write, no audit", () => {
+    const env = three();
+    const res = save(env, body());
+    assert.deepEqual(res.data.changed, []);
+    assert.deepEqual([writes(env).length, audits(env).length], [0, 0]);
+  });
+
+  await test("6c save: CONFLICT on a stale list; VALIDATION_ERROR on bad order/cover/captions; FORBIDDEN for reviewer; nothing written", () => {
+    for (const [extra, code] of [
+      [{ expected_ids: ["UPL-a", "UPL-b"] , order: ["UPL-a", "UPL-b"] }, "CONFLICT"],
+      [{ order: ["UPL-a", "UPL-b"] }, "VALIDATION_ERROR"],
+      [{ order: ["UPL-a", "UPL-b", "UPL-b"] }, "VALIDATION_ERROR"],
+      [{ order: ["UPL-a", "UPL-b", "UPL-x"] }, "VALIDATION_ERROR"],
+      [{ cover_id: "UPL-x" }, "VALIDATION_ERROR"],
+      [{ cover_id: 5 }, "VALIDATION_ERROR"],
+      [{ captions: { "UPL-x": { th: "", en: "" } } }, "VALIDATION_ERROR"],
+      [{ captions: { "UPL-a": { th: "ก".repeat(201), en: "" } } }, "VALIDATION_ERROR"],
+      [{ captions: { "UPL-a": { th: "x" } } }, "VALIDATION_ERROR"],
+      [{ captions: [] }, "VALIDATION_ERROR"],
+      [{ extra: 1 }, "VALIDATION_ERROR"]
+    ]) {
+      const env = three();
+      assert.equal(save(env, body(extra)).error.code, code, JSON.stringify(extra));
+      assert.deepEqual([writes(env).length, env.fetches.length], [0, 0]);
+    }
+    const reviewer = load({ admin: { admin_id: "ADM-r", role: "reviewer" }, uploads: [photo("UPL-a", 1)] });
+    assert.equal(save(reviewer, { place_id: PLACE_ID, expected_ids: ["UPL-a"], order: ["UPL-a"], cover_id: null, captions: {} }).error.code, "FORBIDDEN");
+  });
+
+  await test("6c save: allowed with the switch off (D11); archived place NOT_FOUND; unverifiable write OUTCOME_UNKNOWN", () => {
+    const off = load({ props: { ...PROPS, MEDIA_UPLOAD_ENABLED: "false" }, uploads: [photo("UPL-a", 1), photo("UPL-b", 2)] });
+    assert.equal(save(off, { place_id: PLACE_ID, expected_ids: ["UPL-a", "UPL-b"], order: ["UPL-b", "UPL-a"], cover_id: null, captions: {} }).ok, true);
+    const archived = load({ places: [[PLACE_ID, "x", "archived"]], uploads: [photo("UPL-a", 1)] });
+    assert.equal(save(archived, { place_id: PLACE_ID, expected_ids: ["UPL-a"], order: ["UPL-a"], cover_id: "UPL-a", captions: {} }).error.code, "NOT_FOUND");
+    const broken = load({ uploads: [photo("UPL-a", 1), photo("UPL-b", 2)], onUploadWrite: (sheet, rowNumber) => { if (rowNumber === 2) sheet.values[1][6] = "9"; } });
+    assert.equal(save(broken, { place_id: PLACE_ID, expected_ids: ["UPL-a", "UPL-b"], order: ["UPL-b", "UPL-a"], cover_id: null, captions: {} }).error.code, "OUTCOME_UNKNOWN");
+  });
+
   if (process.exitCode) process.exit(process.exitCode);
   process.stdout.write(`${passed} MediaUploadService tests passed\n`);
 })();

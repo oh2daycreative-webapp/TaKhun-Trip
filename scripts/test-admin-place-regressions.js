@@ -50,7 +50,7 @@ function assertRouterBoundary(source) {
     "submitReview", "adminLogin", "adminValidateSession", "adminLogout",
     "adminGetPlaces", "adminGetPlaceDetail", "adminCreatePlace", "adminSavePlaceDraft", "adminPublishPlace",
     "adminInspectPlaceDependencies", "adminUnpublishPlace", "adminArchivePlace", "adminRestorePlace",
-    "adminGetPlaceMediaOptions", "adminInspectPlaceCreateDestinations", "adminUploadPlaceImage", "adminGetPlaceUploads", "adminDeletePlaceUpload", "adminRetryPlaceUploadDeletes"
+    "adminGetPlaceMediaOptions", "adminInspectPlaceCreateDestinations", "adminUploadPlaceImage", "adminGetPlaceUploads", "adminDeletePlaceUpload", "adminRetryPlaceUploadDeletes", "adminSavePlaceUploads"
   ].sort();
   assert.deepEqual(exactActions(source), expected);
   assert.doesNotMatch(source, /\b(?:eval|Function)\s*\(|\[[^\]]*action[^\]]*\]\s*\(/);

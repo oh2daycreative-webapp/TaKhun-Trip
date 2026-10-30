@@ -496,3 +496,75 @@ function adminRetryPlaceUploadDeletes_(token, payload) {
     return { retried: pendingRows.length, still_pending: stillPending };
   });
 }
+
+// ---- task 6c: save order, cover and captions ----
+
+// payload: { place_id, expected_ids, order (a permutation of expected_ids), cover_id (one of order, or null),
+//            captions: { <upload_id in order>: { th, en } } }.
+function MediaUploadService_savePayload_(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload) ||
+      Object.keys(payload).sort().join(",") !== "captions,cover_id,expected_ids,order,place_id" ||
+      typeof payload.place_id !== "string" || !MediaUploadService_PLACE_ID_PATTERN_.test(payload.place_id)) {
+    throw new Error("VALIDATION_ERROR");
+  }
+  var expectedIds = MediaUploadService_expectedIds_(payload.expected_ids);
+  var order = MediaUploadService_expectedIds_(payload.order);
+  if (order.length !== expectedIds.length || order.some(function (id) { return expectedIds.indexOf(id) === -1; })) throw new Error("VALIDATION_ERROR");
+  if (payload.cover_id !== null && (typeof payload.cover_id !== "string" || order.indexOf(payload.cover_id) === -1)) throw new Error("VALIDATION_ERROR");
+  var source = payload.captions;
+  if (!source || typeof source !== "object" || Array.isArray(source)) throw new Error("VALIDATION_ERROR");
+  var captions = {};
+  Object.keys(source).forEach(function (id) {
+    var entry = source[id];
+    if (order.indexOf(id) === -1 || !entry || typeof entry !== "object" || Array.isArray(entry) || Object.keys(entry).sort().join(",") !== "en,th") {
+      throw new Error("VALIDATION_ERROR");
+    }
+    captions[id] = { th: MediaUploadService_caption_(entry.th), en: MediaUploadService_caption_(entry.en) };
+  });
+  return { place_id: payload.place_id, expected_ids: expectedIds, order: order, cover_id: payload.cover_id, captions: captions };
+}
+
+// adminSavePlaceUploads_: one save for order (D6: live at once), cover (T6) and captions (D13). Allowed with the
+// upload switch off (D11). Only rows that change are written (each verified); one audit row per kind of change.
+function adminSavePlaceUploads_(token, payload) {
+  return MediaUploadService_executeWrite_(token, function (admin) {
+    var input = MediaUploadService_savePayload_(payload);
+    MediaUploadService_requirePlace_(input.place_id, false);
+    var nowIso = new Date().toISOString();
+    return MediaUploadService_withLock_(function () {
+      var activeRows = MediaUploadService_sortedActive_(MediaUploadService_uploadTable_(), input.place_id);
+      MediaUploadService_assertExpected_(activeRows, input.expected_ids);
+      var byId = {};
+      activeRows.forEach(function (entry) { byId[entry.values.upload_id] = entry; });
+      var oldCover = activeRows.filter(function (entry) { return entry.values.is_cover === "true"; }).map(function (entry) { return entry.values.upload_id; });
+      var reordered = false, coverChanged = false, captioned = false;
+      input.order.forEach(function (id, index) {
+        var values = byId[id].values;
+        var patch = {};
+        if (String(values.sort_order) !== String(index + 1)) { patch.sort_order = String(index + 1); reordered = true; }
+        var isCover = id === input.cover_id ? "true" : "false";
+        if ((values.is_cover === "true") !== (isCover === "true")) { patch.is_cover = isCover; coverChanged = true; }
+        var caption = input.captions[id];
+        if (caption) {
+          if (MediaUploadService_plainText_(values.caption_th) !== caption.th) { patch.caption_th = MediaUploadService_storedText_(caption.th); captioned = true; }
+          if (MediaUploadService_plainText_(values.caption_en) !== caption.en) { patch.caption_en = MediaUploadService_storedText_(caption.en); captioned = true; }
+        }
+        if (!Object.keys(patch).length) return;
+        patch.updated_at = nowIso;
+        patch.updated_by = admin.admin_id;
+        MediaUploadService_updateVerified_(byId[id].sourceRowNumber, id, patch);
+      });
+      var changed = [], auditStatus = "not_needed";
+      var record = function (action, description) {
+        changed.push(action);
+        var status = MediaUploadService_audit_(admin, action, input.place_id, description, nowIso);
+        auditStatus = auditStatus === "unconfirmed" || status === "unconfirmed" ? "unconfirmed" : "recorded";
+      };
+      if (reordered) record("MEDIA_REORDER", input.order.join(","));
+      if (coverChanged || (oldCover.length > 1)) record("MEDIA_SET_COVER", input.cover_id || "none");
+      if (captioned) record("MEDIA_CAPTION", Object.keys(input.captions).join(","));
+      var items = MediaUploadService_sortedActive_(MediaUploadService_uploadTable_(), input.place_id).map(function (entry) { return MediaUploadService_item_(entry.values); });
+      return { items: items, changed: changed, audit_status: auditStatus };
+    });
+  });
+}
