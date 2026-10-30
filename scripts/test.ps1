@@ -286,6 +286,8 @@ if ($LASTEXITCODE -ne 0) { throw "SearchService verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Apps Script static verification failed." }
 & node (Join-Path $PSScriptRoot "test-apps-script-load-order.js")
 if ($LASTEXITCODE -ne 0) { throw "Apps Script load-order verification failed." }
+& node (Join-Path $PSScriptRoot "test-r2-sigv4.js")
+if ($LASTEXITCODE -ne 0) { throw "R2 SigV4 signing verification failed." }
 & node (Join-Path $PSScriptRoot "test-routes.js")
 if ($LASTEXITCODE -ne 0) { throw "Routes behavior verification failed." }
 & node (Join-Path $PSScriptRoot "test-trip-planner.js")

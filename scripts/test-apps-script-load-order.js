@@ -131,7 +131,7 @@ const RELEASE_V4_FILES = [
   "GalleryService.gs", "HomeService.gs", "PlaceService.gs", "ProductService.gs", "ReviewService.gs",
   "RouteService.gs", "Router.gs", "SearchService.gs", "SettingsService.gs", "SheetService.gs"
 ];
-const PLACE_UPLOAD_FILES = [];
+const PLACE_UPLOAD_FILES = ["R2SigV4.gs"];
 assert.deepEqual(observedStagingOrder, [...RELEASE_V4_FILES, ...PLACE_UPLOAD_FILES].sort((left, right) => left.localeCompare(right, "en")),
   "apps-script/*.gs must be exactly the v4 release plus the place-upload files");
 assert.ok(observedStagingOrder.indexOf("AdminSettingsService.gs") < observedStagingOrder.indexOf("SettingsService.gs"),
