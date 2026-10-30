@@ -109,6 +109,7 @@ function routeRequest_(method, event) {
         if (action === "adminUploadPlaceImage") return createJsonResponse_(adminUploadPlaceImage_(body.token, body.payload));
         if (action === "adminGetPlaceUploads") return createJsonResponse_(adminGetPlaceUploads_(body.token, body.payload));
         if (action === "adminDeletePlaceUpload") return createJsonResponse_(adminDeletePlaceUpload_(body.token, body.payload));
+        if (action === "adminRetryPlaceUploadDeletes") return createJsonResponse_(adminRetryPlaceUploadDeletes_(body.token, body.payload));
       }
     }
 

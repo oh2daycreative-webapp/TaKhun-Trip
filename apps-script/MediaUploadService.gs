@@ -478,3 +478,21 @@ function adminDeletePlaceUpload_(token, payload) {
     return { deleted: true, file_deleted: fileDeleted, audit_status: keys.audit };
   });
 }
+
+// adminRetryPlaceUploadDeletes_: finishes the file part of this place's delete_pending rows (no scheduled job, C7).
+// The photos already left the site and their deletes were audited, so no new audit row is written here.
+function adminRetryPlaceUploadDeletes_(token, payload) {
+  return MediaUploadService_executeWrite_(token, function () {
+    var placeId = MediaUploadService_placePayload_(payload);
+    MediaUploadService_requirePlace_(placeId, true);
+    var pendingRows = MediaUploadService_uploadTable_().rows.filter(function (entry) {
+      return entry.values.entity_type === "place" && entry.values.entity_id === placeId &&
+        entry.values.status === "deleted" && entry.values.object_state === "delete_pending";
+    });
+    var stillPending = 0;
+    pendingRows.forEach(function (entry) {
+      if (!MediaUploadService_finishFileDelete_(entry.values.upload_id, [entry.values.key_large, entry.values.key_small])) stillPending += 1;
+    });
+    return { retried: pendingRows.length, still_pending: stillPending };
+  });
+}

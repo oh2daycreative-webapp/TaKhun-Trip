@@ -625,6 +625,39 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
     assert.deepEqual(env.fetches, []);
   });
 
+  // ---- task 6b: adminRetryPlaceUploadDeletes ----
+  const retry = (env, body = { place_id: PLACE_ID }, token = "good-token") => JSON.parse(JSON.stringify(env.context.adminRetryPlaceUploadDeletes_(token, body)));
+  const pending = (id, n, extra = {}) => photo(id, n, { status: "deleted", object_state: "delete_pending", ...extra });
+
+  await test("6b retry: deletes the files of this place's delete_pending rows outside the lock and closes them", () => {
+    const env = load({ uploads: [pending("UPL-p1", 1), pending("UPL-p2", 2), pending("UPL-o", 3, { entity_id: "BTK-001" }), photo("UPL-a", 4)] });
+    const res = retry(env);
+    assert.deepEqual(res.data, { retried: 2, still_pending: 0 });
+    assert.equal(env.fetches.length, 4);
+    assert.ok(env.fetches.every((f) => f.method === "delete" && !f.lockHeld));
+    assert.equal(field(env, "UPL-p1", "object_state"), "deleted");
+    assert.equal(field(env, "UPL-p2", "object_state"), "deleted");
+    assert.equal(field(env, "UPL-o", "object_state"), "delete_pending", "other place untouched");
+  });
+
+  await test("6b retry: an R2 failure keeps that row pending; a key a re-uploaded active photo uses is skipped, not deleted", () => {
+    const failing = load({ uploads: [pending("UPL-p1", 1), pending("UPL-p2", 2)], statuses: [500] });
+    assert.deepEqual(retry(failing).data, { retried: 2, still_pending: 1 });
+    const reused = load({ uploads: [pending("UPL-old", 5), photo("UPL-new", 5, { upload_id: "UPL-new" })] });
+    assert.deepEqual(retry(reused).data, { retried: 1, still_pending: 0 });
+    assert.deepEqual(reused.fetches, [], "the active photo's files are not deleted");
+    assert.equal(field(reused, "UPL-old", "object_state"), "deleted");
+  });
+
+  await test("6b retry: reviewer/viewer FORBIDDEN; allowed with the switch off; bad payload VALIDATION_ERROR; nothing pending = no R2 call", () => {
+    for (const role of ["reviewer", "viewer"]) assert.equal(retry(load({ admin: { admin_id: "ADM-r", role }, uploads: [pending("UPL-p1", 1)] })).error.code, "FORBIDDEN");
+    assert.equal(retry(load({ props: { ...PROPS, MEDIA_UPLOAD_ENABLED: "false" }, uploads: [pending("UPL-p1", 1)] })).ok, true);
+    assert.equal(retry(load(), { place_id: PLACE_ID, x: 1 }).error.code, "VALIDATION_ERROR");
+    const none = load({ uploads: [photo("UPL-a", 1)] });
+    assert.deepEqual(retry(none).data, { retried: 0, still_pending: 0 });
+    assert.deepEqual(none.fetches, []);
+  });
+
   if (process.exitCode) process.exit(process.exitCode);
   process.stdout.write(`${passed} MediaUploadService tests passed\n`);
 })();
