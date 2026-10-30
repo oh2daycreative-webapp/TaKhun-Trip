@@ -11,7 +11,7 @@ const vm = require("node:vm");
 const sharp = require("sharp");
 
 const ROOT = path.join(__dirname, "..");
-const FILES = ["Config.gs", "SheetService.gs", "R2SigV4.gs", "MediaImageCheck.gs", "MediaUploadSchema.gs", "MediaUploadService.gs"];
+const FILES = ["Config.gs", "SheetService.gs", "R2SigV4.gs", "MediaImageCheck.gs", "MediaUploadSchema.gs", "MediaUploadService.gs", "MediaUploadPublicService.gs"];
 const SOURCES = FILES.map((name) => [name, fs.readFileSync(path.join(ROOT, "apps-script", name), "utf8")]);
 let passed = 0;
 async function test(name, body) {
@@ -80,7 +80,7 @@ function fakeSheet(name, rows, log, { maxRows = 1000, format = "@", newRowFormat
 
 const PLACE_ID = "plc-6d706013-ce22-46a6-b2e1-061a8da902b7";
 function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" }, uploads = [], places, statuses = [], lock = true, uploadSheetOptions, now = "2026-10-30T14:00:00.000Z", onFetch, onUploadWrite, noUploadSheet = false } = {}) {
-  const log = [], fetches = [], lockEvents = [], objects = new Set();
+  const log = [], fetches = [], lockEvents = [], objects = new Set(), cacheStore = new Map(), cacheRemovals = [];
   let lockHeld = false;
   const queue = statuses.slice();
   const sheets = {
@@ -103,6 +103,11 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
     console: { log() {} }, JSON, Date: class extends Date { constructor(...a) { if (a.length) super(...a); else super(now); } static now() { return Date.parse(now); } },
     PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => (Object.prototype.hasOwnProperty.call(props, k) ? props[k] : null) }) },
     SpreadsheetApp: { openById: () => ({ getSheetByName: (n) => sheets[n] || null }), flush: () => log.push(["flush"]) },
+    CacheService: { getScriptCache: () => ({
+      get: (k) => (cacheStore.has(k) ? cacheStore.get(k) : null),
+      put: (k, v) => cacheStore.set(k, v),
+      remove: (k) => { cacheRemovals.push({ key: k, lockHeld }); cacheStore.delete(k); }
+    }) },
     LockService: { getScriptLock: () => ({
       tryLock: (ms) => { lockEvents.push(["tryLock", ms]); if (lock) lockHeld = true; return lock; },
       releaseLock: () => { lockEvents.push(["release"]); lockHeld = false; }
@@ -135,7 +140,7 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
   };
   vm.createContext(context);
   for (const [name, source] of SOURCES) vm.runInContext(source, context, { filename: `apps-script/${name}` });
-  return { context, sheets, log, fetches, lockEvents, objects };
+  return { context, sheets, log, fetches, lockEvents, objects, cacheRemovals };
 }
 
 (async () => {
@@ -736,6 +741,49 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
     assert.equal(save(archived, { place_id: PLACE_ID, expected_ids: ["UPL-a"], order: ["UPL-a"], cover_id: "UPL-a", captions: {} }).error.code, "NOT_FOUND");
     const broken = load({ uploads: [photo("UPL-a", 1), photo("UPL-b", 2)], onUploadWrite: (sheet, rowNumber) => { if (rowNumber === 2) sheet.values[1][6] = "9"; } });
     assert.equal(save(broken, { place_id: PLACE_ID, expected_ids: ["UPL-a", "UPL-b"], order: ["UPL-b", "UPL-a"], cover_id: null, captions: {} }).error.code, "OUTCOME_UNKNOWN");
+  });
+
+  // ---- task 7b: writers refresh the public cache under their lock (D6: live at once) ----
+  const GEN = "media-uploads-public-generation-v1";
+  const refreshes = (env) => env.cacheRemovals.filter((r) => r.key === GEN);
+
+  await test("7b: upload, delete and a changing save refresh the public cache once, while holding the lock", () => {
+    const up = load();
+    assert.equal(upload(up).ok, true);
+    assert.deepEqual(refreshes(up), [{ key: GEN, lockHeld: true }]);
+    const gone = load({ uploads: [photo("UPL-a", 1)] });
+    assert.equal(del(gone, { place_id: PLACE_ID, upload_id: "UPL-a", expected_ids: ["UPL-a"] }).ok, true);
+    assert.deepEqual(refreshes(gone), [{ key: GEN, lockHeld: true }]);
+    const saved = three();
+    assert.equal(save(saved, body({ cover_id: "UPL-c" })).ok, true);
+    assert.deepEqual(refreshes(saved), [{ key: GEN, lockHeld: true }]);
+  });
+
+  await test("7b: no refresh for a duplicate, a refused or failed upload, an unchanged save, a retry or a read", () => {
+    const dup = load({ uploads: [rowA()] });
+    assert.equal(upload(dup).data.duplicate, true);
+    const refused = load({ statuses: [403] });
+    upload(refused);
+    const busy = load({ lock: false });
+    upload(busy);
+    const same = three();
+    save(same, body());
+    const retried = load({ uploads: [pending("UPL-p1", 1)] });
+    retry(retried);
+    const readOnly = load({ uploads: [photo("UPL-a", 1)] });
+    read(readOnly);
+    for (const env of [dup, refused, busy, same, retried, readOnly]) assert.deepEqual(refreshes(env), []);
+  });
+
+  await test("7b end to end: a cached public read shows the new cover right after the save (no 300 s wait)", () => {
+    // Complete rows (format + pixel sizes): the public read refuses incomplete rows.
+    const full = { format: "webp", width_large: 1600, height_large: 1200, width_small: 800, height_small: 600 };
+    const env = load({ uploads: [photo("UPL-a", 1, { ...full, is_cover: "true" }), photo("UPL-b", 2, full), photo("UPL-c", 3, full)] });
+    const publicCovers = () => JSON.parse(JSON.stringify(env.context.getPlaceUploads_({}))).data.covers;
+    assert.match(publicCovers()[PLACE_ID].key_large, new RegExp(`${String(1).repeat(32)}-1600`));
+    assert.match(publicCovers()[PLACE_ID].key_large, new RegExp(`${String(1).repeat(32)}-1600`), "second read from cache");
+    assert.equal(save(env, body({ cover_id: "UPL-c" })).ok, true);
+    assert.match(publicCovers()[PLACE_ID].key_large, new RegExp(`${String(3).repeat(32)}-1600`));
   });
 
   if (process.exitCode) process.exit(process.exitCode);

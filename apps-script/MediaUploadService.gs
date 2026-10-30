@@ -343,7 +343,11 @@ function adminUploadPlaceImage_(token, payload) {
           caption_th: MediaUploadService_storedText_(input.caption_th), caption_en: MediaUploadService_storedText_(input.caption_en),
           created_at: nowIso, created_by: admin.admin_id, updated_at: nowIso, updated_by: admin.admin_id, deleted_at: "", deleted_by: ""
         };
-        MediaUploadService_appendVerified_(MediaUploadSchema_SHEET_NAME_, MediaUploadSchema_HEADERS_, record, "upload_id");
+        try {
+          MediaUploadService_appendVerified_(MediaUploadSchema_SHEET_NAME_, MediaUploadSchema_HEADERS_, record, "upload_id");
+        } finally {
+          MediaUploadPublicService_invalidateUnderLock_(); // D6: the public read shows the change at once
+        }
         var auditStatus = MediaUploadService_audit_(admin, "MEDIA_UPLOAD", input.place_id, record.upload_id, nowIso);
         return { item: MediaUploadService_item_(record), duplicate: false, audit_status: auditStatus };
       });
@@ -468,10 +472,14 @@ function adminDeletePlaceUpload_(token, payload) {
       MediaUploadService_assertExpected_(activeRows, expectedIds);
       var target = activeRows.filter(function (entry) { return entry.values.upload_id === uploadId; })[0];
       if (!target) throw new Error("NOT_FOUND");
-      MediaUploadService_updateVerified_(target.sourceRowNumber, uploadId, {
-        status: "deleted", object_state: "delete_pending", is_cover: "false",
-        deleted_at: nowIso, deleted_by: admin.admin_id, updated_at: nowIso, updated_by: admin.admin_id
-      });
+      try {
+        MediaUploadService_updateVerified_(target.sourceRowNumber, uploadId, {
+          status: "deleted", object_state: "delete_pending", is_cover: "false",
+          deleted_at: nowIso, deleted_by: admin.admin_id, updated_at: nowIso, updated_by: admin.admin_id
+        });
+      } finally {
+        MediaUploadPublicService_invalidateUnderLock_(); // the photo leaves the public site at once
+      }
       return { large: target.values.key_large, small: target.values.key_small, audit: MediaUploadService_audit_(admin, "MEDIA_DELETE", placeId, uploadId, nowIso) };
     });
     var fileDeleted = MediaUploadService_finishFileDelete_(uploadId, [keys.large, keys.small]);
@@ -537,7 +545,8 @@ function adminSavePlaceUploads_(token, payload) {
       var byId = {};
       activeRows.forEach(function (entry) { byId[entry.values.upload_id] = entry; });
       var oldCover = activeRows.filter(function (entry) { return entry.values.is_cover === "true"; }).map(function (entry) { return entry.values.upload_id; });
-      var reordered = false, coverChanged = false, captioned = false;
+      var reordered = false, coverChanged = false, captioned = false, wrote = false;
+      try {
       input.order.forEach(function (id, index) {
         var values = byId[id].values;
         var patch = {};
@@ -552,8 +561,12 @@ function adminSavePlaceUploads_(token, payload) {
         if (!Object.keys(patch).length) return;
         patch.updated_at = nowIso;
         patch.updated_by = admin.admin_id;
+        wrote = true;
         MediaUploadService_updateVerified_(byId[id].sourceRowNumber, id, patch);
       });
+      } finally {
+        if (wrote) MediaUploadPublicService_invalidateUnderLock_(); // D6: new order / cover / captions live at once
+      }
       var changed = [], auditStatus = "not_needed";
       var record = function (action, description) {
         changed.push(action);
