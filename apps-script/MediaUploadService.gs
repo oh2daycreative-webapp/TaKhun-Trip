@@ -11,7 +11,8 @@ var MediaUploadService_MESSAGES_ = {
   UNAUTHORIZED: "กรุณาเข้าสู่ระบบ",
   FORBIDDEN: "คุณไม่มีสิทธิ์ดำเนินการนี้",
   VALIDATION_ERROR: "ข้อมูลคำขอไม่ถูกต้อง",
-  NOT_FOUND: "ไม่พบสถานที่",
+  NOT_FOUND: "ไม่พบสถานที่หรือรูปนี้",
+  CONFLICT: "รายการรูปถูกแก้ไขแล้ว กรุณาโหลดรายการล่าสุด",
   UPLOAD_DISABLED: "ปิดการอัปโหลดรูปอยู่ในขณะนี้",
   LIMIT_PLACE: "สถานที่นี้มีรูปครบ 20 รูปแล้ว ลบรูปเดิมก่อนจึงจะเพิ่มได้",
   LIMIT_DAILY: "วันนี้อัปโหลดรูปครบจำนวนที่กำหนดแล้ว กรุณาลองใหม่พรุ่งนี้",
@@ -215,14 +216,14 @@ function MediaUploadService_referencedKeys_() {
 // 2) delete the rest;
 // 3) re-read again: if an active row now uses a deleted key and the caller still has its bytes, put the file back.
 // Together with the writer's post-save check (MediaUploadService_ensureStored_) a racing upload never ends up
-// pointing at a deleted file. Returns the keys actually deleted. Errors are swallowed (best effort).
+// pointing at a deleted file. Returns { deleted, skipped (still in use), failed }. Errors are swallowed (best effort).
 function MediaUploadService_deleteUnreferenced_(keys, bytesByKey) {
   var referenced;
-  try { referenced = MediaUploadService_referencedKeys_(); } catch (_readError) { return []; }
-  var deleted = [];
+  try { referenced = MediaUploadService_referencedKeys_(); } catch (_readError) { return { deleted: [], skipped: [], failed: keys.slice() }; }
+  var deleted = [], skipped = [], failed = [];
   keys.forEach(function (key) {
-    if (referenced[key]) return;
-    try { r2DeleteObject_(key); deleted.push(key); } catch (_deleteError) { /* D16 */ }
+    if (referenced[key]) { skipped.push(key); return; }
+    try { r2DeleteObject_(key); deleted.push(key); } catch (_deleteError) { failed.push(key); }
   });
   if (deleted.length && bytesByKey) {
     try {
@@ -234,7 +235,7 @@ function MediaUploadService_deleteUnreferenced_(keys, bytesByKey) {
       });
     } catch (_rereadError) { /* the writer's post-save check also restores */ }
   }
-  return deleted;
+  return { deleted: deleted, skipped: skipped, failed: failed };
 }
 
 // Writer side, after its row is saved and the lock released: both files must exist (T15 check); a missing one
@@ -388,5 +389,92 @@ function adminGetPlaceUploads_(token, payload) {
         return entry.values.entity_type === "place" && entry.values.entity_id === placeId && entry.values.object_state === "delete_pending";
       }).length
     };
+  });
+}
+
+// ---- task 6b: delete ----
+
+var MediaUploadService_UPLOAD_ID_PATTERN_ = /^UPL-[A-Za-z0-9-]{1,64}$/;
+
+// expected_ids: the active photo ids (in order) the admin was looking at; any difference is CONFLICT.
+function MediaUploadService_expectedIds_(value) {
+  if (!Array.isArray(value) || value.length > MediaUploadSchema_PER_PLACE_LIMIT_) throw new Error("VALIDATION_ERROR");
+  var seen = Object.create(null);
+  value.forEach(function (id) {
+    if (typeof id !== "string" || !MediaUploadService_UPLOAD_ID_PATTERN_.test(id) || seen[id]) throw new Error("VALIDATION_ERROR");
+    seen[id] = true;
+  });
+  return value.slice();
+}
+
+function MediaUploadService_assertExpected_(activeRows, expectedIds) {
+  var current = activeRows.map(function (entry) { return entry.values.upload_id; });
+  if (current.length !== expectedIds.length || current.some(function (id, index) { return id !== expectedIds[index]; })) {
+    throw new Error("CONFLICT");
+  }
+}
+
+// Changes some fields of one media_uploads row (only that row) and verifies by reading back. Any failure once the
+// write has started is OUTCOME_UNKNOWN.
+function MediaUploadService_updateVerified_(rowNumber, uploadId, patch) {
+  var sheet = SheetService_getSheet_(MediaUploadSchema_SHEET_NAME_);
+  MediaUploadService_prepareRow_(sheet, rowNumber, MediaUploadSchema_HEADERS_.length);
+  try {
+    SheetService_replaceObjectAtRow_(MediaUploadSchema_SHEET_NAME_, rowNumber, patch);
+    SpreadsheetApp.flush();
+    var matches = MediaUploadService_uploadTable_().rows.filter(function (entry) { return entry.values.upload_id === uploadId; });
+    if (matches.length !== 1 || matches[0].sourceRowNumber !== rowNumber) throw new Error("VERIFY");
+    Object.keys(patch).forEach(function (field) {
+      if (!MediaUploadService_sameText_(String(matches[0].values[field]), MediaUploadService_plainText_(patch[field]))) throw new Error("VERIFY");
+    });
+  } catch (_updateError) {
+    throw new Error("OUTCOME_UNKNOWN");
+  }
+}
+
+// After a delete: removes the row's files (safe helper) and, when both are gone or still used by another active
+// row, marks object_state "deleted" under the lock. Returns true when the file part is finished.
+function MediaUploadService_finishFileDelete_(uploadId, keys) {
+  var outcome = MediaUploadService_deleteUnreferenced_(keys, null);
+  if (outcome.failed.length) return false;
+  try {
+    MediaUploadService_withLock_(function () {
+      var match = MediaUploadService_uploadTable_().rows.filter(function (entry) { return entry.values.upload_id === uploadId; })[0];
+      if (!match || match.values.status !== "deleted" || match.values.object_state !== "delete_pending") throw new Error("STATE");
+      MediaUploadService_updateVerified_(match.sourceRowNumber, uploadId, { object_state: "deleted" });
+    });
+    return true;
+  } catch (_finishError) {
+    return false;
+  }
+}
+
+// adminDeletePlaceUpload_: removes a photo from the site at once (row first, D3/T8), then its files.
+// Allowed with the upload switch off (D11) and for archived places (C4: removal requests must always work).
+function adminDeletePlaceUpload_(token, payload) {
+  return MediaUploadService_executeWrite_(token, function (admin) {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload) || Object.keys(payload).sort().join(",") !== "expected_ids,place_id,upload_id" ||
+        typeof payload.place_id !== "string" || !MediaUploadService_PLACE_ID_PATTERN_.test(payload.place_id) ||
+        typeof payload.upload_id !== "string" || !MediaUploadService_UPLOAD_ID_PATTERN_.test(payload.upload_id)) {
+      throw new Error("VALIDATION_ERROR");
+    }
+    var placeId = payload.place_id;
+    var uploadId = payload.upload_id;
+    var expectedIds = MediaUploadService_expectedIds_(payload.expected_ids);
+    MediaUploadService_requirePlace_(placeId, true);
+    var nowIso = new Date().toISOString();
+    var keys = MediaUploadService_withLock_(function () {
+      var activeRows = MediaUploadService_sortedActive_(MediaUploadService_uploadTable_(), placeId);
+      MediaUploadService_assertExpected_(activeRows, expectedIds);
+      var target = activeRows.filter(function (entry) { return entry.values.upload_id === uploadId; })[0];
+      if (!target) throw new Error("NOT_FOUND");
+      MediaUploadService_updateVerified_(target.sourceRowNumber, uploadId, {
+        status: "deleted", object_state: "delete_pending", is_cover: "false",
+        deleted_at: nowIso, deleted_by: admin.admin_id, updated_at: nowIso, updated_by: admin.admin_id
+      });
+      return { large: target.values.key_large, small: target.values.key_small, audit: MediaUploadService_audit_(admin, "MEDIA_DELETE", placeId, uploadId, nowIso) };
+    });
+    var fileDeleted = MediaUploadService_finishFileDelete_(uploadId, [keys.large, keys.small]);
+    return { deleted: true, file_deleted: fileDeleted, audit_status: keys.audit };
   });
 }

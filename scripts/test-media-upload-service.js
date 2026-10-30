@@ -545,6 +545,86 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
     assert.equal(read(load({ places: [[PLACE_ID, "x", "archived"]] })).ok, true);
   });
 
+  // ---- task 6b: adminDeletePlaceUpload ----
+  const photo = (id, n, extra = {}) => active(n, { upload_id: id, key_large: `uploads/places/${PLACE_ID}/${String(n).repeat(32).slice(0, 32)}-1600.webp`,
+    key_small: `uploads/places/${PLACE_ID}/${String(n).repeat(32).slice(0, 32)}-800.webp`, ...extra });
+  const del = (env, body, token = "good-token") => JSON.parse(JSON.stringify(env.context.adminDeletePlaceUpload_(token, body)));
+  const field = (env, id, name) => { const r = rows(env).find((x) => x[0] === id); return r ? r[UPLOAD_HEADERS.indexOf(name)] : undefined; };
+
+  await test("6b delete: row first (status deleted, delete_pending), files deleted outside the lock, then object_state deleted; audit MEDIA_DELETE", () => {
+    const env = load({ uploads: [photo("UPL-a", 1), photo("UPL-b", 2, { is_cover: "true" })] });
+    const keys = [field(env, "UPL-b", "key_large"), field(env, "UPL-b", "key_small")];
+    keys.forEach((k) => env.objects.add(k));
+    const res = del(env, { place_id: PLACE_ID, upload_id: "UPL-b", expected_ids: ["UPL-a", "UPL-b"] });
+    assert.equal(res.ok, true, JSON.stringify(res));
+    assert.deepEqual(res.data, { deleted: true, file_deleted: true, audit_status: "recorded" });
+    assert.deepEqual(env.fetches.map((f) => [f.method, f.key, f.lockHeld]), [["delete", keys[0], false], ["delete", keys[1], false]]);
+    assert.deepEqual([...env.objects], []);
+    assert.equal(field(env, "UPL-b", "status"), "deleted");
+    assert.equal(field(env, "UPL-b", "object_state"), "deleted");
+    assert.equal(field(env, "UPL-b", "is_cover"), "false");
+    assert.equal(field(env, "UPL-b", "deleted_by"), "ADM-editor");
+    assert.equal(field(env, "UPL-b", "deleted_at"), "2026-10-30T14:00:00.000Z");
+    assert.equal(field(env, "UPL-a", "status"), "active");
+    assert.equal(env.lockEvents.filter((e) => e[0] === "tryLock").length, 2);
+    const audit = Object.fromEntries(AUDIT_HEADERS.map((h, i) => [h, audits(env)[0][i]]));
+    assert.deepEqual([audit.action, audit.entity_id, audit.description], ["MEDIA_DELETE", PLACE_ID, "UPL-b"]);
+  });
+
+  await test("6b delete: reviewer/viewer FORBIDDEN; works with the switch off (D11) and for an archived place (C4)", () => {
+    for (const role of ["reviewer", "viewer"]) {
+      const env = load({ admin: { admin_id: "ADM-r", role }, uploads: [photo("UPL-a", 1)] });
+      assert.equal(del(env, { place_id: PLACE_ID, upload_id: "UPL-a", expected_ids: ["UPL-a"] }).error.code, "FORBIDDEN");
+      assert.deepEqual([env.fetches.length, writes(env).length], [0, 0]);
+    }
+    const off = load({ props: { ...PROPS, MEDIA_UPLOAD_ENABLED: "false" }, uploads: [photo("UPL-a", 1)] });
+    assert.equal(del(off, { place_id: PLACE_ID, upload_id: "UPL-a", expected_ids: ["UPL-a"] }).ok, true);
+    const archived = load({ places: [[PLACE_ID, "x", "archived"]], uploads: [photo("UPL-a", 1)] });
+    assert.equal(del(archived, { place_id: PLACE_ID, upload_id: "UPL-a", expected_ids: ["UPL-a"] }).ok, true);
+  });
+
+  await test("6b delete: list changed by someone else -> CONFLICT; unknown photo -> NOT_FOUND; bad payload -> VALIDATION_ERROR; nothing written", () => {
+    const base = () => load({ uploads: [photo("UPL-a", 1), photo("UPL-b", 2), photo("UPL-x", 3, { entity_id: "BTK-001" })] });
+    for (const [body, code] of [
+      [{ place_id: PLACE_ID, upload_id: "UPL-b", expected_ids: ["UPL-b", "UPL-a"] }, "CONFLICT"],
+      [{ place_id: PLACE_ID, upload_id: "UPL-b", expected_ids: ["UPL-a"] }, "CONFLICT"],
+      [{ place_id: PLACE_ID, upload_id: "UPL-x", expected_ids: ["UPL-a", "UPL-b"] }, "NOT_FOUND"],
+      [{ place_id: PLACE_ID, upload_id: "UPL-b" }, "VALIDATION_ERROR"],
+      [{ place_id: PLACE_ID, upload_id: "x", expected_ids: [] }, "VALIDATION_ERROR"],
+      [{ place_id: PLACE_ID, upload_id: "UPL-b", expected_ids: ["UPL-a", "UPL-a"] }, "VALIDATION_ERROR"],
+      [{ place_id: PLACE_ID, upload_id: "UPL-b", expected_ids: "UPL-a" }, "VALIDATION_ERROR"]
+    ]) {
+      const env = base();
+      assert.equal(del(env, body).error.code, code, JSON.stringify(body));
+      assert.deepEqual([env.fetches.length, writes(env).length], [0, 0]);
+    }
+  });
+
+  await test("6b delete: R2 fails -> the photo is still removed from the site, row stays delete_pending, file_deleted false", () => {
+    const env = load({ uploads: [photo("UPL-a", 1)], statuses: [500] });
+    const res = del(env, { place_id: PLACE_ID, upload_id: "UPL-a", expected_ids: ["UPL-a"] });
+    assert.equal(res.ok, true);
+    assert.equal(res.data.file_deleted, false);
+    assert.equal(field(env, "UPL-a", "status"), "deleted");
+    assert.equal(field(env, "UPL-a", "object_state"), "delete_pending");
+  });
+
+  await test("6b delete: a key another active row still uses is never deleted; the row is closed as deleted", () => {
+    const shared = { key_large: "uploads/places/x/shared-1600.webp", key_small: "uploads/places/x/shared-800.webp" };
+    const env = load({ uploads: [photo("UPL-a", 1, shared), photo("UPL-b", 2, shared)] });
+    const res = del(env, { place_id: PLACE_ID, upload_id: "UPL-a", expected_ids: ["UPL-a", "UPL-b"] });
+    assert.equal(res.ok, true);
+    assert.equal(res.data.file_deleted, true);
+    assert.deepEqual(env.fetches, []);
+    assert.equal(field(env, "UPL-a", "object_state"), "deleted");
+  });
+
+  await test("6b delete: the status change cannot be verified -> OUTCOME_UNKNOWN and no file is deleted", () => {
+    const env = load({ uploads: [photo("UPL-a", 1)], onUploadWrite: (sheet, rowNumber) => { if (rowNumber === 2) sheet.values[1][3] = "active"; } });
+    assert.equal(del(env, { place_id: PLACE_ID, upload_id: "UPL-a", expected_ids: ["UPL-a"] }).error.code, "OUTCOME_UNKNOWN");
+    assert.deepEqual(env.fetches, []);
+  });
+
   if (process.exitCode) process.exit(process.exitCode);
   process.stdout.write(`${passed} MediaUploadService tests passed\n`);
 })();
