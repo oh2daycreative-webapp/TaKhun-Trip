@@ -80,7 +80,7 @@ function fakeSheet(name, rows, log, { maxRows = 1000, format = "@", newRowFormat
 
 const PLACE_ID = "plc-6d706013-ce22-46a6-b2e1-061a8da902b7";
 function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" }, uploads = [], places, statuses = [], lock = true, uploadSheetOptions, now = "2026-10-30T14:00:00.000Z", onFetch, onUploadWrite, noUploadSheet = false } = {}) {
-  const log = [], fetches = [], lockEvents = [];
+  const log = [], fetches = [], lockEvents = [], objects = new Set();
   let lockHeld = false;
   const queue = statuses.slice();
   const sheets = {
@@ -117,17 +117,25 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
       getUuid: () => `00000000-0000-4000-8000-${String(++uuid).padStart(12, "0")}`
     },
     UrlFetchApp: { fetch: (url, options) => {
-      fetches.push({ url, method: options.method, lockHeld, bytes: options.payload ? options.payload.length : 0, key: url.split("/takhun-media-staging/")[1] });
-      if (onFetch) onFetch(sheets, fetches.length);
-      const next = queue.length ? queue.shift() : (options.method === "put" ? 200 : options.method === "delete" ? 204 : 404);
+      const key = url.split("/takhun-media-staging/")[1];
+      fetches.push({ url, method: options.method, lockHeld, bytes: options.payload ? options.payload.length : 0, key });
+      if (onFetch) onFetch(sheets, fetches.length, objects, options.method, key);
+      // Queued statuses first; otherwise a stateful bucket: PUT stores, DELETE removes, ranged GET = 206 / 404.
+      const next = queue.length ? queue.shift() : null;
       if (next instanceof Error) throw next;
-      return { getResponseCode: () => next, getHeaders: () => ({}) };
+      let status = next;
+      if (status === null) {
+        if (options.method === "put") { objects.add(key); status = 200; }
+        else if (options.method === "delete") { objects.delete(key); status = 204; }
+        else status = objects.has(key) ? 206 : 404;
+      } else if (options.method === "put" && status === 200) objects.add(key);
+      return { getResponseCode: () => status, getHeaders: () => ({}) };
     } },
     AuthService_requireAdmin_: (token) => { if (token !== "good-token") throw new Error("UNAUTHORIZED"); return admin; }
   };
   vm.createContext(context);
   for (const [name, source] of SOURCES) vm.runInContext(source, context, { filename: `apps-script/${name}` });
-  return { context, sheets, log, fetches, lockEvents };
+  return { context, sheets, log, fetches, lockEvents, objects };
 }
 
 (async () => {
@@ -226,7 +234,10 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
     assert.deepEqual({ ...item, upload_id: "x" }, { upload_id: "x", place_id: PLACE_ID, sort_order: 1, is_cover: false, format: "webp",
       key_large: KEY_LARGE, key_small: KEY_SMALL, width_large: 1600, height_large: 1200, width_small: 800, height_small: 600,
       caption_th: "", caption_en: "", created_at: "2026-10-30T14:00:00.000Z" });
-    assert.deepEqual(env.fetches.map((f) => [f.method, f.key, f.lockHeld]), [["put", KEY_LARGE, false], ["put", KEY_SMALL, false]]);
+    // After the row is saved (lock released) both files are checked once more (T15 ranged GET).
+    assert.deepEqual(env.fetches.map((f) => [f.method, f.key, f.lockHeld]), [["put", KEY_LARGE, false], ["put", KEY_SMALL, false], ["get", KEY_LARGE, false], ["get", KEY_SMALL, false]]);
+    assert.equal(res.data.files_verified, true);
+    assert.deepEqual([...env.objects].sort(), [KEY_LARGE, KEY_SMALL].sort());
     assert.deepEqual(env.lockEvents, [["tryLock", 10000], ["release"]]);
     const stored = Object.fromEntries(UPLOAD_HEADERS.map((h, i) => [h, rows(env)[0][i]]));
     assert.deepEqual(stored, { upload_id: item.upload_id, entity_type: "place", entity_id: PLACE_ID, status: "active", object_state: "stored",
@@ -344,7 +355,57 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
     assert.equal(again.data.item.upload_id, first.data.item.upload_id);
     assert.equal(rows(env).length, 1);
     assert.equal(audits(env).length, 1);
-    assert.equal(env.fetches.length, 2);
+    assert.deepEqual(env.fetches.map((f) => f.method), ["put", "put", "get", "get"], "the resend makes no R2 call");
+  });
+
+  // ---- race fix (owner review of task 5): a cleanup must never remove a file an active row uses ----
+  const rowA = () => row({ upload_id: "UPL-A", entity_type: "place", entity_id: PLACE_ID, status: "active", object_state: "stored", sort_order: 1,
+    format: "webp", sha256: SHA, key_large: KEY_LARGE, key_small: KEY_SMALL, created_at: "2026-10-30T13:59:00.000Z" });
+
+  await test("race 1: A's row is already saved when B (BUSY) cleans up: B re-reads media_uploads and skips both shared keys", () => {
+    const env = load({ lock: false, onFetch: (sheets, n) => { if (n === 2) sheets.media_uploads.values.push(rowA()); } });
+    assert.equal(upload(env).error.code, "BUSY");
+    assert.deepEqual(env.fetches.map((f) => f.method), ["put", "put"], "no DELETE of a key an active row uses");
+    assert.deepEqual([...env.objects].sort(), [KEY_LARGE, KEY_SMALL].sort());
+  });
+
+  await test("race 2: A saves its row while B is deleting: B re-reads after deleting and puts the files back", () => {
+    const env = load({ lock: false, onFetch: (sheets, n, _objects, method) => {
+      if (method === "delete" && n === 3) sheets.media_uploads.values.push(rowA()); // A commits between B's check and B's delete
+    } });
+    assert.equal(upload(env).error.code, "BUSY");
+    assert.deepEqual(env.fetches.map((f) => f.method), ["put", "put", "delete", "delete", "put", "put"]);
+    assert.deepEqual([...env.objects].sort(), [KEY_LARGE, KEY_SMALL].sort(), "A's files exist at the end");
+  });
+
+  await test("race 3: B deleted before A saved its row: A's post-save check finds the files missing and uploads them again", () => {
+    const env = load({ onUploadWrite: (_sheet, rowNumber) => { if (rowNumber > 1) env.objects.clear(); } });
+    const res = upload(env);
+    assert.equal(res.ok, true, JSON.stringify(res));
+    assert.equal(res.data.files_verified, true);
+    assert.deepEqual(env.fetches.map((f) => [f.method, f.key, f.lockHeld]), [["put", KEY_LARGE, false], ["put", KEY_SMALL, false],
+      ["get", KEY_LARGE, false], ["put", KEY_LARGE, false], ["get", KEY_SMALL, false], ["put", KEY_SMALL, false]]);
+    assert.deepEqual([...env.objects].sort(), [KEY_LARGE, KEY_SMALL].sort());
+  });
+
+  await test("post-save check failing does not undo the upload: ok, files_verified false", () => {
+    const env = load({ statuses: [200, 200, 500] });
+    const res = upload(env);
+    assert.equal(res.ok, true);
+    assert.equal(res.data.files_verified, false);
+    assert.equal(rows(env).length, 1);
+  });
+
+  await test("cleanup when media_uploads cannot be re-read: nothing is deleted (an unlinked file is accepted, D16)", () => {
+    let reads = 0;
+    const env = load({ lock: false });
+    const original = env.context.SheetService_readTable_;
+    env.context.SheetService_readTable_ = (name, headers) => {
+      if (name === "media_uploads" && ++reads > 1) throw new Error("Sheet unavailable");
+      return original(name, headers);
+    };
+    assert.equal(upload(env).error.code, "BUSY");
+    assert.deepEqual(env.fetches.map((f) => f.method), ["put", "put"]);
   });
 
   await test("lock busy: BUSY, no row, the uploaded files are deleted again outside the lock", () => {

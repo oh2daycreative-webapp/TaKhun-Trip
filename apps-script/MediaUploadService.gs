@@ -185,12 +185,55 @@ function MediaUploadService_item_(values) {
   };
 }
 
-// Best effort, outside the lock: removes files this request stored when no row was written. Errors are ignored
-// (spec D16 accepts a rare unlinked file).
-function MediaUploadService_cleanup_(keys) {
-  keys.forEach(function (key) {
-    try { r2DeleteObject_(key); } catch (_cleanupError) { /* D16 */ }
+// Keys used by any active row (both sizes). Throws when media_uploads cannot be read.
+function MediaUploadService_referencedKeys_() {
+  var referenced = Object.create(null);
+  MediaUploadService_uploadTable_().rows.forEach(function (entry) {
+    if (entry.values.status !== "active") return;
+    referenced[entry.values.key_large] = true;
+    referenced[entry.values.key_small] = true;
   });
+  return referenced;
+}
+
+// The ONLY way this service deletes files (cleanup, delete, retry). Outside the lock:
+// 1) re-read media_uploads and skip every key an active row uses (if the sheet can't be read, delete nothing: D16);
+// 2) delete the rest;
+// 3) re-read again: if an active row now uses a deleted key and the caller still has its bytes, put the file back.
+// Together with the writer's post-save check (MediaUploadService_ensureStored_) a racing upload never ends up
+// pointing at a deleted file. Returns the keys actually deleted. Errors are swallowed (best effort).
+function MediaUploadService_deleteUnreferenced_(keys, bytesByKey) {
+  var referenced;
+  try { referenced = MediaUploadService_referencedKeys_(); } catch (_readError) { return []; }
+  var deleted = [];
+  keys.forEach(function (key) {
+    if (referenced[key]) return;
+    try { r2DeleteObject_(key); deleted.push(key); } catch (_deleteError) { /* D16 */ }
+  });
+  if (deleted.length && bytesByKey) {
+    try {
+      var after = MediaUploadService_referencedKeys_();
+      deleted.forEach(function (key) {
+        if (after[key] && bytesByKey[key]) {
+          try { r2PutObject_(key, bytesByKey[key]); } catch (_restoreError) { /* the writer's post-save check also restores */ }
+        }
+      });
+    } catch (_rereadError) { /* the writer's post-save check also restores */ }
+  }
+  return deleted;
+}
+
+// Writer side, after its row is saved and the lock released: both files must exist (T15 check); a missing one
+// (deleted by a racing cleanup) is uploaded again. Returns true when both are confirmed present.
+function MediaUploadService_ensureStored_(bytesByKey) {
+  try {
+    Object.keys(bytesByKey).forEach(function (key) {
+      if (!r2HeadObject_(key).exists) r2PutObject_(key, bytesByKey[key]);
+    });
+    return true;
+  } catch (_checkError) {
+    return false;
+  }
 }
 
 function MediaUploadService_withLock_(operation) {
@@ -254,6 +297,9 @@ function adminUploadPlaceImage_(token, payload) {
     var duplicate = MediaUploadService_checkLimits_(MediaUploadService_uploadTable_(), input.place_id, sha256, settings.dailyLimit, nowIso);
     if (duplicate) return { item: MediaUploadService_item_(duplicate.values), duplicate: true, audit_status: "not_needed" };
 
+    var bytesByKey = {};
+    bytesByKey[keys.large] = largeBytes;
+    bytesByKey[keys.small] = smallBytes;
     var stored = [];
     try {
       r2PutObject_(keys.large, largeBytes);
@@ -261,12 +307,13 @@ function adminUploadPlaceImage_(token, payload) {
       r2PutObject_(keys.small, smallBytes);
       stored.push(keys.small);
     } catch (_storageError) {
-      MediaUploadService_cleanup_(stored);
+      MediaUploadService_deleteUnreferenced_(stored, bytesByKey);
       throw new Error("STORAGE_ERROR");
     }
 
+    var result;
     try {
-      return MediaUploadService_withLock_(function () {
+      result = MediaUploadService_withLock_(function () {
         var table = MediaUploadService_uploadTable_();
         var raced = MediaUploadService_checkLimits_(table, input.place_id, sha256, settings.dailyLimit, nowIso);
         if (raced) return { item: MediaUploadService_item_(raced.values), duplicate: true, audit_status: "not_needed" };
@@ -287,9 +334,11 @@ function adminUploadPlaceImage_(token, payload) {
       });
     } catch (error) {
       // Only OUTCOME_UNKNOWN can mean a row was written; in every other case remove this request's files again
-      // (outside the lock).
-      if (!error || error.message !== "OUTCOME_UNKNOWN") MediaUploadService_cleanup_(stored);
+      // (outside the lock, skipping keys an active row uses).
+      if (!error || error.message !== "OUTCOME_UNKNOWN") MediaUploadService_deleteUnreferenced_(stored, bytesByKey);
       throw error;
     }
+    if (!result.duplicate) result.files_verified = MediaUploadService_ensureStored_(bytesByKey);
+    return result;
   });
 }
