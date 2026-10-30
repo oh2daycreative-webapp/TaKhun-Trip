@@ -4,7 +4,8 @@
 // carry personal data (EXIF incl. GPS, XMP, IPTC). Errors are fixed codes only:
 //   IMAGE_FORMAT   not a single-frame WebP or JPEG, truncated, or extra bytes after the image
 //   IMAGE_EXIF     EXIF / XMP / IPTC metadata present
-//   IMAGE_WIDTH    large file not 1000-1600 px wide (D4, D17), small file not 800 px wide, or height > 4 x width
+//   IMAGE_WIDTH    large file not 1000-1600 px wide (D4, D17), or small file not 800 px wide
+//   IMAGE_ASPECT   longer than 4:1 either way (D23; the Admin page asks the user to crop first)
 //   IMAGE_SIZE     large file > 2 MB or small file > 600 KB (D18)
 //   IMAGE_MISMATCH files differ from the declared format, from each other, or in shape
 
@@ -132,9 +133,12 @@ function MediaImageCheck_checkPair_(largeBytes, smallBytes, declaredFormat) {
   var small = MediaImageCheck_inspect_(smallBytes);
   if (large.format !== declaredFormat || small.format !== declaredFormat) throw new Error("IMAGE_MISMATCH");
   if (large.width < MediaImageCheck_MIN_LARGE_WIDTH_ || large.width > MediaImageCheck_MAX_LARGE_WIDTH_ ||
-      large.height > large.width * MediaImageCheck_MAX_ASPECT_ || large.width > large.height * MediaImageCheck_MAX_ASPECT_ ||
       small.width !== MediaImageCheck_SMALL_WIDTH_) {
     throw new Error("IMAGE_WIDTH");
+  }
+  // D23: longer than 4:1 either way is refused with its own code so the Admin page can ask the user to crop first.
+  if (large.height > large.width * MediaImageCheck_MAX_ASPECT_ || large.width > large.height * MediaImageCheck_MAX_ASPECT_) {
+    throw new Error("IMAGE_ASPECT");
   }
   var expectedSmallHeight = large.height * MediaImageCheck_SMALL_WIDTH_ / large.width;
   if (Math.abs(small.height - expectedSmallHeight) > 1) throw new Error("IMAGE_MISMATCH");

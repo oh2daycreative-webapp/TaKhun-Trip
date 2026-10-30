@@ -292,6 +292,8 @@ if ($LASTEXITCODE -ne 0) { throw "R2 SigV4 signing verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Media image byte-check verification failed." }
 & node (Join-Path $PSScriptRoot "test-media-upload-schema.js")
 if ($LASTEXITCODE -ne 0) { throw "media_uploads schema verification failed." }
+& node (Join-Path $PSScriptRoot "test-media-upload-service.js")
+if ($LASTEXITCODE -ne 0) { throw "Media upload service verification failed." }
 & node (Join-Path $PSScriptRoot "test-routes.js")
 if ($LASTEXITCODE -ne 0) { throw "Routes behavior verification failed." }
 & node (Join-Path $PSScriptRoot "test-trip-planner.js")

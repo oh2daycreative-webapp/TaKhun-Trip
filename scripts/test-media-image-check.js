@@ -122,7 +122,19 @@ const GPS = { IFD0: { Make: "PhoneCam" }, IFD3: { GPSLatitudeRef: "N", GPSLatitu
     assert.equal(code(() => context.MediaImageCheck_checkPair_(signed(webpLarge), signed(small801), "webp")), "IMAGE_WIDTH");
     const tall = await blank(1000, 4001).webp().toBuffer();
     const tallSmall = await blank(800, 3201).webp().toBuffer();
-    assert.equal(code(() => context.MediaImageCheck_checkPair_(signed(tall), signed(tallSmall), "webp")), "IMAGE_WIDTH", "height over 4 x width");
+    assert.equal(code(() => context.MediaImageCheck_checkPair_(signed(tall), signed(tallSmall), "webp")), "IMAGE_ASPECT", "height over 4 x width");
+  });
+
+  await test("D23: more than 4:1 either way is IMAGE_ASPECT (the Admin page asks the user to crop); exactly 4:1 is accepted", async () => {
+    const wide = await blank(1600, 399).webp().toBuffer();
+    const wideSmall = await blank(800, 200).webp().toBuffer();
+    assert.equal(code(() => context.MediaImageCheck_checkPair_(signed(wide), signed(wideSmall), "webp")), "IMAGE_ASPECT");
+    const four = await blank(1600, 400).webp().toBuffer();
+    const fourSmall = await blank(800, 200).webp().toBuffer();
+    assert.equal(code(() => context.MediaImageCheck_checkPair_(signed(four), signed(fourSmall), "webp")), "OK");
+    const tall4 = await blank(1000, 4000).webp().toBuffer();
+    const tall4Small = await blank(800, 3200).webp().toBuffer();
+    assert.equal(code(() => context.MediaImageCheck_checkPair_(signed(tall4), signed(tall4Small), "webp")), "OK");
   });
 
   await test("pair mismatches are refused: format vs declared, mixed formats, different shape", async () => {
@@ -153,7 +165,7 @@ const GPS = { IFD0: { Make: "PhoneCam" }, IFD3: { GPSLatitudeRef: "N", GPSLatitu
   await test("errors are fixed codes only", async () => {
     const codes = new Set();
     for (const bytes of [null, [], signed(Buffer.from("x".repeat(40)))]) codes.add(code(() => context.MediaImageCheck_inspect_(bytes)));
-    for (const value of codes) assert.match(value, /^IMAGE_(?:FORMAT|EXIF|WIDTH|SIZE|MISMATCH)$/);
+    for (const value of codes) assert.match(value, /^IMAGE_(?:FORMAT|EXIF|WIDTH|ASPECT|SIZE|MISMATCH)$/);
   });
 
   if (process.exitCode) process.exit(process.exitCode);
