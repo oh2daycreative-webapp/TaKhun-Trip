@@ -72,8 +72,8 @@ function MediaUploadService_sameText_(actual, intended) {
   return actual === intended || (typeof actual === "string" && actual === "'" + intended && /^[=+\-@]/.test(intended));
 }
 
-// Makes sure the destination row exists and is plain text before a write. A new sheet has 1000 rows formatted @
-// (setupMediaUploadsSheet); row 1001+ does not exist until added, and added rows may not be @.
+// Makes sure the destination row exists and is plain text before a write. The owner-run sheet setup formats the
+// sheet's initial 1000 rows @; row 1001+ does not exist until added, and added rows may not be @.
 function MediaUploadService_prepareRow_(sheet, rowNumber, columns) {
   var maxRows = sheet.getMaxRows();
   if (rowNumber > maxRows) sheet.insertRowsAfter(maxRows, rowNumber - maxRows);
