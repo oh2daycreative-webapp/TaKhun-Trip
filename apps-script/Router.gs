@@ -106,6 +106,7 @@ function routeRequest_(method, event) {
         if (action === "adminRestorePlace") return createJsonResponse_(adminRestorePlace_(body.token, body.payload));
         if (action === "adminGetPlaceMediaOptions") return createJsonResponse_(adminGetPlaceMediaOptions_(body.token, body.payload));
         if (action === "adminInspectPlaceCreateDestinations") return createJsonResponse_(adminInspectPlaceCreateDestinations_(body.token, body.payload));
+        if (action === "adminUploadPlaceImage") return createJsonResponse_(adminUploadPlaceImage_(body.token, body.payload));
       }
     }
 

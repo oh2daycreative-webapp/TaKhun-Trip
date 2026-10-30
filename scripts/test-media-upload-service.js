@@ -408,6 +408,19 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
     assert.equal(env.fetches.length, 0);
   });
 
+  await test("Router: POST body adminUploadPlaceImage reaches the real action; GET and query tokens do not", () => {
+    const env = load();
+    env.context.ContentService = { MimeType: { JSON: "json" }, createTextOutput: (text) => ({ text, setMimeType() { return this; } }) };
+    for (const name of ["ApiResponse.gs", "Router.gs"]) vm.runInContext(fs.readFileSync(path.join(ROOT, "apps-script", name), "utf8"), env.context, { filename: name });
+    const post = (body, parameter = {}) => JSON.parse(env.context.routeRequest_("POST", { parameter, postData: { contents: JSON.stringify(body) } }).text);
+    const res = post({ action: "adminUploadPlaceImage", token: "good-token", payload: payload() }, { token: "query-token" });
+    assert.equal(res.ok, true, JSON.stringify(res));
+    assert.equal(rows(env).length, 1);
+    const viaGet = JSON.parse(env.context.routeRequest_("GET", { parameter: { action: "adminUploadPlaceImage", token: "good-token" } }).text);
+    assert.equal(viaGet.error.code, "UNKNOWN_ACTION");
+    assert.equal(post({ action: "adminUploadPlaceImage", token: "bad", payload: payload() }, { token: "good-token" }).error.code, "UNAUTHORIZED");
+  });
+
   await test("responses never contain R2 config values, signatures or storage URLs", () => {
     for (const env of [load(), load({ statuses: [403] }), load({ lock: false })]) {
       const text = JSON.stringify(upload(env));
