@@ -6,6 +6,28 @@ var MediaUploadService_PLACE_ID_PATTERN_ = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
 var MediaUploadService_UPLOAD_KEYS_ = ["place_id", "format", "large_b64", "small_b64"];
 var MediaUploadService_UPLOAD_OPTIONAL_KEYS_ = ["caption_th", "caption_en"];
 var MediaUploadService_BANGKOK_OFFSET_MS_ = 7 * 60 * 60 * 1000;
+var MediaUploadService_AUDIT_HEADERS_ = ["log_id", "admin_id", "action", "entity_type", "entity_id", "description", "created_at", "audit_id", "actor_admin_id", "occurred_at"];
+var MediaUploadService_MESSAGES_ = {
+  UNAUTHORIZED: "กรุณาเข้าสู่ระบบ",
+  FORBIDDEN: "คุณไม่มีสิทธิ์ดำเนินการนี้",
+  VALIDATION_ERROR: "ข้อมูลคำขอไม่ถูกต้อง",
+  NOT_FOUND: "ไม่พบสถานที่",
+  UPLOAD_DISABLED: "ปิดการอัปโหลดรูปอยู่ในขณะนี้",
+  LIMIT_PLACE: "สถานที่นี้มีรูปครบ 20 รูปแล้ว ลบรูปเดิมก่อนจึงจะเพิ่มได้",
+  LIMIT_DAILY: "วันนี้อัปโหลดรูปครบจำนวนที่กำหนดแล้ว กรุณาลองใหม่พรุ่งนี้",
+  STORAGE_ERROR: "ไม่ได้บันทึกข้อมูล: เชื่อมต่อที่เก็บรูปไม่สำเร็จ",
+  BUSY: "ไม่ได้บันทึกข้อมูล: ระบบกำลังบันทึกงานอื่น กรุณาลองใหม่อีกครั้ง",
+  OUTCOME_UNKNOWN: "ไม่แน่ใจผล · กรุณาโหลดรายการรูปใหม่เพื่อตรวจ ไม่ต้องส่งซ้ำ",
+  SERVER_ERROR: "เกิดข้อผิดพลาดของระบบ"
+};
+var MediaUploadService_IMAGE_REASONS_ = {
+  IMAGE_FORMAT: ["format", "ไฟล์ต้องเป็นรูป WebP หรือ JPEG"],
+  IMAGE_EXIF: ["exif", "รูปยังมีข้อมูลแฝง (EXIF/GPS) กรุณาเลือกรูปใหม่"],
+  IMAGE_WIDTH: ["width", "รูปต้องกว้างอย่างน้อย 1000 px"],
+  IMAGE_ASPECT: ["aspect", "รูปยาวหรือกว้างเกิน 4:1 กรุณาครอปรูปก่อนอัปโหลด"],
+  IMAGE_SIZE: ["size", "ไฟล์รูปใหญ่เกินกำหนด"],
+  IMAGE_MISMATCH: ["mismatch", "ไฟล์รูปไม่ตรงกัน กรุณาเลือกรูปใหม่"]
+};
 
 // ---- 5a helpers ----
 
@@ -83,4 +105,191 @@ function MediaUploadService_prepareRow_(sheet, rowNumber, columns) {
     range.setNumberFormat("@");
     if (range.getNumberFormats()[0].some(function (format) { return format !== "@"; })) throw new Error("MEDIA_UPLOADS_FORMAT");
   }
+}
+
+// ---- 5b: upload action ----
+
+function MediaUploadService_response_(code, reason) {
+  if (reason) {
+    var image = MediaUploadService_IMAGE_REASONS_[reason];
+    return { ok: false, error: { code: "IMAGE_REJECTED", reason: image[0], message: image[1] } };
+  }
+  var known = Object.prototype.hasOwnProperty.call(MediaUploadService_MESSAGES_, code) ? code : "SERVER_ERROR";
+  return { ok: false, error: { code: known, message: MediaUploadService_MESSAGES_[known] } };
+}
+
+// Auth + write role, then the operation. Errors become fixed codes with Thai messages; nothing else leaks.
+function MediaUploadService_executeWrite_(token, operation) {
+  try {
+    var admin = AuthService_requireAdmin_(token);
+    if (!admin || MediaUploadService_WRITE_ROLES_.indexOf(admin.role) === -1) throw new Error("FORBIDDEN");
+    return { ok: true, data: operation(admin) };
+  } catch (error) {
+    var code = error && typeof error.message === "string" ? error.message : "";
+    if (Object.prototype.hasOwnProperty.call(MediaUploadService_IMAGE_REASONS_, code)) return MediaUploadService_response_("", code);
+    return MediaUploadService_response_(code);
+  }
+}
+
+function MediaUploadService_decode_(text) {
+  try { return Utilities.base64Decode(text); } catch (_decodeError) { throw new Error("VALIDATION_ERROR"); }
+}
+
+function MediaUploadService_uploadTable_() {
+  var table;
+  try { table = SheetService_readTable_(MediaUploadSchema_SHEET_NAME_, MediaUploadSchema_HEADERS_); } catch (_tableError) { throw new Error("SERVER_ERROR"); }
+  if (table.headers.length !== MediaUploadSchema_HEADERS_.length ||
+      table.headers.some(function (header, index) { return header !== MediaUploadSchema_HEADERS_[index]; })) {
+    throw new Error("SERVER_ERROR");
+  }
+  return table;
+}
+
+function MediaUploadService_requirePlace_(placeId) {
+  var table;
+  try { table = SheetService_readTable_("places", ["place_id", "status"]); } catch (_placesError) { throw new Error("SERVER_ERROR"); }
+  var match = table.rows.filter(function (entry) { return entry.values.place_id === placeId; });
+  if (match.length !== 1 || String(match[0].values.status) === "archived") throw new Error("NOT_FOUND");
+}
+
+function MediaUploadService_activeForPlace_(table, placeId) {
+  return table.rows.filter(function (entry) {
+    return entry.values.entity_type === "place" && entry.values.entity_id === placeId && entry.values.status === "active";
+  });
+}
+
+// Returns the existing active row for the same photo (duplicate), or throws LIMIT_PLACE / LIMIT_DAILY.
+function MediaUploadService_checkLimits_(table, placeId, sha256, dailyLimit, nowIso) {
+  var activeRows = MediaUploadService_activeForPlace_(table, placeId);
+  var duplicate = activeRows.filter(function (entry) { return entry.values.sha256 === sha256; })[0];
+  if (duplicate) return duplicate;
+  if (activeRows.length >= MediaUploadSchema_PER_PLACE_LIMIT_) throw new Error("LIMIT_PLACE");
+  var today = MediaUploadService_bangkokDay_(nowIso);
+  var todayCount = table.rows.filter(function (entry) { return MediaUploadService_bangkokDay_(String(entry.values.created_at)) === today; }).length;
+  if (todayCount >= dailyLimit) throw new Error("LIMIT_DAILY");
+  return null;
+}
+
+function MediaUploadService_plainText_(value) {
+  return String(value).replace(/^'(?=[=+\-@])/, "");
+}
+
+function MediaUploadService_item_(values) {
+  return {
+    upload_id: values.upload_id, place_id: values.entity_id, sort_order: Number(values.sort_order), is_cover: values.is_cover === "true",
+    format: values.format, key_large: values.key_large, key_small: values.key_small,
+    width_large: Number(values.width_large), height_large: Number(values.height_large),
+    width_small: Number(values.width_small), height_small: Number(values.height_small),
+    caption_th: MediaUploadService_plainText_(values.caption_th), caption_en: MediaUploadService_plainText_(values.caption_en),
+    created_at: values.created_at
+  };
+}
+
+// Best effort, outside the lock: removes files this request stored when no row was written. Errors are ignored
+// (spec D16 accepts a rare unlinked file).
+function MediaUploadService_cleanup_(keys) {
+  keys.forEach(function (key) {
+    try { r2DeleteObject_(key); } catch (_cleanupError) { /* D16 */ }
+  });
+}
+
+function MediaUploadService_withLock_(operation) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(MediaUploadSchema_LOCK_TIMEOUT_MS_)) throw new Error("BUSY");
+  try { return operation(); } finally { lock.releaseLock(); }
+}
+
+// Appends one row and verifies it by reading back (apostrophe-tolerant, T5). Any failure after the write attempt
+// is OUTCOME_UNKNOWN.
+function MediaUploadService_appendVerified_(sheetName, headers, record, idField) {
+  var sheet = SheetService_getSheet_(sheetName);
+  var rowNumber = sheet.getLastRow() + 1;
+  MediaUploadService_prepareRow_(sheet, rowNumber, headers.length);
+  var prepared = SheetService_prepareAppendDestination_(sheet, headers, headers);
+  try {
+    SheetService_appendObjectWithRow_(sheetName, headers, record, prepared);
+    SpreadsheetApp.flush();
+    var matches = SheetService_readTable_(sheetName, headers).rows.filter(function (entry) { return entry.values[idField] === record[idField]; });
+    if (matches.length !== 1 || matches[0].sourceRowNumber !== rowNumber) throw new Error("VERIFY");
+    headers.forEach(function (field) {
+      var intended = Object.prototype.hasOwnProperty.call(record, field) ? MediaUploadService_plainText_(record[field]) : "";
+      if (!MediaUploadService_sameText_(String(matches[0].values[field]), intended)) throw new Error("VERIFY");
+    });
+  } catch (_writeError) {
+    throw new Error("OUTCOME_UNKNOWN");
+  }
+  return rowNumber;
+}
+
+function MediaUploadService_audit_(admin, action, placeId, description, occurredAt) {
+  try {
+    var table = SheetService_readTable_("activity_logs", MediaUploadService_AUDIT_HEADERS_);
+    var auditId = Utilities.getUuid();
+    if (table.rows.some(function (entry) { return entry.values.audit_id === auditId || entry.values.log_id === auditId; })) return "unconfirmed";
+    var record = {
+      log_id: auditId, admin_id: admin.admin_id, action: action, entity_type: "place", entity_id: placeId,
+      description: description, created_at: occurredAt, audit_id: auditId, actor_admin_id: admin.admin_id, occurred_at: occurredAt
+    };
+    MediaUploadService_appendVerified_("activity_logs", table.headers, record, "audit_id");
+    return "recorded";
+  } catch (_auditError) {
+    return "unconfirmed";
+  }
+}
+
+// adminUploadPlaceImage_: one photo (two sizes) per request (spec T2, T3, T8, D1, D6, D9-D13, D16-D18, D23).
+// Order: checks -> PUT both files (no lock) -> lock: re-check, append + verify row, audit -> unlock.
+function adminUploadPlaceImage_(token, payload) {
+  return MediaUploadService_executeWrite_(token, function (admin) {
+    var input = MediaUploadService_uploadPayload_(payload);
+    var settings = MediaUploadSchema_settings_();
+    if (!settings.enabled) throw new Error("UPLOAD_DISABLED");
+    var largeBytes = MediaUploadService_decode_(input.large_b64);
+    var smallBytes = MediaUploadService_decode_(input.small_b64);
+    var checked = MediaImageCheck_checkPair_(largeBytes, smallBytes, input.format);
+    MediaUploadService_requirePlace_(input.place_id);
+    var sha256 = R2SigV4_sha256Hex_(largeBytes);
+    var keys = MediaUploadService_keys_(input.place_id, sha256, input.format);
+    var nowIso = new Date().toISOString();
+    var duplicate = MediaUploadService_checkLimits_(MediaUploadService_uploadTable_(), input.place_id, sha256, settings.dailyLimit, nowIso);
+    if (duplicate) return { item: MediaUploadService_item_(duplicate.values), duplicate: true, audit_status: "not_needed" };
+
+    var stored = [];
+    try {
+      r2PutObject_(keys.large, largeBytes);
+      stored.push(keys.large);
+      r2PutObject_(keys.small, smallBytes);
+      stored.push(keys.small);
+    } catch (_storageError) {
+      MediaUploadService_cleanup_(stored);
+      throw new Error("STORAGE_ERROR");
+    }
+
+    try {
+      return MediaUploadService_withLock_(function () {
+        var table = MediaUploadService_uploadTable_();
+        var raced = MediaUploadService_checkLimits_(table, input.place_id, sha256, settings.dailyLimit, nowIso);
+        if (raced) return { item: MediaUploadService_item_(raced.values), duplicate: true, audit_status: "not_needed" };
+        var sortOrder = MediaUploadService_activeForPlace_(table, input.place_id).reduce(function (max, entry) {
+          return Math.max(max, Number(entry.values.sort_order) || 0);
+        }, 0) + 1;
+        var record = {
+          upload_id: "UPL-" + Utilities.getUuid(), entity_type: "place", entity_id: input.place_id, status: "active", object_state: "stored",
+          is_cover: "false", sort_order: String(sortOrder), format: input.format, sha256: sha256, key_large: keys.large, key_small: keys.small,
+          width_large: String(checked.large.width), height_large: String(checked.large.height), bytes_large: String(checked.large.bytes),
+          width_small: String(checked.small.width), height_small: String(checked.small.height), bytes_small: String(checked.small.bytes),
+          caption_th: MediaUploadService_storedText_(input.caption_th), caption_en: MediaUploadService_storedText_(input.caption_en),
+          created_at: nowIso, created_by: admin.admin_id, updated_at: nowIso, updated_by: admin.admin_id, deleted_at: "", deleted_by: ""
+        };
+        MediaUploadService_appendVerified_(MediaUploadSchema_SHEET_NAME_, MediaUploadSchema_HEADERS_, record, "upload_id");
+        var auditStatus = MediaUploadService_audit_(admin, "MEDIA_UPLOAD", input.place_id, record.upload_id, nowIso);
+        return { item: MediaUploadService_item_(record), duplicate: false, audit_status: auditStatus };
+      });
+    } catch (error) {
+      // Only OUTCOME_UNKNOWN can mean a row was written; in every other case remove this request's files again
+      // (outside the lock).
+      if (!error || error.message !== "OUTCOME_UNKNOWN") MediaUploadService_cleanup_(stored);
+      throw error;
+    }
+  });
 }
