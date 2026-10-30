@@ -581,3 +581,36 @@ function adminSavePlaceUploads_(token, payload) {
     });
   });
 }
+
+// ---- task 8: connection test (T11, criterion 13) ----
+
+var MediaUploadService_PROBE_WEBP_B64_ = "UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA=="; // 1x1 lossless WebP (phase 0)
+
+// One step of the probe: { step, status: HTTP code | "CONFIG" | "NETWORK", ok }.
+function MediaUploadService_probeStep_(name, method, key, body, expected) {
+  var status;
+  try { status = R2SigV4_send_(method, key, body).status; }
+  catch (error) { status = error && error.message === "R2_CONFIG" ? "CONFIG" : "NETWORK"; }
+  return { step: name, status: status, ok: expected.indexOf(status) !== -1 };
+}
+
+// adminTestMediaStorage_: super_admin only; ignores the upload switch. Writes, checks and deletes a tiny file under
+// a fresh uploads/healthcheck/<64 hex>.webp key (one per run, so two runs never collide). The clean-up steps always
+// run. Returns step names and statuses only: never the key, R2 settings or signatures. No lock, no sheet write.
+function adminTestMediaStorage_(token, payload) {
+  return MediaUploadService_execute_(token, ["super_admin"], function () {
+    if (payload !== undefined && (!payload || typeof payload !== "object" || Array.isArray(payload) || Object.keys(payload).length)) {
+      throw new Error("VALIDATION_ERROR");
+    }
+    var key = "uploads/healthcheck/" + R2SigV4_sha256Hex_(Utilities.getUuid()) + ".webp";
+    var steps = [];
+    try {
+      steps.push(MediaUploadService_probeStep_("PUT", "PUT", key, Utilities.base64Decode(MediaUploadService_PROBE_WEBP_B64_), [200]));
+      steps.push(MediaUploadService_probeStep_("EXISTS", "HEAD", key, null, [206, 200]));
+    } finally {
+      steps.push(MediaUploadService_probeStep_("DELETE", "DELETE", key, null, [204, 200]));
+      steps.push(MediaUploadService_probeStep_("GONE", "HEAD", key, null, [404]));
+    }
+    return { ok: steps.every(function (step) { return step.ok; }), steps: steps };
+  });
+}

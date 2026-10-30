@@ -786,6 +786,57 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
     assert.match(publicCovers()[PLACE_ID].key_large, new RegExp(`${String(3).repeat(32)}-1600`));
   });
 
+  // ---- task 8: adminTestMediaStorage (T11, criterion 13) ----
+  const probe = (env, body = {}, token = "good-token") => JSON.parse(JSON.stringify(env.context.adminTestMediaStorage_(token, body)));
+  const ROOT_ADMIN = { admin_id: "ADM-root", role: "super_admin" };
+
+  await test("8: super_admin connection test: PUT 200 -> exists 206 -> DELETE 204 -> gone 404 on a fresh health-check key, no lock, no sheet write", () => {
+    const env = load({ admin: ROOT_ADMIN });
+    const res = probe(env);
+    assert.equal(res.ok, true, JSON.stringify(res));
+    assert.deepEqual(res.data, { ok: true, steps: [{ step: "PUT", status: 200, ok: true }, { step: "EXISTS", status: 206, ok: true }, { step: "DELETE", status: 204, ok: true }, { step: "GONE", status: 404, ok: true }] });
+    assert.deepEqual(env.fetches.map((f) => f.method), ["put", "get", "delete", "get"]);
+    assert.ok(env.fetches.every((f) => /^uploads\/healthcheck\/[a-f0-9]{64}\.webp$/.test(f.key) && f.key === env.fetches[0].key && !f.lockHeld));
+    assert.deepEqual([writes(env).length, env.lockEvents.length, env.objects.size], [0, 0, 0]);
+    const again = load({ admin: ROOT_ADMIN });
+    probe(again); probe(again);
+    assert.notEqual(again.fetches[0].key, again.fetches[4].key, "each run uses its own key");
+  });
+
+  await test("8: editor, reviewer and viewer get FORBIDDEN with no R2 call; the upload switch is ignored", () => {
+    for (const role of ["editor", "reviewer", "viewer"]) {
+      const env = load({ admin: { admin_id: "ADM-x", role } });
+      assert.equal(probe(env).error.code, "FORBIDDEN");
+      assert.equal(env.fetches.length, 0);
+    }
+    assert.equal(probe(load({ admin: ROOT_ADMIN, props: { ...PROPS, MEDIA_UPLOAD_ENABLED: "false" } })).data.ok, true);
+    assert.equal(probe(load(), {}, "bad").error.code, "UNAUTHORIZED");
+  });
+
+  await test("8: failures are reported per step (bad token 403, missing config, network) and the clean-up steps still run", () => {
+    const denied = probe(load({ admin: ROOT_ADMIN, statuses: [403, 403, 403, 403] }));
+    assert.equal(denied.data.ok, false);
+    assert.deepEqual(denied.data.steps.map((s) => [s.step, s.status, s.ok]), [["PUT", 403, false], ["EXISTS", 403, false], ["DELETE", 403, false], ["GONE", 403, false]]);
+    const noConfig = load({ admin: ROOT_ADMIN, props: { SPREADSHEET_ID: "x" } });
+    assert.deepEqual(probe(noConfig).data.steps.map((s) => s.status), ["CONFIG", "CONFIG", "CONFIG", "CONFIG"]);
+    assert.equal(noConfig.fetches.length, 0);
+    const network = probe(load({ admin: ROOT_ADMIN, statuses: [new Error("Address unavailable: https://0123.r2.cloudflarestorage.com/x")] }));
+    assert.equal(network.data.steps[0].status, "NETWORK");
+    assert.equal(network.data.ok, false);
+  });
+
+  await test("8: the result never shows keys, R2 settings, signatures or storage URLs; payload must be empty", () => {
+    for (const env of [load({ admin: ROOT_ADMIN }), load({ admin: ROOT_ADMIN, statuses: [403] })]) {
+      const text = JSON.stringify(probe(env));
+      for (const secret of [PROPS.R2_SECRET_ACCESS_KEY, PROPS.R2_ACCESS_KEY_ID, PROPS.R2_ACCOUNT_ID, PROPS.R2_BUCKET, "healthcheck", "Signature", "cloudflarestorage"]) {
+        assert.equal(text.includes(secret), false, secret);
+      }
+    }
+    assert.equal(probe(load({ admin: ROOT_ADMIN }), undefined).ok, true);
+    assert.equal(probe(load({ admin: ROOT_ADMIN }), { x: 1 }).error.code, "VALIDATION_ERROR");
+    assert.equal(probe(load({ admin: ROOT_ADMIN }), []).error.code, "VALIDATION_ERROR");
+  });
+
   if (process.exitCode) process.exit(process.exitCode);
   process.stdout.write(`${passed} MediaUploadService tests passed\n`);
 })();
