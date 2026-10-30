@@ -121,8 +121,21 @@ function assertRuntime(order, label) {
   assert.equal(response.data.events_enabled, false);
 }
 
-assert.equal(observedStagingOrder[9], "AdminSettingsService.gs", "observed staging order changed unexpectedly");
-assert.equal(observedStagingOrder[27], "SettingsService.gs", "observed staging order changed unexpectedly");
+// Exact backend inventory: the 29 .gs files of the v4 release plus the files added by the place-upload
+// phase (each phase-1 task adds its file here first, so this test fails until the file exists).
+const RELEASE_V4_FILES = [
+  "AdminContentService.gs", "AdminDashboardService.gs", "AdminEventService.gs", "AdminGalleryService.gs",
+  "AdminPlaceSchema.gs", "AdminPlaceService.gs", "AdminProductService.gs", "AdminReviewService.gs",
+  "AdminRouteService.gs", "AdminSettingsService.gs", "ApiResponse.gs", "ApprovedMediaService.gs", "AuthService.gs",
+  "CategoryService.gs", "Code.gs", "Config.gs", "ContentCacheService.gs", "CryptoService.gs", "EventService.gs",
+  "GalleryService.gs", "HomeService.gs", "PlaceService.gs", "ProductService.gs", "ReviewService.gs",
+  "RouteService.gs", "Router.gs", "SearchService.gs", "SettingsService.gs", "SheetService.gs"
+];
+const PLACE_UPLOAD_FILES = [];
+assert.deepEqual(observedStagingOrder, [...RELEASE_V4_FILES, ...PLACE_UPLOAD_FILES].sort((left, right) => left.localeCompare(right, "en")),
+  "apps-script/*.gs must be exactly the v4 release plus the place-upload files");
+assert.ok(observedStagingOrder.indexOf("AdminSettingsService.gs") < observedStagingOrder.indexOf("SettingsService.gs"),
+  "observed staging order changed unexpectedly");
 assert.deepEqual(crossFileInitializerDependencies(), [], "top-level initializers must not read globals declared in another file");
 assertRuntime(observedStagingOrder, "observed alphabetical staging order");
 assertRuntime([...observedStagingOrder].reverse(), "reverse order");
