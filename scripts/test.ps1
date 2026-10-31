@@ -54,6 +54,7 @@ $required = @(
   "public/admin/js/admin-places.js",
   "public/admin/js/admin-place-map.js",
   "public/admin/js/admin-place-media.js",
+  "public/admin/js/admin-image-resize.js",
   "public/admin/js/admin-place-edit.js",
   "public/admin/js/admin-gallery.js",
   "public/admin/js/admin-reviews.js",
@@ -230,6 +231,10 @@ if ($LASTEXITCODE -ne 0) { throw "Admin Place editor verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin Place map verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-place-media.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Place media verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-image-resize.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin image resize verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-image-resize-browser.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin image resize native browser verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-place-regressions.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Place integrated regression verification failed." }
 & node (Join-Path $PSScriptRoot "test-crypto-service.js")
