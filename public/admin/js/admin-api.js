@@ -8,6 +8,9 @@
   const READ_TIMEOUT_MS = 12000;
   const SESSION_TIMEOUT_MS = 30000;
   const MUTATION_TIMEOUT_MS = 45000;
+  // A near-limit photo took 20.5 s on home Wi-Fi (task 10); phones on mobile data need more room. A timeout is
+  // reported as TIMEOUT ("ไม่แน่ใจผล") and the upload is never sent again automatically.
+  const UPLOAD_TIMEOUT_MS = 90000;
   const SESSION_ACTIONS = Object.freeze(["adminLogin", "adminValidateSession", "adminLogout"]);
   const SAFE_MESSAGE = "Admin API request failed.";
   const BACKEND_ERROR_CODES = Object.freeze([
@@ -487,6 +490,11 @@
       return { admin, expires_at: data.expires_at };
     }
     if (action === "adminLogout" && exactKeys(data, [])) return {};
+    if (UPLOAD_ACTIONS.includes(action)) {
+      const uploads = safeUploadResponse(action, data, body.payload);
+      if (!uploads) throw safeError("MALFORMED_RESPONSE");
+      return uploads;
+    }
     let validated = null;
     if (action === "adminGetPlaces") validated = safeList(data);
     else if (action === "adminGetPlaceDetail") validated = safeDetail(data);
@@ -542,6 +550,7 @@
       error[domain.id] = result.error[domain.id];
       throw error;
     }
+    if (UPLOAD_ACTIONS.includes(body.action)) throw uploadError(result);
     if (!exactKeys(result, ["ok", "error"]) || !exactKeys(result.error, ["code", "message"]) ||
         typeof result.error.code !== "string" || !result.error.code || typeof result.error.message !== "string") {
       throw safeError("MALFORMED_RESPONSE");
@@ -556,6 +565,7 @@
 
   // Unknown actions receive the longest budget so a new write can never inherit the short read timeout.
   function requestTimeoutMs(action) {
+    if (action === "adminUploadPlaceImage") return UPLOAD_TIMEOUT_MS;
     if (SESSION_ACTIONS.includes(action)) return SESSION_TIMEOUT_MS;
     if (typeof action === "string" && (action.startsWith("adminGet") || action === "adminInspectPlaceDependencies")) return READ_TIMEOUT_MS;
     return MUTATION_TIMEOUT_MS;
@@ -1060,6 +1070,147 @@
   function clearReviewReply(token, payload) { return placeRequest("clearReviewReply", token, reviewMutationPayload(payload, "clear")); }
   function deleteReview(token, payload) { return placeRequest("deleteReview", token, reviewMutationPayload(payload, "delete")); }
 
+  // ---- place photo uploads (task 11; server: MediaUploadService.gs) ----
+
+  const UPLOAD_ACTIONS = Object.freeze(["adminGetPlaceUploads", "adminUploadPlaceImage", "adminDeletePlaceUpload", "adminRetryPlaceUploadDeletes", "adminSavePlaceUploads", "adminTestMediaStorage"]);
+  const UPLOAD_ERROR_CODES = Object.freeze(["VALIDATION_ERROR", "UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND", "CONFLICT", "UPLOAD_DISABLED", "LIMIT_PLACE", "LIMIT_DAILY", "STORAGE_ERROR", "BUSY", "OUTCOME_UNKNOWN", "SERVER_ERROR", "IMAGE_REJECTED"]);
+  const IMAGE_REASONS = Object.freeze(["format", "exif", "width", "aspect", "size", "mismatch"]);
+  const UPLOAD_ID_PATTERN = /^UPL-[A-Za-z0-9-]{1,64}$/;
+  const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
+  const AUDIT_STATUSES = Object.freeze(["recorded", "unconfirmed"]);
+  const SAVE_CHANGES = Object.freeze(["MEDIA_REORDER", "MEDIA_SET_COVER", "MEDIA_CAPTION"]);
+  const PROBE_STEPS = Object.freeze(["PUT", "EXISTS", "DELETE", "GONE"]);
+  const MAX_PLACE_UPLOADS = 20;
+
+  function uploadError(result) {
+    const error = result && result.error;
+    const reasonAllowed = error && error.code === "IMAGE_REJECTED";
+    if (!exactKeys(result, ["ok", "error"]) || !(exactKeys(error, ["code", "message"]) || reasonAllowed && exactKeys(error, ["code", "message", "reason"])) ||
+        typeof error.code !== "string" || typeof error.message !== "string") return safeError("MALFORMED_RESPONSE");
+    if (error.code === "UNKNOWN_ACTION") return safeError("REDIRECT_BOUNCE");
+    if (reasonAllowed && !IMAGE_REASONS.includes(error.reason)) return safeError("MALFORMED_RESPONSE");
+    const failure = safeError(UPLOAD_ERROR_CODES.includes(error.code) ? error.code : "SERVER_ERROR");
+    if (reasonAllowed) failure.reason = error.reason;
+    return failure;
+  }
+
+  const nonNegativeInteger = (value) => Number.isSafeInteger(value) && value >= 0;
+  const positiveInteger = (value) => Number.isSafeInteger(value) && value > 0;
+  const caption = (value) => typeof value === "string" && validUnicodeLength(value, 0, 200);
+
+  // Keys must be this place's: uploads/places/<lower-case place id>/<32 hex>-1600|800.<webp|jpg>, same stem.
+  function safeUploadItem(value, placeId) {
+    const keys = ["upload_id", "place_id", "sort_order", "is_cover", "format", "key_large", "key_small", "width_large", "height_large", "width_small", "height_small", "caption_th", "caption_en", "created_at"];
+    if (!exactKeys(value, keys) || typeof value.upload_id !== "string" || !UPLOAD_ID_PATTERN.test(value.upload_id) || value.place_id !== placeId) return null;
+    if (!nonNegativeInteger(value.sort_order) || typeof value.is_cover !== "boolean" || (value.format !== "webp" && value.format !== "jpeg")) return null;
+    const extension = value.format === "jpeg" ? "jpg" : "webp";
+    const prefix = "uploads/places/" + placeId.toLowerCase() + "/";
+    const large = new RegExp("^" + prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "([a-f0-9]{32})-1600\\." + extension + "$").exec(String(value.key_large));
+    if (!large || value.key_small !== prefix + large[1] + "-800." + extension) return null;
+    if (![value.width_large, value.height_large, value.width_small, value.height_small].every(positiveInteger)) return null;
+    if (!caption(value.caption_th) || !caption(value.caption_en) || typeof value.created_at !== "string" || value.created_at.length > 40) return null;
+    return Object.freeze(Object.assign({}, value));
+  }
+
+  function safeUploadItems(items, placeId) {
+    if (!Array.isArray(items) || items.length > MAX_PLACE_UPLOADS) return null;
+    const safe = items.map((entry) => safeUploadItem(entry, placeId));
+    const ids = safe.map((entry) => entry && entry.upload_id);
+    return safe.every(Boolean) && new Set(ids).size === ids.length ? safe : null;
+  }
+
+  function safeUploadResponse(action, data, payload) {
+    const placeId = payload && payload.place_id;
+    if (action === "adminGetPlaceUploads") {
+      if (!exactKeys(data, ["enabled", "can_write", "limits", "items", "delete_pending"]) || typeof data.enabled !== "boolean" || typeof data.can_write !== "boolean") return null;
+      const limits = data.limits;
+      if (!exactKeys(limits, ["per_place", "daily_left", "max_bytes_large", "max_bytes_small"]) || !positiveInteger(limits.per_place) || !nonNegativeInteger(limits.daily_left) ||
+          !positiveInteger(limits.max_bytes_large) || !positiveInteger(limits.max_bytes_small) || !nonNegativeInteger(data.delete_pending)) return null;
+      const items = safeUploadItems(data.items, placeId);
+      return items && { enabled: data.enabled, can_write: data.can_write, limits: Object.assign({}, limits), items, delete_pending: data.delete_pending };
+    }
+    if (action === "adminUploadPlaceImage") {
+      const duplicate = data && data.duplicate === true;
+      const keys = duplicate ? ["item", "duplicate", "audit_status"] : ["item", "duplicate", "audit_status", "files_verified"];
+      if (!exactKeys(data, keys) || typeof data.duplicate !== "boolean") return null;
+      if (duplicate ? data.audit_status !== "not_needed" : !AUDIT_STATUSES.includes(data.audit_status) || typeof data.files_verified !== "boolean") return null;
+      const item = safeUploadItem(data.item, placeId);
+      return item && Object.assign({ item, duplicate: data.duplicate, audit_status: data.audit_status }, duplicate ? {} : { files_verified: data.files_verified });
+    }
+    if (action === "adminDeletePlaceUpload") {
+      return exactKeys(data, ["deleted", "file_deleted", "audit_status"]) && data.deleted === true && typeof data.file_deleted === "boolean" && AUDIT_STATUSES.includes(data.audit_status)
+        ? { deleted: true, file_deleted: data.file_deleted, audit_status: data.audit_status } : null;
+    }
+    if (action === "adminRetryPlaceUploadDeletes") {
+      return exactKeys(data, ["retried", "still_pending"]) && nonNegativeInteger(data.retried) && nonNegativeInteger(data.still_pending) && data.still_pending <= data.retried
+        ? { retried: data.retried, still_pending: data.still_pending } : null;
+    }
+    if (action === "adminSavePlaceUploads") {
+      if (!exactKeys(data, ["items", "changed", "audit_status"]) || !Array.isArray(data.changed) || !data.changed.every((entry) => SAVE_CHANGES.includes(entry))) return null;
+      if (data.changed.length ? !AUDIT_STATUSES.includes(data.audit_status) : data.audit_status !== "not_needed") return null;
+      const items = safeUploadItems(data.items, placeId);
+      return items && { items, changed: data.changed.slice(), audit_status: data.audit_status };
+    }
+    if (action === "adminTestMediaStorage") {
+      if (!exactKeys(data, ["ok", "steps"]) || typeof data.ok !== "boolean" || !Array.isArray(data.steps) || data.steps.length > PROBE_STEPS.length) return null;
+      const steps = data.steps.map((step) => exactKeys(step, ["step", "status", "ok"]) && PROBE_STEPS.includes(step.step) && typeof step.ok === "boolean" &&
+        (Number.isSafeInteger(step.status) && step.status >= 100 && step.status <= 599 || step.status === "CONFIG" || step.status === "NETWORK") ? { step: step.step, status: step.status, ok: step.ok } : null);
+      return steps.every(Boolean) ? { ok: data.ok, steps } : null;
+    }
+    return null;
+  }
+
+  function uploadIdList(value) {
+    if (!Array.isArray(value) || value.length > MAX_PLACE_UPLOADS || !value.every((id) => typeof id === "string" && UPLOAD_ID_PATTERN.test(id)) || new Set(value).size !== value.length) validationError();
+    return value.slice();
+  }
+
+  function placeOnly(payload) {
+    const source = requestObject(payload, ["place_id"], ["place_id"], false);
+    if (!validPlaceId(source.place_id)) validationError();
+    return { place_id: source.place_id };
+  }
+
+  function getPlaceUploads(token, payload) { return placeRequest("adminGetPlaceUploads", token, placeOnly(payload)); }
+
+  function uploadPlaceImage(token, payload) {
+    const source = requestObject(payload, ["place_id", "format", "large_b64", "small_b64", "caption_th", "caption_en"], ["place_id", "format", "large_b64", "small_b64"], false);
+    if (!validPlaceId(source.place_id) || (source.format !== "webp" && source.format !== "jpeg")) validationError();
+    for (const key of ["large_b64", "small_b64"]) if (typeof source[key] !== "string" || source[key].length % 4 !== 0 || !BASE64_PATTERN.test(source[key])) validationError();
+    for (const key of ["caption_th", "caption_en"]) if (source[key] !== undefined && !caption(source[key])) validationError();
+    const request = { place_id: source.place_id, format: source.format, large_b64: source.large_b64, small_b64: source.small_b64 };
+    if (source.caption_th !== undefined) request.caption_th = source.caption_th;
+    if (source.caption_en !== undefined) request.caption_en = source.caption_en;
+    return placeRequest("adminUploadPlaceImage", token, request);
+  }
+
+  function deletePlaceUpload(token, payload) {
+    const source = requestObject(payload, ["place_id", "upload_id", "expected_ids"], ["place_id", "upload_id", "expected_ids"], false);
+    if (!validPlaceId(source.place_id) || typeof source.upload_id !== "string" || !UPLOAD_ID_PATTERN.test(source.upload_id)) validationError();
+    return placeRequest("adminDeletePlaceUpload", token, { place_id: source.place_id, upload_id: source.upload_id, expected_ids: uploadIdList(source.expected_ids) });
+  }
+
+  function retryPlaceUploadDeletes(token, payload) { return placeRequest("adminRetryPlaceUploadDeletes", token, placeOnly(payload)); }
+
+  function savePlaceUploads(token, payload) {
+    const source = requestObject(payload, ["place_id", "expected_ids", "order", "cover_id", "captions"], ["place_id", "expected_ids", "order", "cover_id", "captions"], false);
+    if (!validPlaceId(source.place_id)) validationError();
+    const expected = uploadIdList(source.expected_ids), order = uploadIdList(source.order);
+    if (order.length !== expected.length || !order.every((id) => expected.includes(id))) validationError();
+    if (source.cover_id !== null && !order.includes(source.cover_id)) validationError();
+    const captions = source.captions;
+    if (!captions || Array.isArray(captions) || typeof captions !== "object") validationError();
+    const safeCaptions = {};
+    for (const id of Object.keys(captions)) {
+      const entry = captions[id];
+      if (!order.includes(id) || !exactKeys(entry, ["th", "en"]) || !caption(entry.th) || !caption(entry.en)) validationError();
+      safeCaptions[id] = { th: entry.th, en: entry.en };
+    }
+    return placeRequest("adminSavePlaceUploads", token, { place_id: source.place_id, expected_ids: expected, order, cover_id: source.cover_id, captions: safeCaptions });
+  }
+
+  function testMediaStorage(token) { return placeRequest("adminTestMediaStorage", token, {}); }
+
   global.TakhunAdminApi = Object.freeze({
     login, validateSession, logout, getDashboard, getPlaces, getPlaceDetail, getPlaceMediaOptions, inspectPlaceDependencies,
     createPlace, savePlaceDraft, publishPlace, unpublishPlace, archivePlace, restorePlace,
@@ -1068,6 +1219,7 @@
     getRoutes, getRouteDetail, createRoute, updateRoute, deleteRoute,
     getGallery, getGalleryDetail, getGalleryMediaOptions, createGalleryItem, updateGalleryItem, deleteGalleryItem,
     getReviews, getReviewDetail, approveReview, hideReview, replyReview, clearReviewReply, deleteReview,
-    getSettings, updateSettings
+    getSettings, updateSettings,
+    getPlaceUploads, uploadPlaceImage, deletePlaceUpload, retryPlaceUploadDeletes, savePlaceUploads, testMediaStorage
   });
 })(window);

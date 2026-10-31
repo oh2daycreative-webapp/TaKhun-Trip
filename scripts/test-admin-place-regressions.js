@@ -62,7 +62,8 @@ function assertTransportBoundary(source) {
     assert.match(source, new RegExp(`function ${method}\\(token, payload\\) \\{ return placeRequest\\(`));
   }
   assert.match(source, /headers: \{ "Content-Type": CONTENT_TYPE \}/);
-  assert.doesNotMatch(source, /Authorization|\bGET\b|\bretr(?:y|ies|ied)\b/i);
+  // Task 11: only the count field "retried" of adminRetryPlaceUploadDeletes is exempt (same rule as test-admin-api.js).
+  assert.doesNotMatch(source.replace(/"retried"|\bdata\.retried\b|\bretried: /g, ""), /Authorization|\bGET\b|\bretr(?:y|ies|ied)\b/i);
   assert.equal((source.match(/global\.fetch\(/g) || []).length, 1);
   assert.match(source, /throw safeError\("MALFORMED_RESPONSE"\)/);
 }

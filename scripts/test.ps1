@@ -185,6 +185,8 @@ if ($LASTEXITCODE -ne 0) { throw "i18n behavior verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Public API client behavior verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-api.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin API transport verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-place-uploads-api.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin place uploads API verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-auth.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin browser auth verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-shell.js")
