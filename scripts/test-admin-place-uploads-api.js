@@ -27,7 +27,8 @@ function item(overrides = {}) {
   }, overrides);
 }
 const listData = (overrides = {}) => Object.assign({ enabled: true, can_write: true, limits: { per_place: 20, daily_left: 97, max_bytes_large: 2097152, max_bytes_small: 614400 }, items: [item()], delete_pending: 0 }, overrides);
-const ok = (data) => ({ ok: true, data, message: "success" });
+// The server's real success shape: {ok, data} with NO "message" (MediaUploadService_execute_; seen live on staging).
+const ok = (data) => ({ ok: true, data });
 const fail = (code, extra = {}) => ({ ok: false, error: Object.assign({ code, message: "ข้อความ" }, extra) });
 
 function load(respond) {
@@ -50,6 +51,18 @@ async function codeOf(run) { try { await (typeof run === "function" ? run() : ru
 const plain = (v) => JSON.parse(JSON.stringify(v));
 
 (async () => {
+  await test("the live staging response (no message) is accepted; a message is tolerated; other extra keys are not", async () => {
+    const live = '{"ok":true,"data":{"enabled":true,"can_write":true,"limits":{"per_place":20,"daily_left":96,"max_bytes_large":2097152,"max_bytes_small":614400},"items":[],"delete_pending":0}}';
+    const env = load(() => JSON.parse(live));
+    assert.deepEqual(plain(await env.api.getPlaceUploads(TOKEN, { place_id: PLACE_ID })), JSON.parse(live).data);
+    const withMessage = load(() => Object.assign(JSON.parse(live), { message: "success" }));
+    assert.equal(plain(await withMessage.api.getPlaceUploads(TOKEN, { place_id: PLACE_ID })).enabled, true);
+    for (const extra of [{ message: 5 }, { extra: 1 }]) {
+      const bad = load(() => Object.assign(JSON.parse(live), extra));
+      assert.equal(await codeOf(() => bad.api.getPlaceUploads(TOKEN, { place_id: PLACE_ID })), "MALFORMED_RESPONSE");
+    }
+  });
+
   await test("exports the 6 wrappers", () => {
     const { api } = load(() => ok({}));
     for (const name of ["getPlaceUploads", "uploadPlaceImage", "deletePlaceUpload", "retryPlaceUploadDeletes", "savePlaceUploads", "testMediaStorage"]) assert.equal(typeof api[name], "function", name);

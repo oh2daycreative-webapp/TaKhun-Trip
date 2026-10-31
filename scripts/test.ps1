@@ -240,6 +240,8 @@ if ($LASTEXITCODE -ne 0) { throw "Admin image resize verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin image resize native browser verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-place-uploads-ui.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin place uploads UI native browser verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-place-uploads-real-path.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin place uploads real-path browser verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-place-regressions.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Place integrated regression verification failed." }
 & node (Join-Path $PSScriptRoot "test-crypto-service.js")

@@ -64,6 +64,13 @@
     : ERROR_MESSAGES[error && error.code] || DEFAULT_ERROR;
   const isUncertain = (error) => Boolean(error && UNCERTAIN.includes(error.code));
   const captionLength = (text) => Array.from(String(text)).length;
+  // Every caught error is logged with its code only (never the token or file contents), so a failure is visible in
+  // the browser console (task 11 live bug: a valid response was shown as an error with nothing in the console).
+  function logError(step, error) {
+    const code = error && typeof error.code === "string" ? error.code : error && error.name ? error.name : "ERROR";
+    const reason = error && typeof error.reason === "string" ? " (" + error.reason + ")" : "";
+    if (global.console && typeof global.console.warn === "function") global.console.warn("[place uploads] " + step + ": " + code + reason);
+  }
 
   function init(options) {
     const root = options.root;
@@ -76,7 +83,7 @@
     const state = {
       archived: options.archived === true, loaded: false, enabled: false, canWrite: false, limits: null,
       items: [], order: [], cover: null, captions: {}, deletePending: 0,
-      busy: false, conflict: false, queue: [], warnings: [], previews: {}, readError: false
+      busy: false, loading: false, conflict: false, queue: [], warnings: [], previews: {}, readError: false
     };
 
     // ---- DOM ----
@@ -260,6 +267,10 @@
 
     // ---- actions ----
     async function load(message) {
+      if (state.loading) return false;
+      state.loading = true;
+      readRetry.disabled = true;
+      say("กำลังโหลดรายการรูป");
       try {
         const data = await api.getPlaceUploads(token, { place_id: placeId });
         if (!data.can_write) { root.hidden = true; return false; }
@@ -267,10 +278,15 @@
         root.hidden = false;
         if (message) say(message);
       } catch (error) {
+        logError("load", error);
         state.readError = true;
         root.hidden = false;
         say(errorMessage(error));
+      } finally {
+        state.loading = false;
+        readRetry.disabled = false;
       }
+      if (state.loaded && !state.readError && !message) say("");
       render();
       return state.loaded && !state.readError;
     }
@@ -315,6 +331,7 @@
         if (result.audit_status === "unconfirmed") warn(AUDIT_WARNING);
         state.busy = false; render();
       } catch (error) {
+        logError("save", error);
         state.busy = false;
         if (error && error.code === "CONFLICT") { state.conflict = true; say(ERROR_MESSAGES.CONFLICT); render(); }
         else if (isUncertain(error)) { say(STATUS.uncertain); await reloadAfterUncertain(UNCERTAIN_CHANGE); }
@@ -345,6 +362,7 @@
         if (result.audit_status === "unconfirmed") warn(AUDIT_WARNING);
         state.busy = false; render();
       } catch (error) {
+        logError("delete", error);
         state.busy = false;
         if (error && error.code === "CONFLICT") { state.conflict = true; say(ERROR_MESSAGES.CONFLICT); render(); }
         else if (isUncertain(error)) { say(STATUS.uncertain); await reloadAfterUncertain(UNCERTAIN_CHANGE); }
@@ -360,6 +378,7 @@
         state.deletePending = result.still_pending;
         say(result.still_pending ? `ยังลบไฟล์ไม่สำเร็จ ${result.still_pending} รายการ กรุณาลองใหม่ภายหลัง` : "ลบไฟล์ที่ค้างอยู่ครบแล้ว");
       } catch (error) {
+        logError("retry deletes", error);
         say(isUncertain(error) ? "ไม่แน่ใจผล กรุณาโหลดรายการใหม่" : errorMessage(error));
       }
       state.busy = false; renderControls();
@@ -369,7 +388,7 @@
       entry.state = "resizing"; entry.detail = ""; renderQueue();
       let prepared;
       try { prepared = await resize.prepare(entry.file); }
-      catch (error) { entry.state = "failed"; entry.detail = error && error.message || resize.MESSAGES.DECODE; renderQueue(); return "next"; }
+      catch (error) { logError("resize", error); entry.state = "failed"; entry.detail = error && error.message || resize.MESSAGES.DECODE; renderQueue(); return "next"; }
       const megabytes = ((prepared.large.bytes.length + prepared.small.bytes.length) / 1048576).toFixed(1);
       entry.state = "uploading"; entry.detail = `${megabytes} MB อาจใช้เวลาถึง 1 นาที`; renderQueue();
       say(`กำลังอัปโหลด ${entry.name}`);
@@ -391,6 +410,7 @@
         renderQueue(); render();
         return "next";
       } catch (error) {
+        logError("upload", error);
         if (isUncertain(error)) { entry.state = "uncertain"; entry.detail = ""; renderQueue(); return "uncertain"; }
         entry.state = "failed"; entry.detail = errorMessage(error); renderQueue();
         return error && error.code === "IMAGE_REJECTED" ? "next" : error && error.code === "CONFLICT" ? "conflict" : "stop";

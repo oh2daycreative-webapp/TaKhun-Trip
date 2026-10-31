@@ -519,6 +519,11 @@
     if (!result || Array.isArray(result) || typeof result !== "object" || typeof result.ok !== "boolean") {
       throw safeError("MALFORMED_RESPONSE");
     }
+    if (result.ok && UPLOAD_ACTIONS.includes(body.action)) {
+      // MediaUploadService answers {ok, data} without "message" (seen live on staging, task 11); accept both shapes.
+      if (!(exactKeys(result, ["ok", "data"]) || exactKeys(result, ["ok", "data", "message"]) && typeof result.message === "string")) throw safeError("MALFORMED_RESPONSE");
+      return validateSuccess(body, result.data);
+    }
     if (result.ok) {
       if (!exactKeys(result, ["ok", "data", "message"]) || typeof result.message !== "string" ||
           ["adminGetDashboard", "adminGetSettings", "updateSettings"].includes(body.action) && result.message !== "success") {
