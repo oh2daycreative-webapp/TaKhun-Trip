@@ -98,6 +98,13 @@ function pickFiles(r, names) {
   input.files = dt.files; input.dispatchEvent(new Event("change", { bubbles: true }));
 }
 async function settle() { for (let i = 0; i < 20; i += 1) await tick(); }
+const rgb = (text) => (text.match(/[0-9.]+/g) || []).map(Number);
+function background(node) { for (let n = node; n; n = n.parentElement) { const c = rgb(getComputedStyle(n).backgroundColor); if (c.length === 3 || (c.length === 4 && c[3] > 0)) return c.slice(0, 3); } return [255, 255, 255]; }
+function luminance(c) { const s = c.slice(0, 3).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * s[0] + 0.7152 * s[1] + 0.0722 * s[2]; }
+function contrast(node) { const a = luminance(rgb(getComputedStyle(node).color)), b = luminance(background(node)); return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05); }
+function opacity(node) { let o = 1; for (let n = node; n; n = n.parentElement) o *= Number(getComputedStyle(n).opacity); return o; }
+function inline(label) { const input = label.querySelector("input"), text = label.querySelector("span"); const a = input.getBoundingClientRect(), b = text.getBoundingClientRect(); return a.right <= b.left + 1 && Math.abs((a.top + a.bottom) / 2 - (b.top + b.bottom) / 2) <= 10; }
+const box = (r) => { const node = r.querySelector(".admin-uploads__result"); return { visible: visible(node), tone: node.dataset.tone || "", icon: (node.querySelector(".admin-uploads__result-icon") || {}).textContent || "", text: (node.querySelector(".admin-uploads__result-text") || {}).textContent || "", role: node.getAttribute("role"), live: node.getAttribute("aria-live") }; };
 `;
 
 const scenarios = `
@@ -194,6 +201,43 @@ window.__run = async () => {
   out.readError = { box: visible($(host, ".admin-uploads__read-error")) };
   $(host, ".admin-uploads__read-error button").click(); await settle();
   out.readError.after = { box: visible($(host, ".admin-uploads__read-error")), items: c.snapshot().items.length, noThumbOrigin: $(host, ".admin-uploads__thumb--none") !== null };
+  // 17. UX round: delete readable in both states, radios inline + label clickable, result box tones/icons/position
+  ({ root: r, controller: c } = await mount());
+  const freshBox = box(r);
+  const del = $(r, "[data-role=delete]");
+  out.ux = { deleteEnabled: { contrast: contrast(del), opacity: opacity(del) } };
+  $(r, "li[data-upload-id='UPL-1'] [data-role=down]").click();
+  out.ux.deleteDisabled = { disabled: del.isConnected ? $(r, "[data-role=delete]").disabled : true, contrast: contrast($(r, "[data-role=delete]")), opacity: opacity($(r, "[data-role=delete]")) };
+  $(r, ".admin-uploads__discard").click();
+  out.ux.inline = { cover: inline($(r, ".admin-uploads__cover")), noCover: inline($(r, ".admin-uploads__no-cover")) };
+  $(r, "li[data-upload-id='UPL-1'] .admin-uploads__cover span").click();
+  out.ux.labelClick = c.snapshot().cover;
+  $(r, ".admin-uploads__no-cover span").click();
+  out.ux.noCoverClick = c.snapshot().cover;
+  $(r, ".admin-uploads__discard").click();
+  out.ux.afterLoad = freshBox;
+  server.uploadPlan = ["dup"]; pickFiles(r, ["a.jpg"]); await settle(); await settle();
+  out.ux.dup = box(r);
+  pickFiles(r, ["a.jpg", "b.jpg"]); await settle(); await settle();
+  out.ux.allOk = box(r);
+  const resultNode = $(r, ".admin-uploads__result"), listNode = $(r, ".admin-uploads__list");
+  out.ux.position = { aboveList: resultNode.getBoundingClientRect().bottom <= listNode.getBoundingClientRect().top, beforeQueue: resultNode.nextElementSibling === $(r, ".admin-uploads__alert") && $(r, ".admin-uploads__alert").nextElementSibling === $(r, ".admin-uploads__queue") };
+  await settle(); out.ux.kept = box(r).text;
+  server.uploadPlan = [{ code: "STORAGE_ERROR" }]; pickFiles(r, ["a.jpg"]); await settle(); await settle();
+  out.ux.allFailed = box(r);
+  $(r, "li[data-upload-id='UPL-1'] [data-role=down]").click(); $(r, ".admin-uploads__save").click(); await settle();
+  out.ux.saved = box(r);
+  server.deletePlan = ["pending"]; $(r, "[data-role=delete]").click(); await settle();
+  out.ux.pending = box(r);
+  server.deletePlan = ["ok"]; $(r, "[data-role=delete]").click(); await settle();
+  out.ux.deleted = box(r);
+  server.uploadPlan = [{ code: "TIMEOUT" }]; pickFiles(r, ["a.jpg"]); await settle(); await settle();
+  out.ux.uncertain = box(r);
+  out.ux.alertIcon = $(r, ".admin-uploads__alert p") && getComputedStyle($(r, ".admin-uploads__alert p"), "::before").content;
+  reset({ listFail: "NETWORK_ERROR" });
+  const host2 = document.getElementById("host"); host2.innerHTML = '<section hidden></section>';
+  await window.TakhunAdminPlaceUploads.init({ root: host2.firstChild, api: window.TakhunAdminApi, resize: window.TakhunImageResize, token: "T".repeat(43), placeId: PLACE, archived: false, mediaOrigin: "" });
+  out.ux.readError = box(host2);
   // 16. phone width: no sideways scroll, touch-size buttons
   ({ root: r, controller: c } = await mount());
   $(r, "li[data-upload-id='UPL-1'] [data-role=down]").click();
@@ -206,7 +250,7 @@ window.__run = async () => {
 function page() {
   const css = ["main.css", "components.css", "mobile.css", "admin.css", "admin-places.css"].map((name) => `<link rel="stylesheet" href="${url("public/css/" + name)}">`).join("");
   return `<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${css}</head>
-<body class="admin-body"><main class="admin-main"><div id="host"></div></main>
+<body class="admin-body"><main class="admin-main"><section class="admin-place-edit"><div id="host"></div></section></main>
 <script src="${url("public/admin/js/admin-place-uploads.js")}"></script><script>${harness}${scenarios}</script></body></html>`;
 }
 
@@ -270,7 +314,7 @@ function check(out, width) {
   assert.equal(out.queue.uploads, 2);
   assert.equal(out.queue.maxActive, 1, "one request at a time");
   assert.equal(out.queue.items, 3);
-  assert.equal(out.queue.status, "อัปโหลดเสร็จ 1 จาก 3 รูป");
+  assert.equal(out.queue.status, "อัปโหลดเสร็จ 1 จาก 3 รูป · ไม่สำเร็จ 2 รูป (ดูรายการด้านล่าง)");
   assert.match(out.queue.quota, /เพิ่มได้อีก 17 รูป · วันนี้อัปโหลดได้อีก 49 รูป/);
   assert.equal(out.queue.newThumb, "blob:", "new photo previewed from the local file");
 
@@ -312,6 +356,25 @@ function check(out, width) {
   assert.equal(out.readError.box, true);
   assert.deepEqual(out.readError.after, { box: false, items: 2, noThumbOrigin: true });
 
+  // UX round (owner, 2026-10-31)
+  const ux = out.ux;
+  assert.ok(ux.deleteEnabled.contrast >= 4.5 && ux.deleteEnabled.opacity === 1, "delete readable: " + JSON.stringify(ux.deleteEnabled));
+  assert.ok(ux.deleteDisabled.disabled && ux.deleteDisabled.contrast >= 4.5 && ux.deleteDisabled.opacity === 1, "disabled delete readable: " + JSON.stringify(ux.deleteDisabled));
+  assert.deepEqual(ux.inline, { cover: true, noCover: true }, "radio inline with its label");
+  assert.deepEqual([ux.labelClick, ux.noCoverClick], ["UPL-1", null], "clicking the label text picks the radio");
+  assert.equal(ux.afterLoad.visible, false, "no box until there is a result");
+  const expectBox = (actual, tone, icon, text) => { assert.deepEqual([actual.visible, actual.tone, actual.icon, actual.role, actual.live], [true, tone, icon, "status", "polite"], JSON.stringify(actual)); assert.equal(actual.text, text); };
+  expectBox(ux.dup, "warn", "⚠", "อัปโหลดเสร็จ 0 รูป · มีอยู่แล้ว 1 รูป");
+  expectBox(ux.allOk, "ok", "✓", "อัปโหลดเสร็จ 2 รูป");
+  assert.deepEqual(ux.position, { aboveList: true, beforeQueue: true });
+  assert.equal(ux.kept, "อัปโหลดเสร็จ 2 รูป", "kept until the next action");
+  expectBox(ux.allFailed, "error", "✕", "อัปโหลดไม่สำเร็จ 1 รูป: ไม่ได้บันทึกข้อมูล: เชื่อมต่อที่เก็บรูปไม่สำเร็จ");
+  expectBox(ux.saved, "ok", "✓", "บันทึกลำดับ รูปปก และคำบรรยายแล้ว");
+  expectBox(ux.pending, "warn", "⚠", "ลบรูปออกจากเว็บแล้ว แต่ลบไฟล์ในที่เก็บรูปยังไม่สำเร็จ · กดลองลบไฟล์อีกครั้งได้");
+  expectBox(ux.deleted, "ok", "✓", "ลบรูปแล้ว");
+  expectBox(ux.uncertain, "warn", "⚠", "ไม่แน่ใจผล");
+  assert.equal(ux.alertIcon, "\"⚠ \"", "warnings carry an icon too");
+  expectBox(ux.readError, "error", "✕", "โหลดรายการรูปไม่สำเร็จ · เกิดข้อผิดพลาดของระบบ กรุณาลองใหม่");
   assert.ok(out.layout.scrollWidth <= out.layout.clientWidth, `no sideways scroll at ${width}px: ${out.layout.scrollWidth} > ${out.layout.clientWidth}`);
   assert.ok(out.layout.widest <= out.layout.clientWidth + 0.5, `nothing sticks out at ${width}px: ${out.layout.widest}`);
   assert.ok(out.layout.minButton >= 44, `touch-size buttons at ${width}px: ${out.layout.minButton}px`);
@@ -330,6 +393,8 @@ function checkIntegration() {
   assert.match(edit, /async function initUploads\(\) \{ if \(!elements\.uploads \|\| !global\.TakhunAdminPlaceUploads \|\| !global\.TakhunImageResize \|\| state\.mode !== "edit" \|\| !state\.placeId \|\| !writable\(\)\) return;/);
   assert.match(edit, /archived:state\.archived, mediaOrigin:mediaOrigin\(\)/);
   assert.match(edit, /catch \(_uploadsError\) \{ state\.uploadsComponent = null; \}/, "a failure in the photos section never blocks the page");
+  // The "สื่อ" section explains that an uploaded cover is used first (owner UX round).
+  assert.match(html, /<\/div><p class="admin-place-media__upload-note" data-admin-place-media-upload-note>[^<]*รูปภาพที่อัปโหลด[^<]*ใช้รูปนั้นเป็นรูปปกก่อน[^<]*<\/p>/);
 }
 
 (async () => {

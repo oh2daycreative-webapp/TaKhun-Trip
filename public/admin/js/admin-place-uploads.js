@@ -93,8 +93,15 @@
     title.id = "admin-uploads-title";
     root.setAttribute("aria-labelledby", title.id);
     const help = make("p", "admin-uploads__help", "รูปขึ้นเว็บทันทีที่อัปโหลดหรือบันทึก (ไม่ผ่านแบบร่าง) · สูงสุด 20 รูป · กว้างอย่างน้อย 1000 px · ไฟล์ไม่เกิน 20 MB · ห้ามใส่ข้อมูลส่วนบุคคลในคำบรรยาย");
-    const status = make("p", "admin-uploads__status");
+    // Result box (owner UX round): coloured box + icon (not colour alone), right above the photo list, kept until the
+    // next action, announced to screen readers. Tones: ok ✓ / warn ⚠ / error ✕ / info ℹ (progress).
+    const status = make("div", "admin-uploads__result");
     status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite"); status.setAttribute("aria-atomic", "true");
+    status.hidden = true;
+    const statusIcon = make("span", "admin-uploads__result-icon");
+    statusIcon.setAttribute("aria-hidden", "true");
+    const statusText = make("span", "admin-uploads__result-text");
+    status.append(statusIcon, statusText);
     const alert = make("div", "admin-uploads__alert");
     alert.setAttribute("role", "alert"); alert.hidden = true;
     const notice = make("p", "admin-uploads__notice"); notice.hidden = true;
@@ -117,7 +124,7 @@
     conflictBox.append(make("p", "", ERROR_MESSAGES.CONFLICT), reloadButton);
     const readErrorBox = make("div", "admin-uploads__read-error"); readErrorBox.hidden = true;
     const readRetry = button("ลองโหลดอีกครั้ง");
-    readErrorBox.append(make("p", "", "โหลดรายการรูปไม่สำเร็จ"), readRetry);
+    readErrorBox.append(readRetry);
     const noCover = make("label", "admin-uploads__no-cover");
     const noCoverInput = make("input"); noCoverInput.type = "radio"; noCoverInput.name = "admin-uploads-cover"; noCoverInput.value = "";
     noCover.append(noCoverInput, make("span", "", " ไม่ใช้รูปที่อัปโหลดเป็นรูปปก (ใช้รูปปกเดิม)"));
@@ -128,7 +135,7 @@
     const saveButton = button("บันทึกลำดับ รูปปก และคำบรรยาย", "admin-uploads__save");
     const discardButton = button("ยกเลิกการแก้ไข", "admin-uploads__discard");
     saveBar.append(make("p", "", "มีการแก้ไขลำดับ รูปปก หรือคำบรรยายที่ยังไม่บันทึก (อัปโหลดและลบได้หลังบันทึกหรือยกเลิก)"), saveButton, discardButton);
-    root.append(title, help, status, alert, readErrorBox, notice, uploadBox, queueList, pendingBox, conflictBox, noCover, list, empty, saveBar);
+    root.append(title, help, notice, readErrorBox, uploadBox, status, alert, queueList, pendingBox, conflictBox, noCover, list, empty, saveBar);
 
     // ---- model helpers ----
     const serverIds = () => state.items.map((item) => item.upload_id);
@@ -146,7 +153,15 @@
     }
     const canUpload = () => state.enabled && !state.archived && !state.conflict;
     const canEdit = () => !state.archived && !state.conflict;
-    function say(text) { status.textContent = text; }
+    const ICONS = { ok: "✓", warn: "⚠", error: "✕", info: "ℹ" };
+    function say(text, tone) {
+      const kind = ICONS[tone] ? tone : "info";
+      statusText.textContent = text || "";
+      statusIcon.textContent = text ? ICONS[kind] : "";
+      status.dataset.tone = text ? kind : "";
+      status.className = "admin-uploads__result" + (text ? " admin-uploads__result--" + kind : "");
+      status.hidden = !text;
+    }
     function warn(text) {
       if (!state.warnings.includes(text)) state.warnings.push(text);
       alert.replaceChildren(...state.warnings.map((entry) => make("p", "", entry)));
@@ -266,22 +281,22 @@
     }
 
     // ---- actions ----
-    async function load(message) {
+    async function load(message, tone) {
       if (state.loading) return false;
       state.loading = true;
       readRetry.disabled = true;
-      say("กำลังโหลดรายการรูป");
+      say("กำลังโหลดรายการรูป", "info");
       try {
         const data = await api.getPlaceUploads(token, { place_id: placeId });
         if (!data.can_write) { root.hidden = true; return false; }
         applyList(data);
         root.hidden = false;
-        if (message) say(message);
+        if (message) say(message, tone || "ok");
       } catch (error) {
         logError("load", error);
         state.readError = true;
         root.hidden = false;
-        say(errorMessage(error));
+        say("โหลดรายการรูปไม่สำเร็จ · " + errorMessage(error), "error");
       } finally {
         state.loading = false;
         readRetry.disabled = false;
@@ -293,7 +308,7 @@
 
     async function reloadAfterUncertain(text) {
       warn(text);
-      await load();
+      await load(STATUS.uncertain, "warn");
     }
 
     function move(id, step, role) {
@@ -303,7 +318,7 @@
       if (index < 0 || target < 0 || target >= state.order.length) return;
       state.order.splice(index, 1);
       state.order.splice(target, 0, id);
-      say(`ย้ายรูปไปเป็นลำดับที่ ${target + 1} แล้ว (ยังไม่บันทึก)`);
+      say(`ย้ายรูปไปเป็นลำดับที่ ${target + 1} แล้ว (ยังไม่บันทึก)`, "info");
       render({ id, role });
     }
 
@@ -321,28 +336,28 @@
     async function save() {
       if (state.busy || !canEdit() || !dirty()) return;
       const captions = captionsPayload();
-      if (!captions) { say("คำบรรยายยาวเกิน 200 ตัวอักษร"); return; }
-      state.busy = true; clearWarnings(); say("กำลังบันทึก"); renderControls();
+      if (!captions) { say("คำบรรยายยาวเกิน 200 ตัวอักษร", "error"); return; }
+      state.busy = true; clearWarnings(); say("กำลังบันทึก", "info"); renderControls();
       try {
         const result = await api.savePlaceUploads(token, { place_id: placeId, expected_ids: serverIds(), order: state.order.slice(), cover_id: state.cover, captions });
         state.items = result.items.slice().sort((a, b) => a.sort_order - b.sort_order);
         resetLocal();
-        say("บันทึกลำดับ รูปปก และคำบรรยายแล้ว");
+        say("บันทึกลำดับ รูปปก และคำบรรยายแล้ว", "ok");
         if (result.audit_status === "unconfirmed") warn(AUDIT_WARNING);
         state.busy = false; render();
       } catch (error) {
         logError("save", error);
         state.busy = false;
-        if (error && error.code === "CONFLICT") { state.conflict = true; say(ERROR_MESSAGES.CONFLICT); render(); }
-        else if (isUncertain(error)) { say(STATUS.uncertain); await reloadAfterUncertain(UNCERTAIN_CHANGE); }
-        else { say(errorMessage(error)); renderControls(); }
+        if (error && error.code === "CONFLICT") { state.conflict = true; say(ERROR_MESSAGES.CONFLICT, "warn"); render(); }
+        else if (isUncertain(error)) { say(STATUS.uncertain, "warn"); await reloadAfterUncertain(UNCERTAIN_CHANGE); }
+        else { say(errorMessage(error), "error"); renderControls(); }
       }
     }
 
     function discard() {
       if (state.busy) return;
       resetLocal();
-      say("ยกเลิกการแก้ไขแล้ว");
+      say("ยกเลิกการแก้ไขแล้ว", "info");
       render();
     }
 
@@ -350,36 +365,36 @@
       if (state.busy || dirty()) return;
       const index = state.order.indexOf(id);
       if (index < 0 || !confirmFn(`ลบรูปที่ ${index + 1} ออกจากเว็บไซต์และที่เก็บรูป? การลบย้อนกลับไม่ได้`)) return;
-      state.busy = true; clearWarnings(); say("กำลังลบรูป"); renderControls();
+      state.busy = true; clearWarnings(); say("กำลังลบรูป", "info"); renderControls();
       try {
         const result = await api.deletePlaceUpload(token, { place_id: placeId, upload_id: id, expected_ids: serverIds() });
         state.items = state.items.filter((item) => item.upload_id !== id);
         if (state.previews[id] && global.URL && global.URL.revokeObjectURL) global.URL.revokeObjectURL(state.previews[id]);
         delete state.previews[id];
         resetLocal();
-        if (!result.file_deleted) { state.deletePending += 1; say("ลบรูปออกจากเว็บแล้ว แต่ลบไฟล์ในที่เก็บรูปยังไม่สำเร็จ · กดลองลบไฟล์อีกครั้งได้"); }
-        else say("ลบรูปแล้ว");
+        if (!result.file_deleted) { state.deletePending += 1; say("ลบรูปออกจากเว็บแล้ว แต่ลบไฟล์ในที่เก็บรูปยังไม่สำเร็จ · กดลองลบไฟล์อีกครั้งได้", "warn"); }
+        else say("ลบรูปแล้ว", "ok");
         if (result.audit_status === "unconfirmed") warn(AUDIT_WARNING);
         state.busy = false; render();
       } catch (error) {
         logError("delete", error);
         state.busy = false;
-        if (error && error.code === "CONFLICT") { state.conflict = true; say(ERROR_MESSAGES.CONFLICT); render(); }
-        else if (isUncertain(error)) { say(STATUS.uncertain); await reloadAfterUncertain(UNCERTAIN_CHANGE); }
-        else { say(errorMessage(error)); renderControls(); }
+        if (error && error.code === "CONFLICT") { state.conflict = true; say(ERROR_MESSAGES.CONFLICT, "warn"); render(); }
+        else if (isUncertain(error)) { say(STATUS.uncertain, "warn"); await reloadAfterUncertain(UNCERTAIN_CHANGE); }
+        else { say(errorMessage(error), "error"); renderControls(); }
       }
     }
 
     async function retryDeletes() {
       if (state.busy) return;
-      state.busy = true; say("กำลังลองลบไฟล์อีกครั้ง"); renderControls();
+      state.busy = true; say("กำลังลองลบไฟล์อีกครั้ง", "info"); renderControls();
       try {
         const result = await api.retryPlaceUploadDeletes(token, { place_id: placeId });
         state.deletePending = result.still_pending;
-        say(result.still_pending ? `ยังลบไฟล์ไม่สำเร็จ ${result.still_pending} รายการ กรุณาลองใหม่ภายหลัง` : "ลบไฟล์ที่ค้างอยู่ครบแล้ว");
+        say(result.still_pending ? `ยังลบไฟล์ไม่สำเร็จ ${result.still_pending} รายการ กรุณาลองใหม่ภายหลัง` : "ลบไฟล์ที่ค้างอยู่ครบแล้ว", result.still_pending ? "warn" : "ok");
       } catch (error) {
         logError("retry deletes", error);
-        say(isUncertain(error) ? "ไม่แน่ใจผล กรุณาโหลดรายการใหม่" : errorMessage(error));
+        say(isUncertain(error) ? "ไม่แน่ใจผล กรุณาโหลดรายการใหม่" : errorMessage(error), isUncertain(error) ? "warn" : "error");
       }
       state.busy = false; renderControls();
     }
@@ -391,7 +406,7 @@
       catch (error) { logError("resize", error); entry.state = "failed"; entry.detail = error && error.message || resize.MESSAGES.DECODE; renderQueue(); return "next"; }
       const megabytes = ((prepared.large.bytes.length + prepared.small.bytes.length) / 1048576).toFixed(1);
       entry.state = "uploading"; entry.detail = `${megabytes} MB อาจใช้เวลาถึง 1 นาที`; renderQueue();
-      say(`กำลังอัปโหลด ${entry.name}`);
+      say(`กำลังอัปโหลด ${entry.name}`, "info");
       try {
         const result = await api.uploadPlaceImage(token, { place_id: placeId, format: prepared.format, large_b64: resize.toBase64(prepared.large.bytes), small_b64: resize.toBase64(prepared.small.bytes) });
         const item = result.item;
@@ -417,6 +432,20 @@
       }
     }
 
+    // Duplicates are counted apart from uploads (owner: "0 จาก 1" read like a failure).
+    function uploadSummary(queue) {
+      const count = (name) => queue.filter((entry) => entry.state === name).length;
+      const done = count("done"), duplicate = count("duplicate"), failed = count("failed"), skipped = count("skipped");
+      const extras = (duplicate ? ` · มีอยู่แล้ว ${duplicate} รูป` : "") + (skipped ? ` · ยังไม่ได้ส่ง ${skipped} รูป` : "");
+      if (!failed && !skipped) return { text: `อัปโหลดเสร็จ ${done} รูป` + extras, tone: duplicate ? "warn" : "ok" };
+      if (!done && !duplicate) {
+        const first = queue.find((entry) => entry.state === "failed");
+        const reason = failed === 1 && first && first.detail ? `: ${first.detail}` : " (ดูรายการด้านล่าง)";
+        return { text: `อัปโหลดไม่สำเร็จ ${failed} รูป${reason}` + (skipped ? ` · ยังไม่ได้ส่ง ${skipped} รูป` : ""), tone: "error" };
+      }
+      return { text: `อัปโหลดเสร็จ ${done} จาก ${queue.length} รูป` + (failed ? ` · ไม่สำเร็จ ${failed} รูป (ดูรายการด้านล่าง)` : "") + extras, tone: "warn" };
+    }
+
     async function pick(files) {
       if (state.busy || !canUpload() || dirty()) return;
       const picked = Array.from(files || []);
@@ -432,10 +461,9 @@
       }
       state.busy = false;
       renderQueue();
-      const done = state.queue.filter((entry) => entry.state === "done").length;
-      if (outcome === "uncertain") { say(STATUS.uncertain); await reloadAfterUncertain(UNCERTAIN_UPLOAD); }
-      else if (outcome === "conflict") { state.conflict = true; say(ERROR_MESSAGES.CONFLICT); render(); }
-      else { say(`อัปโหลดเสร็จ ${done} จาก ${state.queue.length} รูป`); render(); }
+      if (outcome === "uncertain") { say(STATUS.uncertain, "warn"); await reloadAfterUncertain(UNCERTAIN_UPLOAD); }
+      else if (outcome === "conflict") { state.conflict = true; say(ERROR_MESSAGES.CONFLICT, "warn"); render(); }
+      else { const summary = uploadSummary(state.queue); say(summary.text, summary.tone); render(); }
       return outcome;
     }
 
@@ -443,7 +471,7 @@
     saveButton.addEventListener("click", save);
     discardButton.addEventListener("click", discard);
     retryButton.addEventListener("click", retryDeletes);
-    reloadButton.addEventListener("click", () => { clearWarnings(); load("โหลดรายการล่าสุดแล้ว"); });
+    reloadButton.addEventListener("click", () => { clearWarnings(); load("โหลดรายการล่าสุดแล้ว", "ok"); });
     readRetry.addEventListener("click", () => load());
     noCoverInput.addEventListener("change", () => { if (noCoverInput.checked) { state.cover = null; renderControls(); } });
     const beforeUnload = (event) => { if (state.busy || dirty()) { event.preventDefault(); event.returnValue = ""; } };
@@ -456,7 +484,7 @@
       setCover: (id) => { if (state.busy || !canEdit()) return; state.cover = id; render(); },
       setCaption: (id, lang, text) => { if (state.captions[id]) { state.captions[id][lang] = text; render(); } },
       snapshot: () => JSON.parse(JSON.stringify({ loaded: state.loaded, enabled: state.enabled, archived: state.archived, items: serverIds(), order: state.order, cover: state.cover,
-        dirty: dirty(), busy: state.busy, conflict: state.conflict, deletePending: state.deletePending, warnings: state.warnings, status: status.textContent,
+        dirty: dirty(), busy: state.busy, conflict: state.conflict, deletePending: state.deletePending, warnings: state.warnings, status: statusText.textContent, tone: status.dataset.tone || "",
         queue: state.queue.map((entry) => ({ name: entry.name, state: entry.state, detail: entry.detail })), limits: state.limits }))
     };
     return load().then(() => controller);

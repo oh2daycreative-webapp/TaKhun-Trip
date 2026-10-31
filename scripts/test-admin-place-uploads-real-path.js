@@ -62,7 +62,7 @@ const scenario = (photos) => `(async () => {
   // 1. First load fails like a dropped connection → read error; retry must send a NEW request and then load.
   failNext = 1;
   let c = await init();
-  out.readError = { box: visible(root.querySelector(".admin-uploads__read-error")), status: root.querySelector(".admin-uploads__status").textContent, requests: requests.length, console: consoleLines.slice() };
+  out.readError = { box: visible(root.querySelector(".admin-uploads__read-error")), status: root.querySelector(".admin-uploads__result-text").textContent, requests: requests.length, console: consoleLines.slice() };
   root.querySelector(".admin-uploads__read-error button").click();
   await until(() => c.snapshot().loaded); await settle();
   out.retry = { requests: requests.length, box: visible(root.querySelector(".admin-uploads__read-error")), loaded: c.snapshot().loaded, empty: visible(root.querySelector(".admin-uploads__empty")),
