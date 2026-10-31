@@ -21,6 +21,9 @@ const PUBLIC = path.join(root, "public");
 const P1 = "BTK-001"; // in the bundled content data, has a manifest cover; gets uploads
 const P2 = "PLC-23f91739-de8c-4f07-8705-11d88ee1b739"; // manifest cover only
 const ORIGIN = "https://media-qa.example";
+// The live staging place (task 13 visual check FAIL 1): places.html is fed the real staging getPlaces answers.
+const LIVE = "PLC-dd3b43b8-b698-416f-8494-4b44f1659654";
+const PLACES_FIXTURES = { th: require("./fixtures/staging-getPlaces-th.json"), en: require("./fixtures/staging-getPlaces-en.json") };
 const API = "https://script.google.com/macros/s/TEST-STAGING/exec";
 const EDITOR = "-".padEnd(42, "E") + "A";
 const browser = [process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, "Google/Chrome/Application/chrome.exe"),
@@ -51,20 +54,30 @@ async function pair(width, height, color) {
   const small = await sharp(svg(800, Math.round(height * 800 / width))).webp({ quality: 80 }).toBuffer();
   return { format: "webp", large_b64: large.toString("base64"), small_b64: small.toString("base64") };
 }
-async function seededBackend() {
-  const backend = createBackend({ placeId: P1, places: [[P2, "published"]], admins: { [EDITOR]: { admin_id: "ADM-22222222-2222-4222-8222-222222222222", role: "editor" } } });
-  const upload = async (picture, captions) => {
-    const result = JSON.parse(backend.handle(JSON.stringify({ action: "adminUploadPlaceImage", token: EDITOR, payload: Object.assign({ place_id: P1 }, picture, captions) })));
+async function seededBackend(nearbyId) {
+  const backend = createBackend({ placeId: P1, places: [[P2, "published"], [nearbyId, "published"], [LIVE, "published"]], admins: { [EDITOR]: { admin_id: "ADM-22222222-2222-4222-8222-222222222222", role: "editor" } } });
+  const uploadTo = async (placeId, picture, captions) => {
+    const result = JSON.parse(backend.handle(JSON.stringify({ action: "adminUploadPlaceImage", token: EDITOR, payload: Object.assign({ place_id: placeId }, picture, captions) })));
     assert.equal(result.ok, true, JSON.stringify(result));
     return result.data.item;
   };
+  const upload = (picture, captions) => uploadTo(P1, picture, captions);
+  // A nearby place and the live staging place each get an uploaded cover (their only photo = their cover).
+  const coverOf = async (placeId, color) => {
+    const item = await uploadTo(placeId, await pair(1600, 1067, color));
+    const saved = JSON.parse(backend.handle(JSON.stringify({ action: "adminSavePlaceUploads", token: EDITOR, payload: { place_id: placeId, expected_ids: [item.upload_id], order: [item.upload_id], cover_id: item.upload_id, captions: {} } })));
+    assert.equal(saved.ok, true, JSON.stringify(saved));
+    return item;
+  };
+  const nearbyCover = await coverOf(nearbyId, "#ef6c00");
+  const liveCover = await coverOf(LIVE, "#00838f");
   const cover = await upload(await pair(1600, 1067, "#1565c0"), { caption_th: "ปกที่อัปโหลด", caption_en: "Uploaded cover" });
   const g1 = await upload(await pair(1600, 1200, "#2e7d32"), { caption_th: "ทะเลสาบ", caption_en: "Lake" });
   const g2 = await upload(await pair(1200, 800, "#6a1b9a"));
   const ids = [cover.upload_id, g1.upload_id, g2.upload_id];
   const saved = JSON.parse(backend.handle(JSON.stringify({ action: "adminSavePlaceUploads", token: EDITOR, payload: { place_id: P1, expected_ids: ids, order: ids, cover_id: cover.upload_id, captions: {} } })));
   assert.equal(saved.ok, true, JSON.stringify(saved));
-  return { backend, cover, g1, g2 };
+  return { backend, cover, g1, g2, nearbyCover, liveCover };
 }
 
 // ---- local server for public/ + a cards harness ----
@@ -74,8 +87,9 @@ function startServer() {
 <script src="/js/config.js"></script><script src="/js/api.js"></script><script src="/js/media.js"></script>
 <script>
   const render = (id, options) => TakhunMedia.renderImage(document.getElementById(id), Object.assign({ lang: "th", sizes: "100vw" }, options));
-  render("p1-card", { mediaId: TakhunMedia.mediaIdFor("place", ${JSON.stringify(P1)}), type: "place", role: "cover", decorative: true });
-  render("p2-card", { mediaId: TakhunMedia.mediaIdFor("place", ${JSON.stringify(P2)}), type: "place", role: "cover", decorative: true });
+  // Cards load lazily, exactly like places.js / home.js (the live FAIL 1: a lazy image off the page never loads).
+  render("p1-card", { mediaId: TakhunMedia.mediaIdFor("place", ${JSON.stringify(P1)}), type: "place", role: "cover", decorative: true, loading: "lazy" });
+  render("p2-card", { mediaId: TakhunMedia.mediaIdFor("place", ${JSON.stringify(P2)}), type: "place", role: "cover", decorative: true, loading: "lazy" });
   render("p1-hero", { mediaId: TakhunMedia.mediaIdFor("place", ${JSON.stringify(P1)}), type: "place", role: "hero", fallbackAlt: "P1" });
   render("product-card", { mediaId: TakhunMedia.mediaIdFor("product", "PROD-001"), type: "product", role: "product", decorative: true });
 </script></body></html>`;
@@ -95,9 +109,11 @@ function startServer() {
 // scenario: { origin: true|false, api: "ok"|"error"|"malformed"|"hang", images: "ok"|"broken" }
 async function load(base, pagePath, scenario, fixtures, evaluate) {
   const seen = { uploads: [], api: [] };
+  const width = scenario.width || 1280;
   return withCdpBrowser(browser, { timeoutMs: 20000, commandTimeoutMs: 60000 }, async (session) => {
     await session.send("Page.enable");
     await session.send("Runtime.enable");
+    await session.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: width < 900, screenWidth: width, screenHeight: 900 });
     await session.send("Fetch.enable", { patterns: [{ urlPattern: base + "/js/config.js" }, { urlPattern: base + "/assets/media/manifest/media-manifest.json" }, { urlPattern: "https://script.google.com/*" }, { urlPattern: ORIGIN + "/*" }] });
     const fulfill = (requestId, status, body, type) => session.send("Fetch.fulfillRequest", { requestId, responseCode: status, responseHeaders: [{ name: "content-type", value: type }, { name: "access-control-allow-origin", value: "*" }], body: Buffer.from(body).toString("base64") }).catch(() => {});
     session.waitForEvent("Fetch.requestPaused", (event) => {
@@ -117,6 +133,8 @@ async function load(base, pagePath, scenario, fixtures, evaluate) {
           if (scenario.api === "error") { fulfill(event.requestId, 500, "error", "text/plain"); return false; }
           if (scenario.api === "malformed") { fulfill(event.requestId, 200, '{"ok":true,"data":{"covers":{"' + P1 + '":{"key_large":"https://evil.example/x.webp"}}}}', "application/json"); return false; }
           fulfill(event.requestId, 200, fixtures.backend.handleGet(parameter), "application/json");
+        } else if (parameter.action === "getPlaces") {
+          fulfill(event.requestId, 200, JSON.stringify(PLACES_FIXTURES[parameter.lang === "en" ? "en" : "th"]), "application/json");
         } else if (parameter.action === "getPlaceDetail") {
           fulfill(event.requestId, 200, JSON.stringify({ ok: true, data: fixtures.place, message: "success" }), "application/json");
         } else {
@@ -151,6 +169,11 @@ const detailEval = (scenario) => `(async () => {
   await until(() => document.querySelector("[data-detail-content]") && !document.querySelector("[data-detail-content]").hidden && document.querySelector("[data-detail-hero-media] [data-media-runtime]"), 10000);
   const expectUploaded = ${JSON.stringify(Boolean(scenario.expectUploaded))};
   if (expectUploaded) await until(() => document.querySelector("[data-detail-hero-media] [data-media-runtime=uploaded]") && document.querySelectorAll("[data-detail-gallery] [data-upload-gallery]").length === 2, 8000);
+  // Nearby cards are lazy: their uploaded covers load only once they come near the screen.
+  const nearbySection = document.querySelector("[data-detail-nearby]");
+  if (nearbySection && !nearbySection.hidden) nearbySection.scrollIntoView();
+  if (expectUploaded) await until(() => document.querySelector(".detail-nearby-card__media [data-media-runtime=uploaded]"), 8000);
+  window.scrollTo(0, 0);
   await sleep(${scenario.api === "hang" ? 4600 : 900});
   const hero = document.querySelector("[data-detail-hero-media]");
   const gallery = document.querySelector("[data-detail-gallery]");
@@ -160,7 +183,16 @@ const detailEval = (scenario) => `(async () => {
     heroRuntime: hero.querySelector("[data-media-runtime]").getAttribute("data-media-runtime"),
     heroImg: (() => { const img = hero.querySelector("img"); return img ? { src: img.getAttribute("src"), srcset: img.getAttribute("srcset"), alt: img.alt, complete: img.complete && img.naturalWidth > 0 } : null; })(),
     galleryHidden: gallery.hidden,
-    galleryItems: Array.from(gallery.querySelectorAll(".detail-gallery__item")).map((button) => { const img = button.querySelector("img"); return { uploaded: button.hasAttribute("data-upload-gallery"), label: button.getAttribute("aria-label"), alt: img ? img.alt : "", src: img ? img.getAttribute("src") : "" }; })
+    nearbyRuntime: Array.from(document.querySelectorAll(".detail-nearby-card__media [data-media-runtime]")).map((n) => n.getAttribute("data-media-runtime") + " " + (n.querySelector ? "" : "") + (n.getAttribute("src") || (n.querySelector("img") || {}).getAttribute?.("src") || "")),
+    galleryStyle: (() => {
+      const button = gallery.querySelector("[data-upload-gallery]"), grid = button && button.parentElement;
+      if (!button) return null;
+      const style = getComputedStyle(button), buttons = Array.from(grid.children).map((b) => b.getBoundingClientRect());
+      return { gridClass: grid.className, display: getComputedStyle(grid).display, columns: getComputedStyle(grid).gridTemplateColumns.split(" ").length,
+        border: style.borderTopWidth, radius: parseFloat(style.borderTopLeftRadius), sameRow: buttons.length > 1 && Math.round(buttons[0].top) === Math.round(buttons[1].top),
+        uploadedLikeManifest: Array.from(grid.children).every((b) => b.className === grid.children[0].className) };
+    })(),
+    galleryItems: Array.from(gallery.querySelectorAll(".detail-gallery__button")).map((button) => { const img = button.querySelector("img"); return { uploaded: button.hasAttribute("data-upload-gallery"), label: button.getAttribute("aria-label"), alt: img ? img.alt : "", src: img ? img.getAttribute("src") : "" }; })
   };
   const uploadedButton = gallery.querySelector("[data-upload-gallery]");
   if (uploadedButton) {
@@ -182,8 +214,9 @@ const cardsEval = (scenario) => `(async () => {
 })()`;
 
 (async () => {
-  const { backend, cover, g1, g2 } = await seededBackend();
   const place = contentPlace(P1);
+  const NB = place.nearby_place_ids[0];
+  const { backend, cover, g1, g2, nearbyCover, liveCover } = await seededBackend(NB);
   place.gallery_media_ids = ["place-qa-manifest-gallery-1"];
   const fixtures = { backend, manifest: manifestFixture(), place };
   const server = await startServer();
@@ -192,6 +225,9 @@ const cardsEval = (scenario) => `(async () => {
     const detail = (scenario) => load(base, "/place-detail.html?id=" + encodeURIComponent(P1), scenario, fixtures, detailEval);
     const cards = (scenario) => load(base, "/__cards.html", scenario, fixtures, cardsEval);
 
+    // UPLOADS_TEST_ONLY=detail,cards,places runs only those sections (used to show which section catches a regression).
+    const only = (process.env.UPLOADS_TEST_ONLY || "detail,cards,places").split(",");
+    if (only.includes("detail")) {
     // --- place detail page ---
     const today = await detail({ origin: false, api: "ok", images: "ok" });
     assert.deepEqual(today.seen.uploads, [], "no MEDIA_ORIGIN: no getPlaceUploads call at all");
@@ -199,7 +235,7 @@ const cardsEval = (scenario) => `(async () => {
     assert.deepEqual(today.galleryItems.map((item) => item.uploaded), [false], "today: manifest gallery only");
 
     const live = await detail({ origin: true, api: "ok", images: "ok", expectUploaded: true });
-    assert.deepEqual(live.seen.uploads, [P1], "exactly one getPlaceUploads call, for this place");
+    assert.deepEqual(live.seen.uploads.slice().sort(), ["", P1], "two calls on the place page: this place (hero + gallery) and the covers (nearby cards)");
     assert.equal(live.heroRuntime, "uploaded");
     assert.equal(live.heroImg.src, ORIGIN + "/" + cover.key_large);
     assert.equal(live.heroImg.srcset, `${ORIGIN}/${cover.key_small} 800w, ${ORIGIN}/${cover.key_large} 1600w`);
@@ -211,17 +247,26 @@ const cardsEval = (scenario) => `(async () => {
     assert.equal(live.galleryItems[1].label, "ทะเลสาบ");
     assert.ok(live.galleryItems[2].alt.length > 0, "a photo without caption still has alt text");
     assert.deepEqual(live.lightbox, { src: ORIGIN + "/" + g1.key_large, alt: "ทะเลสาบ" });
-    assert.deepEqual(live.nearbyMedia, today.nearbyMedia, "nearby cards keep their manifest covers (one call per page)");
+    assert.ok(live.nearbyRuntime.includes("uploaded " + ORIGIN + "/" + nearbyCover.key_large), "the nearby card with an uploaded cover shows it: " + JSON.stringify(live.nearbyRuntime));
+    // FAIL 2: uploaded gallery items look like the existing gallery (same classes, no button border, rounded, grid).
+    assert.deepEqual([live.galleryStyle.gridClass, live.galleryStyle.display, live.galleryStyle.border, live.galleryStyle.uploadedLikeManifest], ["detail-gallery-grid", "grid", "0px", true], JSON.stringify(live.galleryStyle));
+    assert.ok(live.galleryStyle.radius > 0, "rounded corners");
+    assert.deepEqual([live.galleryStyle.columns, live.galleryStyle.sameRow], [3, true], "3 columns on desktop");
+    const phone = await detail({ origin: true, api: "ok", images: "ok", expectUploaded: true, width: 360 });
+    assert.deepEqual([phone.galleryStyle.columns, phone.galleryStyle.border], [1, "0px"], "1 column on a phone, no border");
+    assert.ok(phone.galleryStyle.radius > 0);
 
     for (const scenario of [{ api: "error" }, { api: "malformed" }, { api: "hang" }, { api: "ok", images: "broken" }]) {
       const fallback = await detail(Object.assign({ origin: true, images: "ok" }, scenario));
       const label = JSON.stringify(scenario);
-      assert.deepEqual(fallback.seen.uploads, [P1], label + ": one call");
+      assert.deepEqual(fallback.seen.uploads.slice().sort(), ["", P1], label + ": the same two calls");
       assert.equal(fallback.hero, today.hero, label + ": hero identical to today");
       assert.equal(fallback.gallery, today.gallery, label + ": gallery identical to today");
       assert.deepEqual(fallback.nearbyMedia, today.nearbyMedia, label + ": nearby identical to today");
     }
 
+    }
+    if (only.includes("cards")) {
     // --- cards (home / places / map / search all use the same renderer) ---
     const cardsToday = await cards({ origin: false, api: "ok", images: "ok" });
     assert.deepEqual(cardsToday.seen.uploads, []);
@@ -234,6 +279,29 @@ const cardsEval = (scenario) => `(async () => {
     for (const scenario of [{ api: "error" }, { api: "hang" }, { api: "ok", images: "broken" }]) {
       const fallback = await cards(Object.assign({ origin: true, images: "ok" }, scenario));
       for (const id of ["p1", "p2", "hero", "product"]) assert.equal(fallback[id].html, cardsToday[id].html, JSON.stringify(scenario) + " " + id);
+    }
+    }
+    if (only.includes("places")) {
+    // --- the real places.html with the live staging getPlaces answers (FAIL 1) ---
+    const placesEval = (scenario) => `(async () => {
+      ${settleScript(0)}
+      await until(() => document.querySelector(".place-card [data-media-runtime]"), 10000);
+      if (${JSON.stringify(Boolean(scenario.expectUploaded))}) await until(() => document.querySelector(".place-card [data-media-runtime=uploaded]"), 8000);
+      await sleep(${scenario.api === "hang" ? 4600 : 900});
+      const card = document.querySelector(".place-card");
+      const runtime = card.querySelector("[data-media-runtime]"), img = card.querySelector("img");
+      return JSON.stringify({ count: document.querySelectorAll(".place-card").length, html: html(card.querySelector("[data-media-runtime]").parentElement), runtime: runtime.getAttribute("data-media-runtime"), src: img && img.getAttribute("src") });
+    })()`;
+    const places = (scenario) => load(base, "/places.html", scenario, fixtures, placesEval);
+    const placesToday = await places({ origin: false, api: "ok", images: "ok" });
+    assert.deepEqual([placesToday.count, placesToday.seen.uploads], [1, []]);
+    const placesLive = await places({ origin: true, api: "ok", images: "ok", expectUploaded: true });
+    assert.deepEqual(placesLive.seen.uploads, [""], "one covers call for the places page");
+    assert.deepEqual([placesLive.runtime, placesLive.src], ["uploaded", ORIGIN + "/" + liveCover.key_large], "the QA-B01b card shows its uploaded cover");
+    for (const scenario of [{ api: "error" }, { api: "ok", images: "broken" }]) {
+      const fallback = await places(Object.assign({ origin: true, images: "ok" }, scenario));
+      assert.equal(fallback.html, placesToday.html, JSON.stringify(scenario) + ": places card identical to today");
+    }
     }
     console.log("Public upload layer real-path check passed (detail page + cards; no origin / error / malformed / 4 s timeout / broken image = today).");
   } finally {

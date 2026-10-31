@@ -80,15 +80,17 @@
   }
 
   // ---- uploaded place photos (task 13; spec T6, T12, D12, criterion 15) ----
-  // Only with an https APP_CONFIG.MEDIA_ORIGIN; one getPlaceUploads call per page (list mode: every cover; detail mode:
-  // usePlaceUploads(id) first, then that place's cover and gallery). Any failure, timeout or malformed answer = no
-  // uploads, so the page stays exactly as it is without this layer. A cover is swapped in only after it has loaded.
+  // Only with an https APP_CONFIG.MEDIA_ORIGIN. At most one call of each kind per page: list mode (every published
+  // cover, for cards) and, on a place page after usePlaceUploads(id), detail mode (that place's cover + gallery); the
+  // place page's nearby cards use the list call. Any failure, timeout or malformed answer = no uploads, so the page
+  // stays exactly as it is without this layer. A cover is swapped in only after it has loaded; a lazy card starts
+  // loading its uploaded cover only when it comes near the screen (as the browser would for the lazy image).
   const UPLOAD_KEY = /^uploads\/places\/([a-z0-9][a-z0-9-]{0,63})\/([a-f0-9]{32})-(800|1600)\.(webp|jpg)$/;
   const PLACE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
   const PHOTO_KEYS = ["caption_en", "caption_th", "format", "height", "height_small", "key_large", "key_small", "width", "width_small"];
   const NO_UPLOADS = Object.freeze({ covers: new Map(), gallery: new Map() });
   let uploadsScope = "";
-  let uploads = null;
+  const uploadsCache = new Map(); // "" = list mode, place id = detail mode
 
   function mediaOrigin() {
     let config = global.APP_CONFIG;
@@ -128,16 +130,32 @@
 
   // Detail pages call this before rendering, so the single call also brings the gallery.
   function usePlaceUploads(placeId) {
-    if (!uploads && PLACE_ID.test(String(placeId || ""))) uploadsScope = String(placeId);
+    if (!uploadsScope && PLACE_ID.test(String(placeId || ""))) uploadsScope = String(placeId);
   }
 
-  function loadUploads() {
-    if (uploads) return uploads;
-    const origin = mediaOrigin();
-    const scope = uploadsScope;
-    if (!origin || typeof global.TakhunApi?.getPlaceUploads !== "function") { uploads = Promise.resolve(NO_UPLOADS); return uploads; }
-    uploads = Promise.resolve().then(() => global.TakhunApi.getPlaceUploads(scope)).then((data) => normalizeUploads(data, scope)).catch(() => NO_UPLOADS);
-    return uploads;
+  function loadUploads(scope = "") {
+    if (uploadsCache.has(scope)) return uploadsCache.get(scope);
+    let pending;
+    if (!mediaOrigin() || typeof global.TakhunApi?.getPlaceUploads !== "function") pending = Promise.resolve(NO_UPLOADS);
+    else pending = Promise.resolve().then(() => global.TakhunApi.getPlaceUploads(scope)).then((data) => normalizeUploads(data, scope)).catch(() => NO_UPLOADS);
+    uploadsCache.set(scope, pending);
+    return pending;
+  }
+
+  // The scoped place uses the detail call; every other place (cards, nearby) the list call.
+  function uploadsFor(placeLower) {
+    return loadUploads(uploadsScope && cleanId(uploadsScope) === placeLower ? uploadsScope : "");
+  }
+
+  // Lazy cards: wait until the card is near the screen before loading its uploaded cover (no page-speed cost).
+  function whenNear(mount, options, callback) {
+    if (options.loading !== "lazy" || typeof global.IntersectionObserver !== "function") { callback(); return; }
+    const observer = new global.IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      callback();
+    }, { rootMargin: "300px" });
+    observer.observe(mount);
   }
 
   function uploadedImage(photo, options, onError) {
@@ -158,7 +176,7 @@
 
   // The uploaded photos of one place for its gallery, in sort order, without the cover (decision: never repeated).
   function uploadedGallery(placeId) {
-    return loadUploads().then((data) => data.gallery.get(cleanId(placeId)) || []);
+    return (uploadsScope && cleanId(uploadsScope) === cleanId(placeId) ? loadUploads(uploadsScope) : Promise.resolve(NO_UPLOADS)).then((data) => data.gallery.get(cleanId(placeId)) || []);
   }
 
   // Gallery and lightbox images: on an error the caller's onError runs (the detail page removes the item).
@@ -243,10 +261,13 @@
     // the manifest picture (or the placeholder) comes back, exactly as without uploads.
     const coverMatch = options.type === "place" && ["cover", "hero", "card"].includes(role) ? /^place-(.+)-cover$/.exec(String(options.mediaId || "")) : null;
     if (coverMatch) {
-      loadUploads().then((data) => {
+      uploadsFor(coverMatch[1]).then((data) => {
         const photo = data.covers.get(coverMatch[1]);
         if (!photo || mount._takhunMediaGeneration !== generation) return;
-        const image = uploadedImage(photo, options, null);
+        whenNear(mount, options, () => {
+        if (mount._takhunMediaGeneration !== generation) return;
+        // Loaded off the page first (eager: it is already near the screen), swapped in only once it has loaded.
+        const image = uploadedImage(photo, { ...options, loading: "eager" }, null);
         image.setAttribute("data-media-runtime", "uploaded");
         image.addEventListener("load", () => {
           if (mount._takhunMediaGeneration !== generation || !mount.isConnected) return;
@@ -258,6 +279,7 @@
             showManifest();
           }, { once: true });
         }, { once: true });
+        });
       });
     }
     loadManifest().then(() => {

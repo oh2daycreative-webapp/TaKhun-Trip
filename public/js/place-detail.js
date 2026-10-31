@@ -242,7 +242,7 @@
       const name = localized(place, "name", lang);
       for (const photo of photos) {
         const caption = lang === "en" ? photo.caption_en || photo.caption_th : photo.caption_th;
-        const button = make("button", "detail-gallery__item");
+        const button = make("button", "detail-gallery__button");
         button.type = "button";
         button.setAttribute("data-upload-gallery", "");
         button.setAttribute("aria-label", caption || format("place_detail.image_alt", { name }));
@@ -265,13 +265,13 @@
     mount.replaceChildren();
     const generation = Number(mount._takhunGalleryGeneration || 0) + 1;
     mount._takhunGalleryGeneration = generation;
-    const grid = make("div", "detail-gallery__grid");
+    const grid = make("div", "detail-gallery-grid");
     if (!ids.length || !global.TakhunMedia?.pictureModelForEntityRole || !global.TakhunMedia?.loadManifest) { appendUploadedGallery(mount, place, lang, generation, grid); return; }
     global.TakhunMedia.loadManifest().then(() => {
       if (mount._takhunGalleryGeneration !== generation) return;
       for (const mediaId of ids) {
         if (!global.TakhunMedia.pictureModelForEntityRole(mediaId, "place", place.place_id, "gallery", lang)) continue;
-        const button = make("button", "detail-gallery__item");
+        const button = make("button", "detail-gallery__button");
         button.type = "button";
         button.setAttribute("aria-label", format("place_detail.image_alt", { name: localized(place, "name", lang) }));
         const media = make("span", "detail-gallery__media");
