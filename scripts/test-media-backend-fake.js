@@ -48,7 +48,7 @@ function fakeSheet(name, rows) {
 }
 
 // admins: { token: { admin_id, role } }. Returns { handle(bodyText) → response text, table(name), objects, props }.
-function createBackend({ placeId, placeStatus = "published", admins, props: extraProps = {} }) {
+function createBackend({ placeId, placeStatus = "published", admins, props: extraProps = {}, validAccessKeyId = "AKIDTEST" }) {
   const props = Object.assign({ SPREADSHEET_ID: "staging-spreadsheet-id", MEDIA_UPLOAD_ENABLED: "true",
     R2_ACCOUNT_ID: "0123456789abcdef0123456789abcdef", R2_BUCKET: "takhun-media-staging", R2_ACCESS_KEY_ID: "AKIDTEST", R2_SECRET_ACCESS_KEY: "sEcReT/test+key=" }, extraProps);
   const objects = new Map();
@@ -76,6 +76,9 @@ function createBackend({ placeId, placeStatus = "published", admins, props: extr
     },
     UrlFetchApp: { fetch: (url, options) => {
       const key = url.split("/takhun-media-staging/")[1];
+      // R2 refuses a request signed with any other access key id (live staging answered 400 to a wrong key).
+      const authorization = options.headers && (options.headers.Authorization || options.headers.authorization) || "";
+      if (!authorization.includes("Credential=" + validAccessKeyId + "/")) return { getResponseCode: () => 400, getHeaders: () => ({}) };
       let status;
       if (options.method === "put") { objects.set(key, options.payload.length); status = 200; }
       else if (options.method === "delete") { objects.delete(key); status = 204; }

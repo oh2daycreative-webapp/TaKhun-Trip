@@ -56,6 +56,7 @@ $required = @(
   "public/admin/js/admin-place-media.js",
   "public/admin/js/admin-image-resize.js",
   "public/admin/js/admin-place-uploads.js",
+  "public/admin/js/admin-media-storage-test.js",
   "public/admin/js/admin-place-edit.js",
   "public/admin/js/admin-gallery.js",
   "public/admin/js/admin-reviews.js",
@@ -212,6 +213,8 @@ if ($LASTEXITCODE -ne 0) { throw "Admin Settings API verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin Settings UI verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-settings-browser.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Settings native browser verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-media-storage-test-ui.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin media storage connection test UI verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-review-service.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Review service verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-reviews-api.js")
