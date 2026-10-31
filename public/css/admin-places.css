@@ -110,11 +110,11 @@
 .admin-uploads__read-error { margin: .5rem 0; }
 .admin-uploads__alert p, .admin-uploads__conflict p, .admin-uploads__pending p { margin: 0 0 .5rem; }
 .admin-uploads__notice { margin: .75rem 0; padding: .75rem 1rem; border-left: 4px solid var(--color-primary); background: var(--color-surface); color: var(--color-primary-dark); }
-.admin-place-media__upload-note { margin: 0; padding: .5rem .75rem; border-left: 4px solid var(--color-primary); background: var(--color-surface); color: var(--color-primary-dark); }
+.admin-place-media__upload-note { margin: .75rem 0 0; padding: .5rem .75rem; border-left: 4px solid var(--color-primary); background: var(--color-surface); color: var(--color-primary-dark); }
 .admin-uploads .button { min-height: 44px; }
 .admin-uploads__picker { margin: .75rem 0; }
 .admin-uploads__pick, .admin-place-edit .admin-uploads__pick { position: relative; display: inline-flex; align-items: center; justify-content: center; min-height: 44px; max-width: 100%; margin: 0; box-sizing: border-box; cursor: pointer; }
-.admin-uploads__pick.is-disabled { opacity: .55; cursor: not-allowed; }
+
 .admin-uploads__input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: inherit; }
 .admin-uploads__input:focus-visible + *, .admin-uploads__pick:focus-within { outline: 3px solid var(--color-primary-dark); outline-offset: 2px; }
 .admin-uploads__queue { display: grid; gap: .35rem; margin: .5rem 0 1rem; padding-left: 1.25rem; }
@@ -122,7 +122,8 @@
 .admin-uploads__queue-name { font-weight: 700; min-width: 0; }
 .admin-uploads__queue-item--uploading .admin-uploads__queue-state, .admin-uploads__queue-item--resizing .admin-uploads__queue-state { color: var(--color-primary-dark); font-weight: 800; }
 .admin-uploads__queue-item--failed .admin-uploads__queue-state, .admin-uploads__queue-item--uncertain .admin-uploads__queue-state { color: #a61b1b; font-weight: 800; }
-.admin-uploads__queue-item--done .admin-uploads__queue-state, .admin-uploads__queue-item--duplicate .admin-uploads__queue-state { color: #1b6e35; font-weight: 800; }
+.admin-uploads__queue-item--done .admin-uploads__queue-state { color: #1b6e35; font-weight: 800; }
+.admin-uploads__queue-item--duplicate .admin-uploads__queue-state, .admin-uploads__queue-item--skipped .admin-uploads__queue-state { color: #8a5a00; font-weight: 800; }
 /* The edit page stacks label contents (.admin-place-edit label { display: grid }); radios stay inline with their text. */
 .admin-uploads__cover, .admin-uploads__no-cover, .admin-place-edit .admin-uploads__cover, .admin-place-edit .admin-uploads__no-cover { display: flex; flex-direction: row; align-items: center; gap: .5rem; min-height: 44px; margin: .25rem 0; cursor: pointer; }
 .admin-uploads__list { display: grid; gap: 1rem; margin: 0; padding: 0; list-style: none; }
@@ -141,10 +142,11 @@
 /* Danger button: red outline on white; disabled stays readable (grey on light grey, no fading). */
 .admin-uploads .button.admin-uploads__delete { border: 2px solid #a61b1b; background: #fff; color: #a61b1b; }
 .admin-uploads .button.admin-uploads__delete:hover:not(:disabled) { background: #a61b1b; color: #fff; }
-.admin-uploads .button.admin-uploads__delete:disabled { border-color: #8a8a8a; background: #f2f2f2; color: #4a4a4a; opacity: 1; transform: none; box-shadow: none; }
+/* Every disabled button in the photos section (delete, up/down, save...) uses one readable style, never faded. */
+.admin-uploads .button:disabled, .admin-uploads .button.admin-uploads__delete:disabled, .admin-uploads__pick.is-disabled { border: 2px solid #8a8a8a; background: #f2f2f2; color: #4a4a4a; opacity: 1; transform: none; box-shadow: none; cursor: not-allowed; }
 .admin-uploads__savebar { position: sticky; bottom: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: 1rem; padding: .75rem; border: 2px solid var(--color-primary); border-radius: var(--radius-sm); background: #fff; }
 .admin-uploads__savebar p { flex: 1 1 100%; margin: 0; font-weight: 700; }
-.admin-uploads button:disabled { cursor: not-allowed; opacity: .55; }
+.admin-uploads button:disabled { cursor: not-allowed; }
 .admin-uploads :focus-visible { outline: 3px solid var(--color-primary-dark); outline-offset: 2px; }
 @media (min-width: 720px) {
   .admin-uploads__item { grid-template-columns: minmax(160px, 240px) minmax(0, 1fr); align-items: start; }

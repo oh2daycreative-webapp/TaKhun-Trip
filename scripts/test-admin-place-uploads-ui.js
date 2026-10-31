@@ -238,6 +238,26 @@ window.__run = async () => {
   const host2 = document.getElementById("host"); host2.innerHTML = '<section hidden></section>';
   await window.TakhunAdminPlaceUploads.init({ root: host2.firstChild, api: window.TakhunAdminApi, resize: window.TakhunImageResize, token: "T".repeat(43), placeId: PLACE, archived: false, mediaOrigin: "" });
   out.ux.readError = box(host2);
+  // 18. polish: the queue clears when a new action starts; duplicate line uses the warning colour; disabled up/down readable
+  ({ root: r, controller: c } = await mount());
+  const up = $(r, "li[data-upload-id='UPL-1'] [data-role=up]");
+  out.polish = { upDisabled: up.disabled, upContrast: contrast(up), upOpacity: opacity(up) };
+  server.uploadPlan = ["dup"]; pickFiles(r, ["02-landscape.jpg"]); await settle(); await settle();
+  const dupState = $(r, ".admin-uploads__queue-item--duplicate .admin-uploads__queue-state");
+  out.polish.dupColor = dupState ? getComputedStyle(dupState).color : "";
+  out.polish.queueBefore = texts(r, ".admin-uploads__queue-item");
+  server.deletePlan = ["ok"]; $(r, "[data-role=delete]").click(); await settle();
+  out.polish.afterDelete = { queue: texts(r, ".admin-uploads__queue-item"), hidden: !visible($(r, ".admin-uploads__queue")) };
+  server.uploadPlan = ["dup"]; pickFiles(r, ["02-landscape.jpg"]); await settle(); await settle();
+  $(r, "[data-role=down]") && $(r, "li [data-role=up]:not([disabled])") && $(r, "li [data-role=up]:not([disabled])").click();
+  out.polish.afterMove = texts(r, ".admin-uploads__queue-item").length;
+  $(r, ".admin-uploads__discard").click();
+  out.polish.afterDiscard = texts(r, ".admin-uploads__queue-item").length;
+  server.uploadPlan = ["dup"]; pickFiles(r, ["02-landscape.jpg"]); await settle(); await settle();
+  $(r, ".admin-uploads__no-cover span").click(); // one photo left (the cover): clearing the cover is the unsaved change
+  out.polish.queueBeforeSave = texts(r, ".admin-uploads__queue-item").length;
+  $(r, ".admin-uploads__save").click(); await settle();
+  out.polish.afterSave = texts(r, ".admin-uploads__queue-item").length;
   // 16. phone width: no sideways scroll, touch-size buttons
   ({ root: r, controller: c } = await mount());
   $(r, "li[data-upload-id='UPL-1'] [data-role=down]").click();
@@ -375,9 +395,39 @@ function check(out, width) {
   expectBox(ux.uncertain, "warn", "⚠", "ไม่แน่ใจผล");
   assert.equal(ux.alertIcon, "\"⚠ \"", "warnings carry an icon too");
   expectBox(ux.readError, "error", "✕", "โหลดรายการรูปไม่สำเร็จ · เกิดข้อผิดพลาดของระบบ กรุณาลองใหม่");
+  // polish round
+  assert.equal(out.polish.upDisabled, true);
+  assert.ok(out.polish.upContrast >= 4.5 && out.polish.upOpacity === 1, "disabled up readable: " + JSON.stringify(out.polish));
+  assert.equal(out.polish.dupColor, "rgb(138, 90, 0)", "duplicate line in the warning colour");
+  assert.deepEqual(out.polish.queueBefore, ["02-landscape.jpgมีรูปนี้อยู่แล้ว"]);
+  assert.deepEqual(out.polish.afterDelete, { queue: [], hidden: true }, "delete clears the old queue");
+  assert.equal(out.polish.afterDiscard, 0, "discard clears the queue");
+  assert.equal(out.polish.afterSave, 0, "save clears the queue");
+  assert.ok(out.polish.queueBeforeSave > 0, "the queue had a line before save");
   assert.ok(out.layout.scrollWidth <= out.layout.clientWidth, `no sideways scroll at ${width}px: ${out.layout.scrollWidth} > ${out.layout.clientWidth}`);
   assert.ok(out.layout.widest <= out.layout.clientWidth + 0.5, `nothing sticks out at ${width}px: ${out.layout.widest}`);
   assert.ok(out.layout.minButton >= 44, `touch-size buttons at ${width}px: ${out.layout.minButton}px`);
+}
+
+async function mediaLayout(width) {
+  return withCdpBrowser(browser, { timeoutMs: 20000, commandTimeoutMs: 30000 }, async (session) => {
+    await session.send("Page.enable");
+    await session.send("Emulation.setScriptExecutionDisabled", { value: true });
+    await session.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: width < 900, screenWidth: width, screenHeight: 900 });
+    const loaded = session.waitForEvent("Page.loadEventFired");
+    await session.send("Page.navigate", { url: url("public/admin/place-edit.html") });
+    await loaded;
+    await session.send("Emulation.setScriptExecutionDisabled", { value: false });
+    return session.evaluate(`(() => {
+      for (const node of document.querySelectorAll("[hidden]")) if (!node.closest("dialog") && !node.matches("input")) node.hidden = false;
+      for (const node of document.querySelectorAll("[aria-hidden=true]")) if (!node.closest("dialog") && !node.matches("input")) node.setAttribute("aria-hidden", "false");
+      document.body.classList.remove("admin-auth-pending");
+      const hero = document.querySelector(".admin-place-media__hero"), gallery = document.querySelector(".admin-place-media__gallery"), note = document.querySelector("[data-admin-place-media-upload-note]");
+      const a = hero.getBoundingClientRect(), b = gallery.getBoundingClientRect();
+      return { heroTop: Math.round(a.top), galleryTop: Math.round(b.top), heroLeft: Math.round(a.left), galleryLeft: Math.round(b.left), heroBottom: Math.round(a.bottom),
+        noteInHero: hero.contains(note), mountKeepsNote: !document.querySelector("[data-admin-place-media-hero]").contains(note) };
+    })()`);
+  });
 }
 
 function checkIntegration() {
@@ -394,11 +444,16 @@ function checkIntegration() {
   assert.match(edit, /archived:state\.archived, mediaOrigin:mediaOrigin\(\)/);
   assert.match(edit, /catch \(_uploadsError\) \{ state\.uploadsComponent = null; \}/, "a failure in the photos section never blocks the page");
   // The "สื่อ" section explains that an uploaded cover is used first (owner UX round).
-  assert.match(html, /<\/div><p class="admin-place-media__upload-note" data-admin-place-media-upload-note>[^<]*รูปภาพที่อัปโหลด[^<]*ใช้รูปนั้นเป็นรูปปกก่อน[^<]*<\/p>/);
+  assert.match(html, /<div class="admin-place-media__hero"><div data-admin-place-media-hero>[\s\S]*?<\/div><p class="admin-place-media__upload-note" data-admin-place-media-upload-note>[^<]*รูปภาพที่อัปโหลด[^<]*ใช้รูปนั้นเป็นรูปปกก่อน[^<]*<\/p><\/div><div class="admin-place-media__gallery">/);
 }
 
 (async () => {
   checkIntegration();
+  const desktop = await mediaLayout(1280), phone = await mediaLayout(360);
+  assert.equal(desktop.noteInHero, true, "the note sits inside the Hero box");
+  assert.equal(desktop.mountKeepsNote, true, "the note is outside the element the media script rewrites");
+  assert.ok(desktop.heroTop === desktop.galleryTop && desktop.galleryLeft > desktop.heroLeft, "Hero and Gallery side by side on desktop: " + JSON.stringify(desktop));
+  assert.ok(phone.galleryTop >= phone.heroBottom && phone.galleryLeft === phone.heroLeft, "stacked at phone width: " + JSON.stringify(phone));
   for (const [width, height] of [[1280, 900], [360, 800]]) check(await run(width, height), width);
   console.log("Admin place uploads UI native browser check passed at 1280x900 and 360x800.");
 })().catch((error) => { console.error(error.stack || error); process.exitCode = 1; });

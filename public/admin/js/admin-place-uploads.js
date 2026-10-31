@@ -167,6 +167,8 @@
       alert.replaceChildren(...state.warnings.map((entry) => make("p", "", entry)));
       alert.hidden = false;
     }
+    // The per-photo lines belong to one upload round; any new action starts with an empty list (owner polish).
+    function clearQueue() { state.queue = []; renderQueue(); }
     function clearWarnings() { state.warnings = []; alert.replaceChildren(); alert.hidden = true; }
     function applyList(data) {
       state.loaded = true; state.readError = false;
@@ -337,7 +339,7 @@
       if (state.busy || !canEdit() || !dirty()) return;
       const captions = captionsPayload();
       if (!captions) { say("คำบรรยายยาวเกิน 200 ตัวอักษร", "error"); return; }
-      state.busy = true; clearWarnings(); say("กำลังบันทึก", "info"); renderControls();
+      state.busy = true; clearWarnings(); clearQueue(); say("กำลังบันทึก", "info"); renderControls();
       try {
         const result = await api.savePlaceUploads(token, { place_id: placeId, expected_ids: serverIds(), order: state.order.slice(), cover_id: state.cover, captions });
         state.items = result.items.slice().sort((a, b) => a.sort_order - b.sort_order);
@@ -357,6 +359,7 @@
     function discard() {
       if (state.busy) return;
       resetLocal();
+      clearQueue();
       say("ยกเลิกการแก้ไขแล้ว", "info");
       render();
     }
@@ -365,7 +368,7 @@
       if (state.busy || dirty()) return;
       const index = state.order.indexOf(id);
       if (index < 0 || !confirmFn(`ลบรูปที่ ${index + 1} ออกจากเว็บไซต์และที่เก็บรูป? การลบย้อนกลับไม่ได้`)) return;
-      state.busy = true; clearWarnings(); say("กำลังลบรูป", "info"); renderControls();
+      state.busy = true; clearWarnings(); clearQueue(); say("กำลังลบรูป", "info"); renderControls();
       try {
         const result = await api.deletePlaceUpload(token, { place_id: placeId, upload_id: id, expected_ids: serverIds() });
         state.items = state.items.filter((item) => item.upload_id !== id);
@@ -387,7 +390,7 @@
 
     async function retryDeletes() {
       if (state.busy) return;
-      state.busy = true; say("กำลังลองลบไฟล์อีกครั้ง", "info"); renderControls();
+      state.busy = true; clearQueue(); say("กำลังลองลบไฟล์อีกครั้ง", "info"); renderControls();
       try {
         const result = await api.retryPlaceUploadDeletes(token, { place_id: placeId });
         state.deletePending = result.still_pending;
