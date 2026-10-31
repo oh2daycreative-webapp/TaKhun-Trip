@@ -48,13 +48,14 @@ function fakeSheet(name, rows) {
 }
 
 // admins: { token: { admin_id, role } }. Returns { handle(bodyText) → response text, table(name), objects, props }.
-function createBackend({ placeId, placeStatus = "published", admins, props: extraProps = {}, validAccessKeyId = "AKIDTEST" }) {
+// places: optional extra [place_id, status] rows. objects: key -> Buffer of the stored file (served by browser tests).
+function createBackend({ placeId, placeStatus = "published", places = [], admins, props: extraProps = {}, validAccessKeyId = "AKIDTEST" }) {
   const props = Object.assign({ SPREADSHEET_ID: "staging-spreadsheet-id", MEDIA_UPLOAD_ENABLED: "true",
     R2_ACCOUNT_ID: "0123456789abcdef0123456789abcdef", R2_BUCKET: "takhun-media-staging", R2_ACCESS_KEY_ID: "AKIDTEST", R2_SECRET_ACCESS_KEY: "sEcReT/test+key=" }, extraProps);
   const objects = new Map();
   const cache = new Map();
   const sheets = {
-    places: fakeSheet("places", [["place_id", "name_th", "status"], [placeId, "QA", placeStatus]]),
+    places: fakeSheet("places", [["place_id", "name_th", "status"], [placeId, "QA", placeStatus], ...places.map(([id, status]) => [id, "QA", status])]),
     media_uploads: fakeSheet("media_uploads", [UPLOAD_HEADERS]),
     activity_logs: fakeSheet("activity_logs", [AUDIT_HEADERS])
   };
@@ -80,7 +81,7 @@ function createBackend({ placeId, placeStatus = "published", admins, props: extr
       const authorization = options.headers && (options.headers.Authorization || options.headers.authorization) || "";
       if (!authorization.includes("Credential=" + validAccessKeyId + "/")) return { getResponseCode: () => 400, getHeaders: () => ({}) };
       let status;
-      if (options.method === "put") { objects.set(key, options.payload.length); status = 200; }
+      if (options.method === "put") { objects.set(key, toBuffer(options.payload)); status = 200; }
       else if (options.method === "delete") { objects.delete(key); status = 204; }
       else status = objects.has(key) ? 206 : 404;
       return { getResponseCode: () => status, getHeaders: () => ({}) };
@@ -90,8 +91,10 @@ function createBackend({ placeId, placeStatus = "published", admins, props: extr
   for (const file of fs.readdirSync(APPS_SCRIPT).filter((name) => name.endsWith(".gs"))) vm.runInContext(fs.readFileSync(path.join(APPS_SCRIPT, file), "utf8"), context, { filename: file });
   context.AuthService_requireAdmin_ = (token) => { if (!admins[token]) throw new Error("UNAUTHORIZED"); return admins[token]; };
   const handle = (bodyText) => context.routeRequest_("POST", { parameter: {}, postData: { contents: bodyText } }).text;
+  // Public GET (e.g. getPlaceUploads), exactly as the web app answers ?action=...&place_id=...
+  const handleGet = (parameter) => context.routeRequest_("GET", { parameter }).text;
   const table = (name) => { const [h, ...r] = sheets[name].values; return r.filter((row) => row.some((v) => v !== "")).map((row) => Object.fromEntries(h.map((k, i) => [k, row[i]]))); };
-  return { handle, table, objects, props };
+  return { handle, handleGet, table, objects, props };
 }
 
 module.exports = { createBackend };

@@ -223,17 +223,52 @@
     global.document.body.classList.add("has-modal");
     dialog.querySelector("[data-lightbox-close]")?.focus();
   }
+  function openUploadedLightbox(photo, name, trigger) {
+    const dialog = global.document.querySelector("[data-detail-lightbox]");
+    const media = dialog.querySelector("[data-lightbox-media]");
+    const lang = global.TakhunI18n?.getCurrentLang?.() || "th";
+    media.replaceChildren();
+    global.TakhunMedia.renderUploadedImage(media, photo, { className: "detail-lightbox__image", loading: "eager", sizes: "90vw", lang, fallbackAlt: format("place_detail.image_alt", { name }), onError: () => media.replaceChildren(fallbackMedia(name)) });
+    dialog._returnFocus = trigger; dialog.hidden = false; dialog.classList.add("is-open");
+    global.document.body.classList.add("has-modal");
+    dialog.querySelector("[data-lightbox-close]")?.focus();
+  }
+  // Uploaded photos come after the manifest gallery (D12), without the cover (owner decision), captions as alt text.
+  // An item whose image fails is removed, so a failure leaves the gallery exactly as it is without uploads.
+  function appendUploadedGallery(mount, place, lang, generation, grid) {
+    if (!global.TakhunMedia?.uploadedGallery || !global.TakhunMedia?.renderUploadedImage) return;
+    global.TakhunMedia.uploadedGallery(place.place_id).then((photos) => {
+      if (mount._takhunGalleryGeneration !== generation || !photos.length) return;
+      const name = localized(place, "name", lang);
+      for (const photo of photos) {
+        const caption = lang === "en" ? photo.caption_en || photo.caption_th : photo.caption_th;
+        const button = make("button", "detail-gallery__item");
+        button.type = "button";
+        button.setAttribute("data-upload-gallery", "");
+        button.setAttribute("aria-label", caption || format("place_detail.image_alt", { name }));
+        const media = make("span", "detail-gallery__media");
+        button.append(media);
+        const drop = () => { button.remove(); if (!grid.children.length) { mount.hidden = true; mount.replaceChildren(); } };
+        if (!global.TakhunMedia.renderUploadedImage(media, photo, { className: "detail-gallery__image", loading: "lazy", sizes: "(min-width: 900px) 33vw, (min-width: 600px) 50vw, 100vw", lang, fallbackAlt: format("place_detail.image_alt", { name }), onError: drop })) continue;
+        button.addEventListener("click", () => openUploadedLightbox(photo, name, button));
+        grid.append(button);
+      }
+      if (!grid.children.length) return;
+      if (!grid.isConnected) mount.append(heading("detail-gallery-title", t("place_detail.gallery")), grid);
+      mount.hidden = false;
+    });
+  }
   function renderGallery(place, lang) {
     const mount = global.document.querySelector("[data-detail-gallery]");
     const ids = Array.isArray(place.gallery_media_ids) ? place.gallery_media_ids : [];
     mount.hidden = true;
     mount.replaceChildren();
-    if (!ids.length || !global.TakhunMedia?.pictureModelForEntityRole || !global.TakhunMedia?.loadManifest) return;
     const generation = Number(mount._takhunGalleryGeneration || 0) + 1;
     mount._takhunGalleryGeneration = generation;
+    const grid = make("div", "detail-gallery__grid");
+    if (!ids.length || !global.TakhunMedia?.pictureModelForEntityRole || !global.TakhunMedia?.loadManifest) { appendUploadedGallery(mount, place, lang, generation, grid); return; }
     global.TakhunMedia.loadManifest().then(() => {
       if (mount._takhunGalleryGeneration !== generation) return;
-      const grid = make("div", "detail-gallery__grid");
       for (const mediaId of ids) {
         if (!global.TakhunMedia.pictureModelForEntityRole(mediaId, "place", place.place_id, "gallery", lang)) continue;
         const button = make("button", "detail-gallery__item");
@@ -245,9 +280,11 @@
         button.addEventListener("click", () => openLightbox(mediaId, localized(place, "name", lang), button, place.place_id));
         grid.append(button);
       }
-      if (!grid.children.length) return;
-      mount.append(heading("detail-gallery-title", t("place_detail.gallery")), grid);
-      mount.hidden = false;
+      if (grid.children.length) {
+        mount.append(heading("detail-gallery-title", t("place_detail.gallery")), grid);
+        mount.hidden = false;
+      }
+      appendUploadedGallery(mount, place, lang, generation, grid);
     });
   }
 
@@ -323,6 +360,7 @@
         const placeId = parsePlaceId(global.location.search);
         if (!validatePlaceId(placeId)) { currentPlace = null; global.document.title = t("place_detail.not_found_page_title"); setPageState(mounts, "not-found", root); return; }
         const lang = global.TakhunI18n?.getCurrentLang?.() || "th";
+        global.TakhunMedia?.usePlaceUploads?.(placeId); // one uploads call for this page: this place's cover + gallery
         const reviewsOn = reviewsEnabled();
         currentPlace = await global.TakhunApi.getPlaceDetail(placeId, { lang }, { mock: () => findPublishedPlace(placeId) });
         if (!currentPlace) { global.document.title = t("place_detail.not_found_page_title"); setPageState(mounts, "not-found", root); return; }

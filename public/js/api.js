@@ -166,6 +166,14 @@
     return get("getGallery", allowed, options);
   }
 
+  // Uploaded place photos (task 13): without a place id the published covers of every place, with one the cover and
+  // gallery of that place. A short timeout: the page never waits on it (media.js upgrades images when it answers).
+  const UPLOADS_TIMEOUT_MS = 4000;
+  function getPlaceUploads(placeId, options = {}) {
+    const params = placeId ? { place_id: placeId } : {};
+    return get("getPlaceUploads", params, { ...options, timeoutMs: UPLOADS_TIMEOUT_MS });
+  }
+
   function getReviews(placeId, params = {}, options = {}) {
     const allowed = { place_id: placeId };
     for (const key of ["page", "page_size"]) if (params?.[key] !== undefined) allowed[key] = params[key];
@@ -202,6 +210,7 @@
     getEvents,
     getEventDetail,
     getGallery,
+    getPlaceUploads,
     getReviews,
     searchAll,
     submitReview,
