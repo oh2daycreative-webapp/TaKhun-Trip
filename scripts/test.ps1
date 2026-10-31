@@ -150,6 +150,8 @@ foreach ($html in $htmlFiles) {
 if ($LASTEXITCODE -ne 0) { throw "Media pipeline verification failed." }
 & node (Join-Path $PSScriptRoot "test-media-uploads-real-path.js")
 if ($LASTEXITCODE -ne 0) { throw "Public upload layer real-path verification failed." }
+& node (Join-Path $PSScriptRoot "test-media-worker.mjs")
+if ($LASTEXITCODE -ne 0) { throw "Media Worker verification failed." }
 & node (Join-Path $PSScriptRoot "test-content-data.js")
 if ($LASTEXITCODE -ne 0) { throw "Canonical content data verification failed." }
 & node (Join-Path $PSScriptRoot "test-content-integration.js")
