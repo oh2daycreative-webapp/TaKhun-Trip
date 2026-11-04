@@ -74,6 +74,7 @@ window.TakhunImageResize = {
   MESSAGES: { DECODE: "เปิดรูปนี้ไม่ได้" },
   prepare: async (file) => {
     if (file.name.startsWith("wide")) throw Object.assign(new Error("รูปยาวหรือกว้างเกิน 4:1 กรุณาครอปรูปก่อนอัปโหลด"), { code: "ASPECT" });
+    if (file.name.startsWith("heic")) throw Object.assign(new Error("เบราว์เซอร์นี้เปิดไฟล์ HEIC ไม่ได้ กรุณาเลือกรูปแบบ JPEG (iPhone: การตั้งค่า > กล้อง > รูปแบบ > ความเข้ากันได้มากที่สุด)"), { code: "HEIC" });
     return { format: "webp", large: { bytes: new Uint8Array([82,73,70,70]), width: 1600, height: 1067 }, small: { bytes: new Uint8Array([82,73,70,70]), width: 800, height: 533 }, quality: { large: .82, small: .82 } };
   },
   toBase64: () => "UklGRg=="
@@ -108,6 +109,29 @@ const box = (r) => { const node = r.querySelector(".admin-uploads__result"); ret
 `;
 
 const scenarios = `
+// D24 condition 2: the phone hint after a failed upload round (shown only on a phone, only for failures a computer can help with).
+window.__runHint = async () => {
+  const out = {};
+  const hint = (r) => { const node = r.querySelector(".admin-uploads__result-hint"); return node && visible(node) ? node.textContent : ""; };
+  const round = async (files, plan) => {
+    const { root: r } = await mount();
+    server.uploadPlan = plan || [];
+    pickFiles(r, files); await settle(); await settle(); await settle();
+    return { hint: hint(r), text: (r.querySelector(".admin-uploads__result-text") || {}).textContent || "", role: r.querySelector(".admin-uploads__result").getAttribute("role") };
+  };
+  out.heic = await round(["heic-1.heic", "a.jpg"], ["ok"]);
+  out.storage = await round(["a.jpg"], [{ code: "STORAGE_ERROR" }]);
+  out.timeout = await round(["a.jpg"], [{ code: "TIMEOUT" }]);
+  out.success = await round(["a.jpg", "b.jpg"], ["ok", "ok"]);
+  out.aspectOnly = await round(["wide.jpg"]);
+  const { root: r } = await mount();
+  server.uploadPlan = [{ code: "STORAGE_ERROR" }]; pickFiles(r, ["a.jpg"]); await settle(); await settle();
+  r.querySelector("li [data-role=down]").click();
+  out.clearedOnNextAction = hint(r);
+  out.scrollWidth = document.documentElement.scrollWidth; out.clientWidth = document.documentElement.clientWidth;
+  return JSON.stringify(out);
+};
+
 window.__run = async () => {
   const out = {};
   // 1. normal load
@@ -258,6 +282,21 @@ window.__run = async () => {
   out.polish.queueBeforeSave = texts(r, ".admin-uploads__queue-item").length;
   $(r, ".admin-uploads__save").click(); await settle();
   out.polish.afterSave = texts(r, ".admin-uploads__queue-item").length;
+  // 19. D24 containment: a HEIC in a 3-photo pick is refused in the browser and never sent; the others upload;
+  //     leaving the page while an upload runs asks first (beforeunload)
+  ({ root: r, controller: c } = await mount());
+  server.gate = deferred();
+  pickFiles(r, ["a.jpg", "heic-1.heic", "b.jpg"]); await settle();
+  const leaving = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(leaving);
+  out.contain = { leaveAsked: leaving.defaultPrevented };
+  server.gate.resolve(); server.gate = null; await settle(); await settle();
+  out.contain.queue = texts(r, ".admin-uploads__queue-item");
+  out.contain.uploads = count("upload");
+  out.contain.items = c.snapshot().items.length;
+  const idle = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(idle);
+  out.contain.leaveAskedWhenIdle = idle.defaultPrevented;
   // 16. phone width: no sideways scroll, touch-size buttons
   ({ root: r, controller: c } = await mount());
   $(r, "li[data-upload-id='UPL-1'] [data-role=down]").click();
@@ -274,7 +313,8 @@ function page() {
 <script src="${url("public/admin/js/admin-place-uploads.js")}"></script><script>${harness}${scenarios}</script></body></html>`;
 }
 
-async function run(width, height) {
+const PHONE_UA = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Mobile Safari/537.36";
+async function run(width, height, options = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "takhun-uploads-ui-"));
   const file = path.join(directory, "uploads.html");
   fs.writeFileSync(file, page());
@@ -283,10 +323,11 @@ async function run(width, height) {
       await session.send("Page.enable");
       await session.send("Runtime.enable");
       await session.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: width < 900, screenWidth: width, screenHeight: height });
+      if (options.phone) await session.send("Emulation.setUserAgentOverride", { userAgent: PHONE_UA, userAgentMetadata: { brands: [{ brand: "Chromium", version: "150" }], fullVersion: "150.0.0.0", platform: "Android", platformVersion: "10", architecture: "", model: "K", mobile: true } });
       const loaded = session.waitForEvent("Page.loadEventFired");
       await session.send("Page.navigate", { url: pathToFileURL(file).href });
       await loaded;
-      return session.evaluate("window.__run()");
+      return session.evaluate(options.scenario || "window.__run()");
     }));
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
@@ -395,6 +436,12 @@ function check(out, width) {
   expectBox(ux.uncertain, "warn", "⚠", "ไม่แน่ใจผล");
   assert.equal(ux.alertIcon, "\"⚠ \"", "warnings carry an icon too");
   expectBox(ux.readError, "error", "✕", "โหลดรายการรูปไม่สำเร็จ · เกิดข้อผิดพลาดของระบบ กรุณาลองใหม่");
+  // D24 containment: HEIC never sent, the rest upload; leaving mid-upload asks first, not when idle
+  assert.equal(out.contain.leaveAsked, true, "beforeunload guard while uploading");
+  assert.equal(out.contain.leaveAskedWhenIdle, false, "no guard when idle");
+  assert.deepEqual(out.contain.queue, ["a.jpgอัปโหลดแล้ว", "heic-1.heicไม่สำเร็จ: เบราว์เซอร์นี้เปิดไฟล์ HEIC ไม่ได้ กรุณาเลือกรูปแบบ JPEG (iPhone: การตั้งค่า > กล้อง > รูปแบบ > ความเข้ากันได้มากที่สุด)", "b.jpgอัปโหลดแล้ว"]);
+  assert.equal(out.contain.uploads, 2, "the HEIC is never sent");
+  assert.equal(out.contain.items, 4);
   // polish round
   assert.equal(out.polish.upDisabled, true);
   assert.ok(out.polish.upContrast >= 4.5 && out.polish.upOpacity === 1, "disabled up readable: " + JSON.stringify(out.polish));
@@ -455,5 +502,17 @@ function checkIntegration() {
   assert.ok(desktop.heroTop === desktop.galleryTop && desktop.galleryLeft > desktop.heroLeft, "Hero and Gallery side by side on desktop: " + JSON.stringify(desktop));
   assert.ok(phone.galleryTop >= phone.heroBottom && phone.galleryLeft === phone.heroLeft, "stacked at phone width: " + JSON.stringify(phone));
   for (const [width, height] of [[1280, 900], [360, 800]]) check(await run(width, height), width);
+  // D24 condition 2: the phone hint
+  const HINT = "ถ้าอัปโหลดจากมือถือไม่ได้ ให้ใช้คอมพิวเตอร์";
+  const phoneHint = await run(360, 800, { phone: true, scenario: "window.__runHint()" });
+  assert.deepEqual([phoneHint.heic.hint, phoneHint.storage.hint, phoneHint.timeout.hint], [HINT, HINT, HINT], "phone: hint after a resize failure, an upload failure and an uncertain result: " + JSON.stringify(phoneHint));
+  assert.equal(phoneHint.timeout.text, "ไม่แน่ใจผล");
+  assert.equal(phoneHint.success.hint, "", "phone: no hint after full success");
+  assert.equal(phoneHint.aspectOnly.hint, "", "phone: no hint when only a file rule refused the photo (a computer would not help)");
+  assert.equal(phoneHint.clearedOnNextAction, "", "the hint goes with the next action");
+  assert.equal(phoneHint.heic.role, "status", "announced with the result box");
+  assert.ok(phoneHint.scrollWidth <= phoneHint.clientWidth, "no sideways scroll with the hint at 360 px");
+  const desktopHint = await run(1280, 900, { scenario: "window.__runHint()" });
+  assert.deepEqual([desktopHint.heic.hint, desktopHint.storage.hint, desktopHint.timeout.hint, desktopHint.success.hint], ["", "", "", ""], "desktop: never the phone hint");
   console.log("Admin place uploads UI native browser check passed at 1280x900 and 360x800.");
 })().catch((error) => { console.error(error.stack || error); process.exitCode = 1; });

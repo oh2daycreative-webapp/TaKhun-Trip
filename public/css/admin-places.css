@@ -99,6 +99,10 @@
 .admin-uploads__result[hidden] { display: none; }
 .admin-uploads__result-icon { flex: 0 0 auto; display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: #4f5b55; color: #fff; font-weight: 900; line-height: 1; }
 .admin-uploads__result-text { min-width: 0; overflow-wrap: anywhere; }
+.admin-uploads__result { flex-wrap: wrap; }
+/* D24: the phone hint sits on its own line under the result text, aligned with it. */
+.admin-uploads__result-hint { flex: 1 1 100%; margin-left: 2.2rem; font-weight: 800; }
+.admin-uploads__result-hint[hidden] { display: none; }
 .admin-uploads__result--ok { border-color: #1b6e35; background: #e8f5ec; color: #0f4d24; }
 .admin-uploads__result--ok .admin-uploads__result-icon { background: #1b6e35; }
 .admin-uploads__result--warn { border-color: #8a5a00; background: #fff4d6; color: #5c3c00; }

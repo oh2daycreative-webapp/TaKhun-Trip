@@ -64,6 +64,16 @@
     : ERROR_MESSAGES[error && error.code] || DEFAULT_ERROR;
   const isUncertain = (error) => Boolean(error && UNCERTAIN.includes(error.code));
   const captionLength = (text) => Array.from(String(text)).length;
+  // D24 condition 2 (spec v5.3): on a phone, a failed round also says to use a computer. Not for refusals a computer
+  // would not change (file rules, limits, switch off, rights, conflict).
+  const PHONE_HINT = "ถ้าอัปโหลดจากมือถือไม่ได้ ให้ใช้คอมพิวเตอร์";
+  const NOT_DEVICE_CODES = Object.freeze(["FILE_TYPE", "FILE_SIZE", "WIDTH", "ASPECT", "ROOM", "LIMIT_PLACE", "LIMIT_DAILY", "UPLOAD_DISABLED", "FORBIDDEN", "UNAUTHORIZED", "CONFLICT"]);
+  function isPhone() {
+    const nav = global.navigator || {};
+    if (nav.userAgentData && typeof nav.userAgentData.mobile === "boolean" && nav.userAgentData.mobile) return true;
+    const ua = String(nav.userAgent || "");
+    return /Android|iPhone|iPod|Mobile/i.test(ua) || (/Macintosh/.test(ua) && Number(nav.maxTouchPoints) > 1);
+  }
   // Every caught error is logged with its code only (never the token or file contents), so a failure is visible in
   // the browser console (task 11 live bug: a valid response was shown as an error with nothing in the console).
   function logError(step, error) {
@@ -101,7 +111,9 @@
     const statusIcon = make("span", "admin-uploads__result-icon");
     statusIcon.setAttribute("aria-hidden", "true");
     const statusText = make("span", "admin-uploads__result-text");
-    status.append(statusIcon, statusText);
+    const statusHint = make("span", "admin-uploads__result-hint", PHONE_HINT);
+    statusHint.hidden = true;
+    status.append(statusIcon, statusText, statusHint);
     const alert = make("div", "admin-uploads__alert");
     alert.setAttribute("role", "alert"); alert.hidden = true;
     const notice = make("p", "admin-uploads__notice"); notice.hidden = true;
@@ -154,9 +166,10 @@
     const canUpload = () => state.enabled && !state.archived && !state.conflict;
     const canEdit = () => !state.archived && !state.conflict;
     const ICONS = { ok: "✓", warn: "⚠", error: "✕", info: "ℹ" };
-    function say(text, tone) {
+    function say(text, tone, hint) {
       const kind = ICONS[tone] ? tone : "info";
       statusText.textContent = text || "";
+      statusHint.hidden = !(text && hint === true);
       statusIcon.textContent = text ? ICONS[kind] : "";
       status.dataset.tone = text ? kind : "";
       status.className = "admin-uploads__result" + (text ? " admin-uploads__result--" + kind : "");
@@ -283,7 +296,7 @@
     }
 
     // ---- actions ----
-    async function load(message, tone) {
+    async function load(message, tone, hint) {
       if (state.loading) return false;
       state.loading = true;
       readRetry.disabled = true;
@@ -293,7 +306,7 @@
         if (!data.can_write) { root.hidden = true; return false; }
         applyList(data);
         root.hidden = false;
-        if (message) say(message, tone || "ok");
+        if (message) say(message, tone || "ok", hint);
       } catch (error) {
         logError("load", error);
         state.readError = true;
@@ -308,9 +321,9 @@
       return state.loaded && !state.readError;
     }
 
-    async function reloadAfterUncertain(text) {
+    async function reloadAfterUncertain(text, hint) {
       warn(text);
-      await load(STATUS.uncertain, "warn");
+      await load(STATUS.uncertain, "warn", hint);
     }
 
     function move(id, step, role) {
@@ -406,7 +419,7 @@
       entry.state = "resizing"; entry.detail = ""; renderQueue();
       let prepared;
       try { prepared = await resize.prepare(entry.file); }
-      catch (error) { logError("resize", error); entry.state = "failed"; entry.detail = error && error.message || resize.MESSAGES.DECODE; renderQueue(); return "next"; }
+      catch (error) { logError("resize", error); entry.state = "failed"; entry.code = error && error.code || "DECODE"; entry.detail = error && error.message || resize.MESSAGES.DECODE; renderQueue(); return "next"; }
       const megabytes = ((prepared.large.bytes.length + prepared.small.bytes.length) / 1048576).toFixed(1);
       entry.state = "uploading"; entry.detail = `${megabytes} MB อาจใช้เวลาถึง 1 นาที`; renderQueue();
       say(`กำลังอัปโหลด ${entry.name}`, "info");
@@ -429,8 +442,8 @@
         return "next";
       } catch (error) {
         logError("upload", error);
-        if (isUncertain(error)) { entry.state = "uncertain"; entry.detail = ""; renderQueue(); return "uncertain"; }
-        entry.state = "failed"; entry.detail = errorMessage(error); renderQueue();
+        if (isUncertain(error)) { entry.state = "uncertain"; entry.code = error.code; entry.detail = ""; renderQueue(); return "uncertain"; }
+        entry.state = "failed"; entry.code = error && error.code || "SERVER_ERROR"; entry.detail = errorMessage(error); renderQueue();
         return error && error.code === "IMAGE_REJECTED" ? "next" : error && error.code === "CONFLICT" ? "conflict" : "stop";
       }
     }
@@ -454,7 +467,7 @@
       const picked = Array.from(files || []);
       if (!picked.length) return;
       const room = Math.max(0, state.limits.per_place - state.items.length);
-      state.queue = picked.map((file, index) => ({ file, name: String(file.name || `รูปที่ ${index + 1}`), state: index < room ? "queued" : "failed", detail: index < room ? "" : "เกินจำนวนสูงสุด 20 รูปต่อสถานที่" }));
+      state.queue = picked.map((file, index) => ({ file, name: String(file.name || `รูปที่ ${index + 1}`), state: index < room ? "queued" : "failed", code: index < room ? "" : "ROOM", detail: index < room ? "" : "เกินจำนวนสูงสุด 20 รูปต่อสถานที่" }));
       state.busy = true; clearWarnings(); renderQueue(); renderControls();
       let outcome = "next";
       for (const entry of state.queue) {
@@ -464,9 +477,10 @@
       }
       state.busy = false;
       renderQueue();
-      if (outcome === "uncertain") { say(STATUS.uncertain, "warn"); await reloadAfterUncertain(UNCERTAIN_UPLOAD); }
+      const hint = isPhone() && state.queue.some((entry) => entry.state === "uncertain" || entry.state === "failed" && !NOT_DEVICE_CODES.includes(entry.code));
+      if (outcome === "uncertain") { say(STATUS.uncertain, "warn", hint); await reloadAfterUncertain(UNCERTAIN_UPLOAD, hint); }
       else if (outcome === "conflict") { state.conflict = true; say(ERROR_MESSAGES.CONFLICT, "warn"); render(); }
-      else { const summary = uploadSummary(state.queue); say(summary.text, summary.tone); render(); }
+      else { const summary = uploadSummary(state.queue); say(summary.text, summary.tone, hint); render(); }
       return outcome;
     }
 
