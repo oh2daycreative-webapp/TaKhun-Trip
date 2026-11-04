@@ -149,5 +149,127 @@ const scenario = (photos) => `(async () => {
   assert.equal(backend.objects.size, 2);
   assert.deepEqual(out.requests, ["adminGetPlaceUploads", "adminGetPlaceUploads", "adminUploadPlaceImage", "adminUploadPlaceImage", "adminSavePlaceUploads", "adminDeletePlaceUpload"]);
   assert.ok(out.consoleAfter.every((line) => !line.includes(TOKEN)), "no token in the console");
-  console.log("Admin place uploads real-path browser check passed (real admin-api.js + resize + backend).");
+  await containment();
+  console.log("Admin place uploads real-path browser check passed (real admin-api.js + resize + backend; D24 containment).");
 })().catch((error) => { console.error(error.stack || error); process.exitCode = 1; });
+
+// ---- D24 condition 1 (spec v5.3): iPhone-type failures stay contained (no partial write, no broken page) ----
+const HEIC_BYTES = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from("ftypheic\0\0\0\0mif1heic", "latin1"), Buffer.alloc(256)]).toString("base64");
+
+function insertApp1(jpeg) {
+  const payload = Buffer.from("Exif\0\0MM\0\x2a\0\0\0\x08\0\0", "latin1");
+  return Buffer.concat([jpeg.subarray(0, 2), Buffer.from([0xff, 0xe1, (payload.length + 2) >> 8, (payload.length + 2) & 0xff]), payload, jpeg.subarray(2)]);
+}
+
+// The page gets two test switches: holdUploads (the server still runs the upload, the reply never comes back) and a
+// shortened upload timeout (the client's 90 s budget becomes 1.5 s), plus reloadOnFirstUpload (the tab reloads right
+// after the first upload request has been sent, like a crash or a reload mid-queue).
+function containmentPage() {
+  return page().replace("window.fetch = (address, options) => new Promise((resolve, reject) => {", `const realSetTimeout = window.setTimeout.bind(window);
+  window.setTimeout = (fn, ms, ...rest) => realSetTimeout(fn, ms >= 60000 ? 1500 : ms, ...rest);
+  window.holdUploads = 0; window.reloadOnFirstUpload = false;
+  window.fetch = (address, options) => new Promise((resolve, reject) => {
+    if (JSON.parse(options.body).action === "adminUploadPlaceImage") {
+      if (window.reloadOnFirstUpload) { window.reloadOnFirstUpload = false; const id0 = ++next; window.__backend(JSON.stringify({ id: id0, body: options.body, hold: true })); realSetTimeout(() => location.reload(), 0); return; }
+      if (window.holdUploads > 0) { window.holdUploads -= 1; const id1 = ++next; window.__backend(JSON.stringify({ id: id1, body: options.body, hold: true }));
+        options.signal && options.signal.addEventListener("abort", () => { const error = new Error("aborted"); error.name = "AbortError"; reject(error); }); requests.push("adminUploadPlaceImage"); return; }
+    }`);
+}
+
+async function withBackendPage(backend, run) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "takhun-uploads-contain-"));
+  const file = path.join(directory, "page.html");
+  fs.writeFileSync(file, containmentPage());
+  try {
+    return await withCdpBrowser(browser, { timeoutMs: 20000, commandTimeoutMs: 120000 }, async (session) => {
+      await session.send("Page.enable");
+      await session.send("Runtime.enable");
+      await session.send("Runtime.addBinding", { name: "__backend" });
+      session.waitForEvent("Runtime.bindingCalled", (event) => {
+        if (event.name !== "__backend") return false;
+        const { id, body, hold } = JSON.parse(event.payload);
+        const text = backend.handle(body); // the server always runs the request
+        if (!hold) session.send("Runtime.evaluate", { expression: `window.__reply(${id}, ${JSON.stringify(text)})` }).catch(() => {});
+        return false;
+      }, 600000).catch(() => {});
+      const loaded = session.waitForEvent("Page.loadEventFired");
+      await session.send("Page.navigate", { url: pathToFileURL(file).href });
+      await loaded;
+      return run(session);
+    });
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+const pagePrelude = `
+  const settle = async () => { for (let i = 0; i < 30; i += 1) await new Promise((r) => setTimeout(r, 20)); };
+  const until = async (test) => { for (let i = 0; i < 400 && !test(); i += 1) await new Promise((r) => setTimeout(r, 25)); };
+  const root = document.querySelector("[data-admin-place-uploads]");
+  const init = () => TakhunAdminPlaceUploads.init({ root, api: TakhunAdminApi, resize: TakhunImageResize, token: ${JSON.stringify(TOKEN)}, placeId: ${JSON.stringify(PLACE)}, archived: false, mediaOrigin: "" });
+  const pick = (files) => { const dt = new DataTransfer(); for (const [name, b64, type] of files) { const raw = atob(b64); const u = new Uint8Array(raw.length); for (let i = 0; i < raw.length; i += 1) u[i] = raw.charCodeAt(i); dt.items.add(new File([u], name, { type })); }
+    const input = root.querySelector("input[type=file]"); input.files = dt.files; input.dispatchEvent(new Event("change")); };
+  const idle = (c) => !c.snapshot().busy && c.snapshot().queue.length && c.snapshot().queue.every((q) => !["queued", "resizing", "uploading"].includes(q.state));`;
+
+async function containment() {
+  // 1. EXIF/APP1 in a JPEG that reaches the real server: refused before any storage call; nothing written.
+  {
+    const backend = createBackend({ placeId: PLACE, admins: { [TOKEN]: ADMIN } });
+    const svg = (w, h) => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="#456"/></svg>`);
+    const large = insertApp1(await sharp(svg(1600, 1200)).jpeg().toBuffer()), small = insertApp1(await sharp(svg(800, 600)).jpeg().toBuffer());
+    const result = JSON.parse(backend.handle(JSON.stringify({ action: "adminUploadPlaceImage", token: TOKEN, payload: { place_id: PLACE, format: "jpeg", large_b64: large.toString("base64"), small_b64: small.toString("base64") } })));
+    assert.deepEqual([result.ok, result.error.code, result.error.reason], [false, "IMAGE_REJECTED", "exif"]);
+    assert.deepEqual([backend.table("media_uploads").length, backend.table("activity_logs").length, backend.objects.size], [0, 0, 0], "APP1 JPEG: no row, no audit, no file");
+  }
+  const a = await photo(3000, 2000, "#1565c0"), b = await photo(2000, 1500, "#2e7d32"), d = await photo(1800, 1200, "#ad1457");
+  // 2. Upload timeout (slow mobile data): the server still saves the photo; the page says "ไม่แน่ใจผล", reloads the
+  //    list (which shows it) and never sends it again. 3. HEIC: refused in the browser, never sent, the next photo uploads.
+  {
+    const backend = createBackend({ placeId: PLACE, admins: { [TOKEN]: ADMIN } });
+    const out = JSON.parse(await withBackendPage(backend, (session) => session.evaluate(`(async () => {
+      ${pagePrelude}
+      const c = await init();
+      window.holdUploads = 1;
+      pick([["held.jpg", ${JSON.stringify(a)}, "image/jpeg"], ["after.jpg", ${JSON.stringify(b)}, "image/jpeg"]]);
+      await until(() => idle(c) && c.snapshot().items.length === 1); await settle();
+      const timeout = { queue: c.snapshot().queue.map((q) => q.name + ":" + q.state), items: c.snapshot().items.length, status: c.snapshot().status, uploads: requests.filter((x) => x === "adminUploadPlaceImage").length };
+      pick([["photo.heic", ${JSON.stringify(HEIC_BYTES)}, "image/heic"], ["second.jpg", ${JSON.stringify(d)}, "image/jpeg"]]);
+      await until(() => idle(c) && c.snapshot().queue[1].state !== "queued"); await settle();
+      const heic = { queue: c.snapshot().queue.map((q) => q.name + ":" + q.state + (q.detail ? ":" + q.detail : "")), uploads: requests.filter((x) => x === "adminUploadPlaceImage").length };
+      return JSON.stringify({ timeout, heic });
+    })()`)));
+    assert.deepEqual(out.timeout.queue, ["held.jpg:uncertain", "after.jpg:skipped"], "timeout: uncertain, the rest not sent");
+    assert.equal(out.timeout.status, "ไม่แน่ใจผล");
+    assert.equal(out.timeout.uploads, 1, "never resent");
+    assert.equal(out.timeout.items, 1, "the reloaded list shows the photo the server saved");
+    assert.equal(backend.table("media_uploads").length, 2, "1 from the timed-out upload + 1 after the HEIC round");
+    assert.equal(out.heic.queue[0].startsWith("photo.heic:failed:เบราว์เซอร์นี้เปิดไฟล์ HEIC ไม่ได้"), true, JSON.stringify(out.heic.queue));
+    assert.equal(out.heic.queue[1], "second.jpg:done");
+    assert.equal(out.heic.uploads, 2, "the HEIC was never sent");
+    assert.equal(backend.objects.size, 4, "2 complete photos, 2 files each, nothing partial");
+  }
+  // 4. Tab reload (or crash) right after the first of 3 uploads was sent: the server finishes that one completely; the
+  //    other two are never sent; after the reload the list shows exactly that photo; re-picking all three gives one
+  //    duplicate and two new photos, and no extra row.
+  {
+    const backend = createBackend({ placeId: PLACE, admins: { [TOKEN]: ADMIN } });
+    const files = JSON.stringify([["one.jpg", a, "image/jpeg"], ["two.jpg", b, "image/jpeg"], ["three.jpg", d, "image/jpeg"]]);
+    const out = JSON.parse(await withBackendPage(backend, async (session) => {
+      await session.evaluate(`(async () => { ${pagePrelude} await init(); window.reloadOnFirstUpload = true; pick(${files}); return "started"; })()`);
+      await session.waitForEvent("Page.loadEventFired", () => true, 30000);
+      return session.evaluate(`(async () => {
+        ${pagePrelude}
+        const c = await init();
+        const afterReload = c.snapshot().items.length;
+        pick(${files});
+        await until(() => idle(c) && c.snapshot().queue.every((q) => q.state !== "queued")); await settle();
+        return JSON.stringify({ afterReload, queue: c.snapshot().queue.map((q) => q.name + ":" + q.state), items: c.snapshot().items.length });
+      })()`);
+    }));
+    assert.equal(out.afterReload, 1, "after the reload: exactly the one photo the server finished");
+    assert.deepEqual(out.queue, ["one.jpg:duplicate", "two.jpg:done", "three.jpg:done"], "re-picking: one duplicate, two new");
+    const rows = backend.table("media_uploads");
+    assert.equal(rows.length, 3, "no extra row");
+    for (const row of rows) assert.ok(backend.objects.has(row.key_large) && backend.objects.has(row.key_small), "every row has both of its files");
+  }
+}

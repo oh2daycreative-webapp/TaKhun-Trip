@@ -106,7 +106,8 @@ function startServer() {
 }
 
 // ---- one page load under a given scenario ----
-// scenario: { origin: true|false, api: "ok"|"error"|"malformed"|"hang", images: "ok"|"broken" }
+// scenario: { origin: true|false, api: "ok"|"error"|"malformed"|"hang", images: "ok"|"broken"|"undecodable" }
+// "undecodable" (D24): the file arrives (200, image/webp) but the browser cannot decode it, like an old Safari meeting WebP.
 async function load(base, pagePath, scenario, fixtures, evaluate) {
   const seen = { uploads: [], api: [] };
   const width = scenario.width || 1280;
@@ -144,6 +145,7 @@ async function load(base, pagePath, scenario, fixtures, evaluate) {
         const key = address.pathname.slice(1);
         const bytes = fixtures.backend.objects.get(key);
         if (scenario.images === "broken" || !bytes) fulfill(event.requestId, 404, "", "text/plain");
+        else if (scenario.images === "undecodable") fulfill(event.requestId, 200, Buffer.from("RIFF\0\0\0\0WEBPVP8 not-a-real-image".repeat(8), "latin1"), "image/webp");
         else fulfill(event.requestId, 200, bytes, key.endsWith(".jpg") ? "image/jpeg" : "image/webp");
       } else {
         session.send("Fetch.continueRequest", { requestId: event.requestId }).catch(() => {});
@@ -256,7 +258,7 @@ const cardsEval = (scenario) => `(async () => {
     assert.deepEqual([phone.galleryStyle.columns, phone.galleryStyle.border], [1, "0px"], "1 column on a phone, no border");
     assert.ok(phone.galleryStyle.radius > 0);
 
-    for (const scenario of [{ api: "error" }, { api: "malformed" }, { api: "hang" }, { api: "ok", images: "broken" }]) {
+    for (const scenario of [{ api: "error" }, { api: "malformed" }, { api: "hang" }, { api: "ok", images: "broken" }, { api: "ok", images: "undecodable" }]) {
       const fallback = await detail(Object.assign({ origin: true, images: "ok" }, scenario));
       const label = JSON.stringify(scenario);
       assert.deepEqual(fallback.seen.uploads.slice().sort(), ["", P1], label + ": the same two calls");
@@ -276,7 +278,7 @@ const cardsEval = (scenario) => `(async () => {
     assert.deepEqual([cardsLive.hero.runtime, cardsLive.hero.alt], ["uploaded", "ปกที่อัปโหลด"]);
     assert.equal(cardsLive.p2.html, cardsToday.p2.html, "a place without an uploaded cover is unchanged");
     assert.equal(cardsLive.product.html, cardsToday.product.html, "non-place images are unchanged");
-    for (const scenario of [{ api: "error" }, { api: "hang" }, { api: "ok", images: "broken" }]) {
+    for (const scenario of [{ api: "error" }, { api: "hang" }, { api: "ok", images: "broken" }, { api: "ok", images: "undecodable" }]) {
       const fallback = await cards(Object.assign({ origin: true, images: "ok" }, scenario));
       for (const id of ["p1", "p2", "hero", "product"]) assert.equal(fallback[id].html, cardsToday[id].html, JSON.stringify(scenario) + " " + id);
     }
@@ -298,12 +300,12 @@ const cardsEval = (scenario) => `(async () => {
     const placesLive = await places({ origin: true, api: "ok", images: "ok", expectUploaded: true });
     assert.deepEqual(placesLive.seen.uploads, [""], "one covers call for the places page");
     assert.deepEqual([placesLive.runtime, placesLive.src], ["uploaded", ORIGIN + "/" + liveCover.key_large], "the QA-B01b card shows its uploaded cover");
-    for (const scenario of [{ api: "error" }, { api: "ok", images: "broken" }]) {
+    for (const scenario of [{ api: "error" }, { api: "ok", images: "broken" }, { api: "ok", images: "undecodable" }]) {
       const fallback = await places(Object.assign({ origin: true, images: "ok" }, scenario));
       assert.equal(fallback.html, placesToday.html, JSON.stringify(scenario) + ": places card identical to today");
     }
     }
-    console.log("Public upload layer real-path check passed (detail page + cards; no origin / error / malformed / 4 s timeout / broken image = today).");
+    console.log("Public upload layer real-path check passed (detail page + cards; no origin / error / malformed / 4 s timeout / broken image / undecodable image = today).");
   } finally {
     server.close();
   }
