@@ -85,6 +85,27 @@ test("pre-request snapshot failure cannot latch unknown Create",async()=>{
   const h=readOnlyHarness({search:"",role:"editor"}); await h.c.init(); h.internals.state.mediaComponent.getSelected=()=>{throw Object.assign(new Error("local"),{code:"TIMEOUT"});};
   await h.v.form.fire("submit"); assert.equal(h.internals.state.createOutcomeUnknown,false); assert.equal(h.v.save.disabled,false); assert.equal(h.calls.length,0);
 });
+// Staging 4 Nov (criterion 11): a save that fails in the browser before any request must say nothing was saved and
+// that pressing Save again is safe, never the server wording "ไม่สามารถทำรายการได้ในขณะนี้".
+const MEDIA_NOT_READY_TEXT = "ยังไม่ได้บันทึก: รายการภาพ Gallery ยังโหลดไม่สำเร็จ กรุณากด “ค้นหา” ในส่วน Gallery ให้โหลดเสร็จก่อน แล้วกดบันทึกอีกครั้ง";
+const NOT_SENT_TEXT = "ยังไม่ได้บันทึก ระบบยังไม่ได้ส่งข้อมูล กรุณากดบันทึกอีกครั้ง";
+for (const publish of [false, true]) test(`${publish ? "Publish" : "Save draft"} with an unconfirmed Gallery change: nothing sent, says not saved, retry allowed`, async () => {
+  const h=readOnlyHarness({role:"editor",details:[detail()]}); await h.c.init();
+  h.internals.state.mediaComponent.getSelected=()=>{throw new Error("MEDIA_OPTIONS_UNAVAILABLE");};
+  if (publish) await h.v.publish.fire("click"); else await h.v.form.fire("submit");
+  assert.deepEqual(h.calls.map((c)=>c[0]),["detail"],"no write request");
+  assert.equal(h.v.status.textContent,MEDIA_NOT_READY_TEXT);
+  assert.equal(h.v.save.disabled,false); assert.equal(h.v.publish.disabled,false); assert.equal(h.internals.state.pending,false);
+});
+test("any other failure before the request: says not saved and safe to retry, not the server wording", async () => {
+  const h=readOnlyHarness({role:"editor",details:[detail()]}); await h.c.init();
+  h.internals.state.mediaComponent.getSelected=()=>{throw new TypeError("local bug");};
+  await h.v.form.fire("submit");
+  assert.deepEqual(h.calls.map((c)=>c[0]),["detail"]);
+  assert.equal(h.v.status.textContent,NOT_SENT_TEXT);
+  assert.notEqual(h.v.status.textContent,"ไม่สามารถทำรายการได้ในขณะนี้");
+  assert.equal(h.v.save.disabled,false);
+});
 function descendants(node) { return (node.children||[]).flatMap((child)=>[child,...descendants(child)]); }
 function renderedText(node) { return [node.textContent,...descendants(node).map((child)=>child.textContent)].filter(Boolean).join(" "); }
 test("page security and exact controls are present",()=>{ assert.match(page,/data-admin-place-edit-fatal/); assert.match(page,/places\.html/); assert.match(page,/role="tablist"/); assert.doesNotMatch(source,/\bfetch\s*\(|innerHTML|\?edit=/); for(const k of KEYS) assert.match(page,new RegExp(`name="${k}"`)); });

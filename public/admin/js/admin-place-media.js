@@ -50,6 +50,7 @@
     let totalPages = 0;
     let keyword = "";
     let ready = false;
+    let changed = false; // the editor added, removed or moved a Gallery image in this selector
     let requestGeneration = 0;
 
     function announce(value) { status.textContent = value; }
@@ -99,17 +100,17 @@
     }
     function add(mediaId) {
       if (!galleryById[mediaId] || selected.includes(mediaId) || selected.length >= MAX_SELECTED) return false;
-      selected = [...selected, mediaId]; render({ surface:"selected", mediaId }, `เลือก ${mediaId} แล้ว ${selected.length} จากสูงสุด ${MAX_SELECTED} ภาพ`); return true;
+      selected = [...selected, mediaId]; changed = true; render({ surface:"selected", mediaId }, `เลือก ${mediaId} แล้ว ${selected.length} จากสูงสุด ${MAX_SELECTED} ภาพ`); return true;
     }
     function remove(mediaId) {
       if (!selected.includes(mediaId)) return false;
-      selected = selected.filter((id) => id !== mediaId); render({ surface:"options", mediaId }, `นำออก ${mediaId} แล้ว เลือก ${selected.length} จากสูงสุด ${MAX_SELECTED} ภาพ`); return true;
+      selected = selected.filter((id) => id !== mediaId); changed = true; render({ surface:"options", mediaId }, `นำออก ${mediaId} แล้ว เลือก ${selected.length} จากสูงสุด ${MAX_SELECTED} ภาพ`); return true;
     }
     function move(mediaId, direction) {
       const index = selected.indexOf(mediaId);
       const target = index + direction;
       if (index < 0 || (direction !== -1 && direction !== 1) || target < 0 || target >= selected.length) return false;
-      const next = selected.slice(); [next[index], next[target]] = [next[target], next[index]]; selected = next; render({ surface:"selected", mediaId }, `เลื่อน ${mediaId} ไปเป็นลำดับ ${target + 1} แล้ว เลือก ${selected.length} จากสูงสุด ${MAX_SELECTED} ภาพ`); return true;
+      const next = selected.slice(); [next[index], next[target]] = [next[target], next[index]]; selected = next; changed = true; render({ surface:"selected", mediaId }, `เลื่อน ${mediaId} ไปเป็นลำดับ ${target + 1} แล้ว เลือก ${selected.length} จากสูงสุด ${MAX_SELECTED} ภาพ`); return true;
     }
 
     if (options.mode !== "edit" || !placeId) {
@@ -175,7 +176,9 @@
     mounts.previous?.addEventListener("click", () => isCurrent() && previous());
     mounts.next?.addEventListener("click", () => isCurrent() && next());
     await loadPage(1, "");
-    return Object.freeze({ getSelected: () => { if (!ready) throw new Error("MEDIA_OPTIONS_UNAVAILABLE"); return selected.slice(); }, add, remove, move, search, next, previous });
+        // An unchanged selection is the saved one, so a failed list never blocks saving it (staging 4 Nov, criterion 11).
+    // Only a change made while the list cannot be confirmed is held back until the list loads again.
+    return Object.freeze({ getSelected: () => { if (!ready && changed) throw new Error("MEDIA_OPTIONS_UNAVAILABLE"); return selected.slice(); }, add, remove, move, search, next, previous });
   }
 
   global.TakhunAdminPlaceMedia = Object.freeze({ init });

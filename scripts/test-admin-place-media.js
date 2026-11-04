@@ -160,13 +160,34 @@ async function test(name, fn) {
     assert.equal(await component.search("retry"), false);
     assert.equal(nodes.root.getAttribute("data-media-state"), "error");
     assert.match(nodes.status.textContent, /ไม่สามารถโหลด/);
-    assert.throws(() => component.getSelected(), /MEDIA_OPTIONS_UNAVAILABLE/);
+    assert.deepEqual(plain(component.getSelected()), [], "selection unchanged: a failed list does not block saving it");
     assert.deepEqual(plain(calls), [
       { place_id: "PLC-A", role: "gallery", page: 1, page_size: 20 },
       { place_id: "PLC-A", role: "gallery", page: 2, page_size: 20 },
       { place_id: "PLC-A", role: "gallery", page: 1, page_size: 20, keyword: "waterfall" },
       { place_id: "PLC-A", role: "gallery", page: 1, page_size: 20, keyword: "retry" }
     ]);
+  });
+
+  // Staging 4 Nov (criterion 11): the Gallery list failed to load, and saving the place draft then failed in the
+  // browser before any request ("ไม่สามารถทำรายการได้ในขณะนี้"). An unchanged selection is the saved one, so it must
+  // not block the save; only a change made while the list cannot be confirmed is held back.
+  await test("a failed Gallery list never blocks saving an unchanged selection; an unconfirmed change is held back", async () => {
+    const { api } = load();
+    const first = await api.init({ mode: "edit", placeId: "PLC-A", selectedIds: ["gallery-a", "gallery-b"], mounts: mounts(),
+      loadOptions: async () => { throw new Error("private failure"); } });
+    assert.deepEqual(plain(first.getSelected()), ["gallery-a", "gallery-b"], "first load failed, nothing changed: the saved ids");
+    const nodes = mounts(); let fail = false;
+    const second = await api.init({ mode: "edit", placeId: "PLC-A", selectedIds: ["gallery-a"], mounts: nodes,
+      loadOptions: async () => { if (fail) throw new Error("private failure"); return { items: [media("gallery-a"), media("gallery-b")], page: 1, page_size: 20, total: 2, total_pages: 1 }; } });
+    assert.equal(second.add("gallery-b"), true);
+    fail = true;
+    assert.equal(await second.search("x"), false);
+    assert.equal(nodes.root.getAttribute("data-media-state"), "error");
+    assert.throws(() => second.getSelected(), /MEDIA_OPTIONS_UNAVAILABLE/, "a change while the list is unavailable is not saved blindly");
+    fail = false;
+    assert.equal(await second.search(""), true);
+    assert.deepEqual(plain(second.getSelected()), ["gallery-a", "gallery-b"], "after the list loads again the change is kept and saved");
   });
 
   await test("reinitializing after an authoritative reload leaves only the latest media controls active", async () => {
