@@ -80,7 +80,7 @@ function fakeSheet(name, rows, log, { maxRows = 1000, format = "@", newRowFormat
 
 const PLACE_ID = "plc-6d706013-ce22-46a6-b2e1-061a8da902b7";
 function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" }, uploads = [], places, statuses = [], lock = true, uploadSheetOptions, now = "2026-10-30T14:00:00.000Z", onFetch, onUploadWrite, noUploadSheet = false } = {}) {
-  const log = [], fetches = [], lockEvents = [], objects = new Set(), cacheStore = new Map(), cacheRemovals = [];
+  const log = [], fetches = [], lockEvents = [], objects = new Set(), cacheStore = new Map(), cacheRemovals = [], sleeps = [], warnings = [];
   let lockHeld = false;
   const queue = statuses.slice();
   const sheets = {
@@ -100,7 +100,7 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
   }
   let uuid = 0;
   const context = {
-    console: { log() {} }, JSON, Date: class extends Date { constructor(...a) { if (a.length) super(...a); else super(now); } static now() { return Date.parse(now); } },
+    console: { log() {}, warn: (...parts) => warnings.push(parts.join(" ")) }, JSON, Date: class extends Date { constructor(...a) { if (a.length) super(...a); else super(now); } static now() { return Date.parse(now); } },
     PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => (Object.prototype.hasOwnProperty.call(props, k) ? props[k] : null) }) },
     SpreadsheetApp: { openById: () => ({ getSheetByName: (n) => sheets[n] || null }), flush: () => log.push(["flush"]) },
     CacheService: { getScriptCache: () => ({
@@ -119,7 +119,8 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
       computeDigest: (_a, bytes) => toSigned(crypto.createHash("sha256").update(toBuffer(bytes)).digest()),
       computeHmacSha256Signature: (value, key) => toSigned(crypto.createHmac("sha256", toBuffer(key)).update(toBuffer(value)).digest()),
       formatDate: (date) => date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, ""),
-      getUuid: () => `00000000-0000-4000-8000-${String(++uuid).padStart(12, "0")}`
+      getUuid: () => `00000000-0000-4000-8000-${String(++uuid).padStart(12, "0")}`,
+      sleep: (ms) => sleeps.push({ ms, lockHeld })
     },
     UrlFetchApp: { fetch: (url, options) => {
       const key = url.split("/takhun-media-staging/")[1];
@@ -140,7 +141,7 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
   };
   vm.createContext(context);
   for (const [name, source] of SOURCES) vm.runInContext(source, context, { filename: `apps-script/${name}` });
-  return { context, sheets, log, fetches, lockEvents, objects, cacheRemovals };
+  return { context, sheets, log, fetches, lockEvents, objects, cacheRemovals, sleeps, warnings };
 }
 
 (async () => {
@@ -334,18 +335,21 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
     assert.equal(res.error.code, "STORAGE_ERROR");
     assert.match(res.error.message, /^ไม่ได้บันทึกข้อมูล/);
     assert.deepEqual([writes(env).length, env.lockEvents.length], [0, 0]);
+    assert.deepEqual([env.fetches.length, env.sleeps.length], [1, 0], "a wrong key (403) is never retried: refused at once");
+    assert.deepEqual(env.warnings, ["R2 PUT 1600 failed: 403"]);
     const noConfig = load({ props: { SPREADSHEET_ID: "staging-spreadsheet-id", MEDIA_UPLOAD_ENABLED: "true" } });
     assert.equal(upload(noConfig).error.code, "STORAGE_ERROR");
     assert.equal(noConfig.fetches.length, 0);
   });
 
   await test("failure midway (large stored, small fails): no row, the stored file is deleted again outside the lock (criterion 10)", () => {
-    const env = load({ statuses: [200, 500, 204] });
+    const env = load({ statuses: [200, 500, 500, 500, 204] }); // the small file fails on every attempt (2 retries)
     const res = upload(env);
     assert.equal(res.error.code, "STORAGE_ERROR");
-    assert.deepEqual(env.fetches.map((f) => [f.method, f.key, f.lockHeld]), [["put", KEY_LARGE, false], ["put", KEY_SMALL, false], ["delete", KEY_LARGE, false]]);
+    assert.deepEqual(env.fetches.map((f) => [f.method, f.key, f.lockHeld]), [["put", KEY_LARGE, false], ["put", KEY_SMALL, false], ["put", KEY_SMALL, false], ["put", KEY_SMALL, false], ["delete", KEY_LARGE, false]]);
+    assert.deepEqual(env.warnings, ["R2 PUT 800 failed: 500, 500, 500"]);
     assert.deepEqual(rows(env), []);
-    const network = load({ statuses: [200, new Error("Address unavailable: https://0123.r2.cloudflarestorage.com/x")] });
+    const network = load({ statuses: [200, new Error("Address unavailable: https://0123.r2.cloudflarestorage.com/x"), new Error("Address unavailable: https://0123.r2.cloudflarestorage.com/x"), new Error("Address unavailable: https://0123.r2.cloudflarestorage.com/x")] });
     const failed = upload(network);
     assert.equal(failed.error.code, "STORAGE_ERROR");
     assert.equal(JSON.stringify(failed).includes("cloudflarestorage"), false);
@@ -394,11 +398,26 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
   });
 
   await test("post-save check failing does not undo the upload: ok, files_verified false", () => {
-    const env = load({ statuses: [200, 200, 500] });
+    const env = load({ statuses: [200, 200, 500, 500, 500] }); // the existence check fails on every attempt
     const res = upload(env);
     assert.equal(res.ok, true);
     assert.equal(res.data.files_verified, false);
     assert.equal(rows(env).length, 1);
+  });
+
+  // Task 15, 5 Nov: run7_03 / run7_13 got STORAGE_ERROR and a file delete failed on staging; R2 calls now retry.
+  await test("a transient R2 failure during an upload is retried (1 s) outside the lock: the photo is saved, one log line", () => {
+    const env = load({ statuses: [200, 503] }); // the small file's first attempt gets 503, the retry succeeds
+    const res = upload(env);
+    assert.equal(res.ok, true, JSON.stringify(res));
+    assert.equal(res.data.files_verified, true);
+    assert.equal(rows(env).length, 1);
+    assert.deepEqual(env.fetches.map((f) => [f.method, f.key, f.lockHeld]), [["put", KEY_LARGE, false], ["put", KEY_SMALL, false], ["put", KEY_SMALL, false], ["get", KEY_LARGE, false], ["get", KEY_SMALL, false]]);
+    assert.deepEqual(env.sleeps, [{ ms: 1000, lockHeld: false }], "the wait never holds the script lock");
+    assert.deepEqual(env.warnings, ["R2 PUT 800 ok after retry: 503, 200"]);
+    const dropped = load({ statuses: [new Error("Address unavailable: https://0123.r2.cloudflarestorage.com/x")] }); // a dropped connection on the large file
+    assert.equal(upload(dropped).ok, true);
+    assert.deepEqual(dropped.warnings, ["R2 PUT 1600 ok after retry: network, 200"]);
   });
 
   await test("cleanup when media_uploads cannot be re-read: nothing is deleted (an unlinked file is accepted, D16)", () => {
@@ -606,12 +625,21 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
   });
 
   await test("6b delete: R2 fails -> the photo is still removed from the site, row stays delete_pending, file_deleted false", () => {
-    const env = load({ uploads: [photo("UPL-a", 1)], statuses: [500] });
+    const env = load({ uploads: [photo("UPL-a", 1)], statuses: [500, 500, 500] }); // every attempt fails
     const res = del(env, { place_id: PLACE_ID, upload_id: "UPL-a", expected_ids: ["UPL-a"] });
     assert.equal(res.ok, true);
     assert.equal(res.data.file_deleted, false);
+    assert.ok(env.sleeps.every((s) => !s.lockHeld) && env.fetches.every((f) => !f.lockHeld));
     assert.equal(field(env, "UPL-a", "status"), "deleted");
     assert.equal(field(env, "UPL-a", "object_state"), "delete_pending");
+  });
+
+  await test("6b delete: a transient R2 failure on the file delete is retried: file_deleted true, row closed", () => {
+    const env = load({ uploads: [photo("UPL-a", 1)], statuses: [500] }); // first DELETE 500, the retry 204
+    const res = del(env, { place_id: PLACE_ID, upload_id: "UPL-a", expected_ids: ["UPL-a"] });
+    assert.deepEqual([res.ok, res.data.file_deleted], [true, true]);
+    assert.equal(field(env, "UPL-a", "object_state"), "deleted");
+    assert.deepEqual(env.sleeps, [{ ms: 1000, lockHeld: false }]);
   });
 
   await test("6b delete: a key another active row still uses is never deleted; the row is closed as deleted", () => {
@@ -646,7 +674,7 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
   });
 
   await test("6b retry: an R2 failure keeps that row pending; a key a re-uploaded active photo uses is skipped, not deleted", () => {
-    const failing = load({ uploads: [pending("UPL-p1", 1), pending("UPL-p2", 2)], statuses: [500] });
+    const failing = load({ uploads: [pending("UPL-p1", 1), pending("UPL-p2", 2)], statuses: [500, 500, 500] });
     assert.deepEqual(retry(failing).data, { retried: 2, still_pending: 1 });
     const reused = load({ uploads: [pending("UPL-old", 5), photo("UPL-new", 5, { upload_id: "UPL-new" })] });
     assert.deepEqual(retry(reused).data, { retried: 1, still_pending: 0 });
@@ -820,7 +848,7 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
     const noConfig = load({ admin: ROOT_ADMIN, props: { SPREADSHEET_ID: "x" } });
     assert.deepEqual(probe(noConfig).data.steps.map((s) => s.status), ["CONFIG", "CONFIG", "CONFIG", "CONFIG"]);
     assert.equal(noConfig.fetches.length, 0);
-    const network = probe(load({ admin: ROOT_ADMIN, statuses: [new Error("Address unavailable: https://0123.r2.cloudflarestorage.com/x")] }));
+    const network = probe(load({ admin: ROOT_ADMIN, statuses: [new Error("Address unavailable: https://0123.r2.cloudflarestorage.com/x"), new Error("Address unavailable: https://0123.r2.cloudflarestorage.com/x"), new Error("Address unavailable: https://0123.r2.cloudflarestorage.com/x")] }));
     assert.equal(network.data.steps[0].status, "NETWORK");
     assert.equal(network.data.ok, false);
   });

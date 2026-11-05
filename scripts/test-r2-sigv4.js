@@ -23,9 +23,10 @@ function test(name, body) {
 const toSigned = (buffer) => Array.from(buffer, (b) => (b > 127 ? b - 256 : b));
 const toBuffer = (bytes) => { assert.ok(Array.isArray(bytes), "Apps Script byte arrays expected"); return Buffer.from(bytes.map((b) => b & 0xff)); };
 
-function load({ props = {}, fetch } = {}) {
-  const calls = [];
+function load({ props = {}, fetch, start = Date.parse("2026-11-05T06:00:00.000Z") } = {}) {
+  const calls = [], sleeps = [], logs = [], clock = { t: start };
   const context = {
+    console: { warn: (...parts) => logs.push(parts.join(" ")) },
     Utilities: {
       DigestAlgorithm: { SHA_256: "SHA_256" },
       newBlob: (text) => ({ getBytes: () => toSigned(Buffer.from(String(text), "utf8")) }),
@@ -34,14 +35,16 @@ function load({ props = {}, fetch } = {}) {
       formatDate: (date, zone, pattern) => {
         assert.equal(zone, "UTC"); assert.equal(pattern, "yyyyMMdd'T'HHmmss'Z'");
         return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
-      }
+      },
+      sleep: (ms) => { sleeps.push(ms); clock.t += ms; }
     },
     PropertiesService: { getScriptProperties: () => ({ getProperty: (name) => (Object.prototype.hasOwnProperty.call(props, name) ? props[name] : null) }) },
     UrlFetchApp: { fetch: (url, options) => { calls.push({ url, options }); return fetch ? fetch(url, options) : { getResponseCode: () => 200, getHeaders: () => ({ ETag: "\"e\"" }) }; } }
   };
   vm.createContext(context);
   vm.runInContext(SOURCE, context, { filename: "apps-script/R2SigV4.gs" });
-  return { context, calls };
+  context.R2SigV4_now_ = () => clock.t; // a controllable clock (the real one is Date.now)
+  return { context, calls, sleeps, logs, clock };
 }
 
 // Parses an aws-c-auth request.txt into method, path, query pairs, headers and body.
@@ -201,6 +204,100 @@ test("send helpers map R2 status codes to results and fixed error codes only", (
   assert.equal(env.calls[0].options.contentType, "image/jpeg");
   assert.equal(env.calls[0].url, `https://${CONFIG.accountId}.r2.cloudflarestorage.com/${CONFIG.bucket}/${KEY_JPG}`);
   assert.equal(JSON.stringify(env.calls[0]).includes(CONFIG.secretAccessKey), false);
+});
+
+// ---- Retry of transient R2 failures (task 15, 5 Nov: STORAGE_ERROR on run7_03 and run7_13, a failed DELETE) ----
+// A fetch plan: a number is the status, an Error is a network failure, { status, ms } also takes that long.
+function plan(steps) {
+  return (env) => () => {
+    const step = steps.shift();
+    if (step === undefined) throw new Error("unexpected extra R2 call");
+    const value = step && typeof step === "object" && !(step instanceof Error) ? step : { status: step };
+    if (value.ms) env.clock.t += value.ms;
+    if (value.status instanceof Error) throw value.status;
+    return { getResponseCode: () => value.status, getHeaders: () => ({ ETag: "\"r\"" }) };
+  };
+}
+function retryEnv(steps) {
+  const env = load({ props: PROPS, fetch: (...args) => env.fetchImpl(...args) });
+  env.fetchImpl = plan(steps)(env);
+  return env;
+}
+const KEY_SMALL = KEY_WEBP.replace("-1600.", "-800.");
+const outcome = (fn) => { try { const value = fn(); return value && typeof value === "object" ? JSON.parse(JSON.stringify(value)) : value; } catch (error) { return "throws " + error.message; } };
+const allLogs = [];
+
+test("transient failures (5xx, 429, network) are retried up to twice, 1 s then 2 s, each attempt signed again", () => {
+  const ok = retryEnv([503, 200]);
+  assert.equal(outcome(() => ok.context.r2PutObject_(KEY_WEBP, BODY)).status, 200);
+  assert.deepEqual([ok.calls.length, ok.sleeps], [2, [1000]]);
+  assert.deepEqual(ok.logs, ["R2 PUT 1600 ok after retry: 503, 200"]);
+  const dates = ok.calls.map((call) => call.options.headers["x-amz-date"]);
+  assert.notEqual(dates[0], dates[1], "the retry is signed with a fresh date");
+  assert.ok(ok.calls.every((call) => /^AWS4-HMAC-SHA256 Credential=/.test(call.options.headers.Authorization)));
+
+  const exhausted = retryEnv([500, 502, 500]);
+  assert.equal(outcome(() => exhausted.context.r2PutObject_(KEY_SMALL, BODY)), "throws R2_HTTP_500");
+  assert.deepEqual([exhausted.calls.length, exhausted.sleeps], [3, [1000, 2000]]);
+  assert.deepEqual(exhausted.logs, ["R2 PUT 800 failed: 500, 502, 500"]);
+
+  const limited = retryEnv([429, 204]);
+  assert.equal(outcome(() => limited.context.r2DeleteObject_(KEY_WEBP)).status, 204);
+  assert.deepEqual([limited.calls.length, limited.logs], [2, ["R2 DELETE 1600 ok after retry: 429, 204"]]);
+
+  const dropped = retryEnv([new Error("Address unavailable: https://x.r2.cloudflarestorage.com/b/k"), 206]);
+  assert.equal(outcome(() => dropped.context.r2HeadObject_(KEY_SMALL)).exists, true);
+  assert.deepEqual(dropped.logs, ["R2 HEAD 800 ok after retry: network, 206"]);
+
+  const offline = retryEnv([new Error("DNS error"), new Error("DNS error"), new Error("DNS error")]);
+  assert.equal(outcome(() => offline.context.r2PutObject_(KEY_WEBP, BODY)), "throws R2_NETWORK");
+  assert.deepEqual([offline.calls.length, offline.sleeps, offline.logs], [3, [1000, 2000], ["R2 PUT 1600 failed: network, network, network"]]);
+  allLogs.push(...ok.logs, ...exhausted.logs, ...limited.logs, ...dropped.logs, ...offline.logs);
+});
+
+test("never retried: 4xx (a wrong key fails at once), and 404 on the existence check is an answer, not a failure", () => {
+  const denied = retryEnv([403]);
+  assert.equal(outcome(() => denied.context.r2PutObject_(KEY_WEBP, BODY)), "throws R2_HTTP_403");
+  assert.deepEqual([denied.calls.length, denied.sleeps, denied.logs], [1, [], ["R2 PUT 1600 failed: 403"]]);
+  for (const status of [400, 401, 404, 409]) {
+    const env = retryEnv([status]);
+    assert.equal(outcome(() => env.context.r2DeleteObject_(KEY_WEBP)), "throws R2_HTTP_" + status);
+    assert.deepEqual([env.calls.length, env.sleeps], [1, []], String(status));
+  }
+  const missing = retryEnv([404]);
+  assert.equal(outcome(() => missing.context.r2HeadObject_(KEY_WEBP)).exists, false);
+  assert.deepEqual([missing.calls.length, missing.logs], [1, []]);
+  const fine = retryEnv([200]);
+  fine.context.r2PutObject_(KEY_WEBP, BODY);
+  assert.deepEqual([fine.calls.length, fine.sleeps, fine.logs], [1, [], []]);
+  const health = retryEnv([503, 200]);
+  assert.equal(health.context.R2SigV4_send_("PUT", "uploads/healthcheck/" + "a".repeat(64) + ".webp", BODY).status, 200, "the connection test uses the same retry");
+  allLogs.push(...denied.logs);
+});
+
+test("time budget: a slow failure is not retried, and retries stop 20 s after the first retry of the request", () => {
+  const slow = retryEnv([{ status: 504, ms: 12000 }]);
+  assert.equal(outcome(() => slow.context.r2PutObject_(KEY_WEBP, BODY)), "throws R2_HTTP_504");
+  assert.deepEqual([slow.calls.length, slow.sleeps, slow.logs], [1, [], ["R2 PUT 1600 failed: 504"]]);
+  // Ten calls in one request, every attempt a quick 503: the retries (and their waits) end within the 20 s window.
+  const steps = Array.from({ length: 30 }, () => ({ status: 503, ms: 200 }));
+  const busy = retryEnv(steps);
+  for (let i = 0; i < 10; i += 1) assert.equal(outcome(() => busy.context.r2PutObject_(KEY_WEBP, BODY)), "throws R2_HTTP_503");
+  const waited = busy.sleeps.reduce((a, b) => a + b, 0);
+  assert.ok(waited <= 20000, "total wait " + waited);
+  assert.ok(busy.calls.length < 30, "later calls are not retried any more: " + busy.calls.length);
+  assert.equal(busy.logs.length, 10, "one line per failed call");
+});
+
+test("log lines carry the step and status only: never the key, account, bucket, access key, secret, URL or signature", () => {
+  assert.ok(allLogs.length >= 6);
+  const hash = KEY_WEBP.match(/[a-f0-9]{32}/)[0];
+  for (const line of allLogs) {
+    assert.match(line, /^R2 (PUT|DELETE|HEAD) (1600|800|health) (ok after retry|failed): [a-z0-9, ]+$/, line);
+    for (const secret of [CONFIG.secretAccessKey, CONFIG.accessKeyId, CONFIG.accountId, CONFIG.bucket, hash, "http", "Signature", "cloudflarestorage", "uploads/"]) {
+      assert.equal(line.includes(secret), false, secret + " in " + line);
+    }
+  }
 });
 
 test("no top-level calls to Apps Script services (safe in any file load order)", () => {

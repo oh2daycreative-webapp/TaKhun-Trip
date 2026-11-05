@@ -2,7 +2,8 @@
 // Signs PUT / DELETE / existence-check requests to Cloudflare R2's S3 API (region "auto", service "s3").
 // Uses only Utilities.computeDigest (SHA-256) and Utilities.computeHmacSha256Signature with byte-array keys.
 // Script Properties (values never logged, never returned): R2_ACCOUNT_ID, R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY.
-// Errors carry fixed codes only (R2_CONFIG, R2_KEY, R2_METHOD, R2_BODY, R2_HTTP_<status>), never credentials or URLs.
+// Errors carry fixed codes only (R2_CONFIG, R2_KEY, R2_METHOD, R2_BODY, R2_HTTP_<status>, R2_NETWORK), never credentials
+// or URLs. Transient failures are retried (see R2SigV4_send_); log lines carry the step and status only.
 // No top-level service calls: safe in any Apps Script file load order.
 
 var R2SigV4_ALGORITHM_ = "AWS4-HMAC-SHA256";
@@ -158,30 +159,89 @@ function R2SigV4_buildRequest_(method, key, body, config, now) {
   return { url: "https://" + host + R2SigV4_canonicalPath_(path), options: options, signed: signed };
 }
 
+// Retry (staging 5 Nov: R2 PUT and DELETE failed now and then, about 1 call in 60). A network error, 5xx or 429 is
+// tried again up to twice, about 1 s and then 2 s later, each attempt signed afresh. A 4xx is an answer and is never
+// retried, so a wrong key still fails at once. Time budget, well inside the client's 90 s upload timeout: only a
+// quick failure (under 10 s) is retried, and retries stop 20 s after the first retry in this request. PUT, DELETE and
+// the ranged GET are idempotent for content-hash keys. Callers never hold the script lock during R2 calls.
+var R2SigV4_RETRY_DELAYS_MS_ = [1000, 2000];
+var R2SigV4_RETRY_QUICK_MS_ = 10000;
+var R2SigV4_RETRY_WINDOW_MS_ = 20000;
+var R2SigV4_retryWindowStart_ = 0; // per request: Apps Script globals start fresh in every execution
+
+function R2SigV4_now_() {
+  return Date.now();
+}
+
+function R2SigV4_retryable_(status) {
+  return status === 0 || status === 429 || (status >= 500 && status <= 599);
+}
+
+// "PUT 1600", "DELETE 800", "HEAD health": the step without the key, its hash or anything about the bucket.
+function R2SigV4_step_(method, key) {
+  var size = /-1600\.(?:webp|jpg)$/.test(key) ? "1600" : /-800\.(?:webp|jpg)$/.test(key) ? "800" : "health";
+  return method + " " + size;
+}
+
+function R2SigV4_log_(text) {
+  try { console.warn(text); } catch (_logError) { /* logging must never break a storage call */ }
+}
+
+// Returns { status, etag, attempts: ["503", "200"] }. Throws R2_NETWORK when the last attempt got no response.
 function R2SigV4_send_(method, key, body) {
-  var request = R2SigV4_buildRequest_(method, key, body, R2SigV4_config_());
-  var response = UrlFetchApp.fetch(request.url, request.options);
-  var status = response.getResponseCode();
-  var headers = response.getHeaders() || {};
-  return { status: status, etag: headers.ETag || headers.etag || "" };
+  var config = R2SigV4_config_();
+  var attempts = [];
+  for (var attempt = 0; ; attempt += 1) {
+    var request = R2SigV4_buildRequest_(method, key, body, config, new Date(R2SigV4_now_()));
+    var started = R2SigV4_now_();
+    var status = 0, headers = {};
+    try {
+      var response = UrlFetchApp.fetch(request.url, request.options);
+      status = response.getResponseCode();
+      headers = response.getHeaders() || {};
+    } catch (_fetchError) {
+      status = 0; // no response: DNS, connection or timeout (the message may contain the URL, so it is dropped)
+    }
+    attempts.push(status ? String(status) : "network");
+    if (!R2SigV4_retryable_(status)) return { status: status, etag: headers.ETag || headers.etag || "", attempts: attempts };
+    var now = R2SigV4_now_();
+    var delay = R2SigV4_RETRY_DELAYS_MS_[attempt];
+    var windowStart = R2SigV4_retryWindowStart_ || now;
+    if (delay === undefined || now - started >= R2SigV4_RETRY_QUICK_MS_ || now + delay - windowStart > R2SigV4_RETRY_WINDOW_MS_) {
+      if (!status) {
+        R2SigV4_log_("R2 " + R2SigV4_step_(method, key) + " failed: " + attempts.join(", "));
+        throw new Error("R2_NETWORK");
+      }
+      return { status: status, etag: "", attempts: attempts };
+    }
+    R2SigV4_retryWindowStart_ = windowStart;
+    Utilities.sleep(delay);
+  }
+}
+
+// One log line per call that needed a retry or failed: "R2 PUT 800 ok after retry: 503, 200" / "... failed: 403".
+function R2SigV4_result_(method, key, result, ok) {
+  if (!ok) {
+    R2SigV4_log_("R2 " + R2SigV4_step_(method, key) + " failed: " + result.attempts.join(", "));
+    throw new Error("R2_HTTP_" + result.status);
+  }
+  if (result.attempts.length > 1) R2SigV4_log_("R2 " + R2SigV4_step_(method, key) + " ok after retry: " + result.attempts.join(", "));
+  return result;
 }
 
 // Public helpers. PUT and DELETE are idempotent for content-hash keys; r2HeadObject_ reports existence (T15).
 function r2PutObject_(key, bytes) {
   var result = R2SigV4_send_("PUT", key, bytes);
-  if (result.status !== 200) throw new Error("R2_HTTP_" + result.status);
-  return result;
+  return R2SigV4_result_("PUT", key, result, result.status === 200);
 }
 
 function r2DeleteObject_(key) {
   var result = R2SigV4_send_("DELETE", key, null);
-  if (result.status !== 204 && result.status !== 200) throw new Error("R2_HTTP_" + result.status);
-  return result;
+  return R2SigV4_result_("DELETE", key, result, result.status === 204 || result.status === 200);
 }
 
 function r2HeadObject_(key) {
   var result = R2SigV4_send_("HEAD", key, null);
-  if (result.status === 404) return { exists: false };
-  if (result.status !== 206 && result.status !== 200) throw new Error("R2_HTTP_" + result.status);
-  return { exists: true, etag: result.etag };
+  R2SigV4_result_("HEAD", key, result, result.status === 404 || result.status === 206 || result.status === 200);
+  return result.status === 404 ? { exists: false } : { exists: true, etag: result.etag };
 }
