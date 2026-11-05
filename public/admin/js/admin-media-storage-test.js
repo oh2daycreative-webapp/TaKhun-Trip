@@ -8,6 +8,10 @@
   const STEP_LABELS = Object.freeze({ PUT: "เขียนไฟล์ทดสอบ", EXISTS: "ตรวจว่ามีไฟล์", DELETE: "ลบไฟล์ทดสอบ", GONE: "ตรวจว่าไฟล์หายไป" });
   const UNCERTAIN = Object.freeze(["TIMEOUT", "NETWORK_ERROR", "HTTP_ERROR", "MALFORMED_RESPONSE", "REDIRECT_BOUNCE", "OUTCOME_UNKNOWN"]);
   const ICONS = Object.freeze({ ok: "✓", warn: "⚠", error: "✕", info: "ℹ" });
+  // Storage events (task 15, 5 Nov): the server's last retried or failed storage calls, newest first.
+  const EVENT_ACTIONS = Object.freeze({ PUT: "อัปโหลด", DELETE: "ลบ", HEAD: "ตรวจ" });
+  const EVENT_FILES = Object.freeze({ "1600": "รูปใหญ่", "800": "รูปเล็ก", health: "ไฟล์ทดสอบ" });
+  const THAI_MONTHS = Object.freeze(["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]);
 
   function make(tag, className, text) {
     const node = global.document.createElement(tag);
@@ -25,6 +29,20 @@
     if (status === "CONFIG") return "ตั้งค่าไม่ครบ";
     if (status === "NETWORK") return "เชื่อมต่อไม่ได้";
     return "รหัส " + status;
+  }
+
+  // "5 พ.ย. 14:36:46" in Bangkok time (UTC+7, no daylight saving), without depending on the browser's locale data.
+  function bangkokTime(iso) {
+    const date = new Date(Date.parse(iso) + 7 * 3600000);
+    const pad = (value) => String(value).padStart(2, "0");
+    return `${date.getUTCDate()} ${THAI_MONTHS[date.getUTCMonth()]} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
+  }
+
+  function eventLine(event) {
+    const [action, file] = event.step.split(" ");
+    const attempts = event.attempts.split(", ").map((value) => (value === "network" ? "เชื่อมต่อไม่ได้" : value)).join(", ");
+    return [bangkokTime(event.at), (EVENT_ACTIONS[action] || action) + (EVENT_FILES[file] || file), event.ok ? "สำเร็จเมื่อลองซ้ำ" : "ไม่สำเร็จ",
+      "ผลแต่ละครั้ง " + attempts, (event.ms / 1000).toFixed(1) + " วินาที"].join(" · ");
   }
 
   function failureHint(steps) {
@@ -54,7 +72,17 @@
     const steps = make("ol", "admin-media-test__steps");
     steps.setAttribute("aria-label", "ผลแต่ละขั้น");
     steps.hidden = true;
-    root.replaceChildren(title, help, runButton, result, steps);
+    const events = make("div", "admin-media-test__events");
+    events.hidden = true;
+    const eventsTitle = make("h3", "", "เหตุขัดข้องล่าสุดของที่เก็บรูป");
+    eventsTitle.id = "admin-media-test-events-title";
+    events.setAttribute("role", "region");
+    events.setAttribute("aria-labelledby", eventsTitle.id);
+    const eventsHelp = make("p", "admin-media-test__help", "การอัปโหลดหรือลบรูปที่ต้องลองซ้ำหรือไม่สำเร็จ 20 ครั้งล่าสุด (ใหม่สุดอยู่บน) ใช้แจ้งผู้ดูแลระบบได้");
+    const eventsEmpty = make("p", "admin-media-test__events-empty", "ยังไม่มีเหตุขัดข้องที่บันทึกไว้");
+    const eventsList = make("ol", "admin-media-test__events-list");
+    events.append(eventsTitle, eventsHelp, eventsEmpty, eventsList);
+    root.replaceChildren(title, help, runButton, result, steps, events);
     root.hidden = false;
 
     function show(text, tone) {
@@ -76,16 +104,27 @@
       steps.hidden = list.length === 0;
     }
 
+    // null = an older server that sends no events: the section stays hidden.
+    function showEvents(list) {
+      if (!Array.isArray(list)) { events.hidden = true; eventsList.replaceChildren(); return; }
+      eventsList.replaceChildren(...list.map((event) => make("li", "admin-media-test__event admin-media-test__event--" + (event.ok ? "ok" : "fail"), eventLine(event))));
+      eventsEmpty.hidden = list.length > 0;
+      eventsList.hidden = list.length === 0;
+      events.hidden = false;
+    }
+
     let running = false;
     async function run() {
       if (running) return;
       running = true;
       runButton.disabled = true;
       showSteps([]);
+      showEvents(null);
       show("กำลังทดสอบ…", "info");
       try {
         const data = await api.testMediaStorage(token);
         showSteps(data.steps);
+        showEvents(data.events);
         if (data.ok) show("เชื่อมต่อที่เก็บรูปได้ปกติ ผ่านครบ " + data.steps.length + " ขั้น", "ok");
         else show("เชื่อมต่อที่เก็บรูปไม่ได้ · " + failureHint(data.steps), "error");
       } catch (error) {

@@ -21,6 +21,12 @@ const browser = [process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES,
   process.env["PROGRAMFILES(X86)"] && path.join(process.env["PROGRAMFILES(X86)"], "Microsoft/Edge/Application/msedge.exe")].find((p) => p && fs.existsSync(p));
 assert.ok(browser, "Chrome or Edge is required");
 const url = (file) => pathToFileURL(path.join(root, file)).href;
+// Task 15 (5 Nov): storage events as the backend keeps them (oldest first); one tampered entry is dropped by the server.
+const SEEDED_EVENTS = [
+  { at: "2026-11-05T06:30:00.000Z", step: "HEAD health", attempts: "network, network, network", ok: false, ms: 3000 },
+  { at: "2026-11-05T06:59:27.123Z", step: "DELETE 800", attempts: "503, 503, 204", ok: true, ms: 3410 },
+  { at: "2026-11-05T07:00:00.000Z", step: "<img src=x onerror=alert(1)>", attempts: "403", ok: false, ms: 0 },
+  { at: "2026-11-05T07:36:46.000Z", step: "PUT 1600", attempts: "403", ok: false, ms: 0 }];
 
 function staticChecks() {
   const html = fs.readFileSync(path.join(root, "public/admin/settings.html"), "utf8");
@@ -62,7 +68,10 @@ const scenario = `(async () => {
   const read = () => ({ visible: visible(rootNode), tone: (rootNode.querySelector(".admin-media-test__result") || {}).dataset ? rootNode.querySelector(".admin-media-test__result").dataset.tone : "",
     icon: (rootNode.querySelector(".admin-media-test__result-icon") || {}).textContent || "", text: (rootNode.querySelector(".admin-media-test__result-text") || {}).textContent || "",
     role: rootNode.querySelector(".admin-media-test__result") && rootNode.querySelector(".admin-media-test__result").getAttribute("role"),
-    steps: Array.from(rootNode.querySelectorAll(".admin-media-test__step")).map((n) => n.textContent), all: rootNode.textContent, button: rootNode.querySelector(".admin-media-test__run") });
+    steps: Array.from(rootNode.querySelectorAll(".admin-media-test__step")).map((n) => n.textContent), all: rootNode.textContent, button: rootNode.querySelector(".admin-media-test__run"),
+    eventsVisible: visible(rootNode.querySelector(".admin-media-test__events")), eventsTitle: (rootNode.querySelector(".admin-media-test__events h3") || {}).textContent || "",
+    events: Array.from(rootNode.querySelectorAll(".admin-media-test__event")).filter(visible).map((n) => n.textContent),
+    eventsEmpty: visible(rootNode.querySelector(".admin-media-test__events-empty")) ? rootNode.querySelector(".admin-media-test__events-empty").textContent : "" });
   const run = async () => { const before = requests.length; read().button.click(); await until(() => requests.length > before && !read().button.disabled); const r = read(); delete r.button; return r; };
   // editor: nothing shown, nothing sent
   let c = TakhunAdminMediaStorageTest.init({ root: rootNode, api: TakhunAdminApi, token: ${JSON.stringify(EDITOR)}, role: "editor" });
@@ -72,6 +81,8 @@ const scenario = `(async () => {
   const initial = read(); delete initial.button;
   out.initial = Object.assign(initial, { requests: requests.length, title: rootNode.querySelector("h2").textContent, buttonText: rootNode.querySelector(".admin-media-test__run").textContent });
   out.pass = await run();
+  window.__setEvents(${JSON.stringify(JSON.stringify(SEEDED_EVENTS))});
+  out.withEvents = await run();
   window.__setKey("AKIDTESTx");
   out.wrongKey = await run();
   window.__setKey(null);
@@ -98,7 +109,9 @@ async function run(width) {
       await session.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: width < 900, screenWidth: width, screenHeight: 900 });
       await session.send("Runtime.addBinding", { name: "__backend" });
       await session.send("Runtime.addBinding", { name: "__setKeyBinding" });
+      await session.send("Runtime.addBinding", { name: "__setEventsBinding" });
       session.waitForEvent("Runtime.bindingCalled", (event) => {
+        if (event.name === "__setEventsBinding") { backend.props.MEDIA_R2_EVENTS = JSON.parse(event.payload); return false; }
         if (event.name === "__setKeyBinding") {
           const value = JSON.parse(event.payload);
           if (value === null) delete backend.props.R2_ACCESS_KEY_ID; else backend.props.R2_ACCESS_KEY_ID = value;
@@ -113,7 +126,7 @@ async function run(width) {
       const loaded = session.waitForEvent("Page.loadEventFired");
       await session.send("Page.navigate", { url: pathToFileURL(file).href });
       await loaded;
-      await session.evaluate(`window.__setKey = (value) => window.__setKeyBinding(JSON.stringify(value))`);
+      await session.evaluate(`window.__setKey = (value) => window.__setKeyBinding(JSON.stringify(value)); window.__setEvents = (text) => window.__setEventsBinding(JSON.stringify(text))`);
       return session.evaluate(scenario);
     }));
   } finally {
@@ -131,6 +144,15 @@ function check(out, width) {
 
   box(out.pass, "ok", "✓", "เชื่อมต่อที่เก็บรูปได้ปกติ ผ่านครบ 4 ขั้น");
   assert.deepEqual(out.pass.steps, ["เขียนไฟล์ทดสอบผ่าน", "ตรวจว่ามีไฟล์ผ่าน", "ลบไฟล์ทดสอบผ่าน", "ตรวจว่าไฟล์หายไปผ่าน"]);
+  // Storage events: an empty state first, then the kept events newest first, in Thai, Bangkok time, no key or URL.
+  assert.deepEqual([out.pass.eventsVisible, out.pass.eventsTitle, out.pass.events, out.pass.eventsEmpty],
+    [true, "เหตุขัดข้องล่าสุดของที่เก็บรูป", [], "ยังไม่มีเหตุขัดข้องที่บันทึกไว้"]);
+  assert.deepEqual([out.withEvents.eventsVisible, out.withEvents.eventsEmpty], [true, ""]);
+  assert.deepEqual(out.withEvents.events, [
+    "5 พ.ย. 14:36:46 · อัปโหลดรูปใหญ่ · ไม่สำเร็จ · ผลแต่ละครั้ง 403 · 0.0 วินาที",
+    "5 พ.ย. 13:59:27 · ลบรูปเล็ก · สำเร็จเมื่อลองซ้ำ · ผลแต่ละครั้ง 503, 503, 204 · 3.4 วินาที",
+    "5 พ.ย. 13:30:00 · ตรวจไฟล์ทดสอบ · ไม่สำเร็จ · ผลแต่ละครั้ง เชื่อมต่อไม่ได้, เชื่อมต่อไม่ได้, เชื่อมต่อไม่ได้ · 3.0 วินาที"]);
+  assert.doesNotMatch(out.withEvents.all, /<img|onerror/, "a tampered entry never reaches the page");
 
   box(out.wrongKey, "error", "✕", "เชื่อมต่อที่เก็บรูปไม่ได้ · ตรวจ R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY ใน Script Properties และสิทธิ์ของ token");
   assert.deepEqual(out.wrongKey.steps, ["เขียนไฟล์ทดสอบไม่ผ่าน (รหัส 400)", "ตรวจว่ามีไฟล์ไม่ผ่าน (รหัส 400)", "ลบไฟล์ทดสอบไม่ผ่าน (รหัส 400)", "ตรวจว่าไฟล์หายไปไม่ผ่าน (รหัส 400)"]);
@@ -142,8 +164,9 @@ function check(out, width) {
   assert.deepEqual(out.timeout.steps, []);
   box(out.again, "ok", "✓", "เชื่อมต่อที่เก็บรูปได้ปกติ ผ่านครบ 4 ขั้น");
 
-  assert.deepEqual(out.requests, Array(5).fill("adminTestMediaStorage"), "one request per press, never resent");
-  for (const r of [out.pass, out.wrongKey, out.config, out.again]) {
+  assert.deepEqual(out.requests, Array(6).fill("adminTestMediaStorage"), "one request per press, never resent");
+  assert.deepEqual([out.timeout.eventsVisible, out.again.eventsVisible, out.again.events.length], [false, true, 3], "no list without an answer; back on the next run");
+  for (const r of [out.pass, out.withEvents, out.wrongKey, out.config, out.again]) {
     assert.doesNotMatch(r.all, /uploads\/|healthcheck|AKID|sEcReT|r2\.cloudflarestorage|Credential=|Signature/, "no key, secret or URL on the page");
   }
   assert.ok(out.console.includes("warn: [media storage test] run: TIMEOUT"), JSON.stringify(out.console));

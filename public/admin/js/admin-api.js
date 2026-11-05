@@ -1157,12 +1157,28 @@
       return items && { items, changed: data.changed.slice(), audit_status: data.audit_status };
     }
     if (action === "adminTestMediaStorage") {
-      if (!exactKeys(data, ["ok", "steps"]) || typeof data.ok !== "boolean" || !Array.isArray(data.steps) || data.steps.length > PROBE_STEPS.length) return null;
+      // events (task 15, 5 Nov): the last storage events, newest first; optional so an older backend still works.
+      const hasEvents = exactKeys(data, ["ok", "steps", "events"]);
+      if (!hasEvents && !exactKeys(data, ["ok", "steps"]) || typeof data.ok !== "boolean" || !Array.isArray(data.steps) || data.steps.length > PROBE_STEPS.length) return null;
+      const events = hasEvents ? safeStorageEvents(data.events) : null;
+      if (hasEvents && !events) return null;
       const steps = data.steps.map((step) => exactKeys(step, ["step", "status", "ok"]) && PROBE_STEPS.includes(step.step) && typeof step.ok === "boolean" &&
         (Number.isSafeInteger(step.status) && step.status >= 100 && step.status <= 599 || step.status === "CONFIG" || step.status === "NETWORK") ? { step: step.step, status: step.status, ok: step.ok } : null);
-      return steps.every(Boolean) ? { ok: data.ok, steps } : null;
+      return steps.every(Boolean) ? { ok: data.ok, steps, events } : null;
     }
     return null;
+  }
+
+  // Exactly { at, step, attempts, ok, ms } per event, at most 20: never a key, URL or anything else.
+  function safeStorageEvents(value) {
+    if (!Array.isArray(value) || value.length > 20) return null;
+    const events = value.map((entry) => exactKeys(entry, ["at", "step", "attempts", "ok", "ms"]) &&
+      typeof entry.at === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(entry.at) && Number.isFinite(Date.parse(entry.at)) &&
+      typeof entry.step === "string" && /^(?:PUT|DELETE|HEAD) (?:1600|800|health)$/.test(entry.step) &&
+      typeof entry.attempts === "string" && /^(?:[1-5][0-9]{2}|network)(?:, (?:[1-5][0-9]{2}|network)){0,2}$/.test(entry.attempts) &&
+      typeof entry.ok === "boolean" && Number.isSafeInteger(entry.ms) && entry.ms >= 0 && entry.ms <= 600000
+      ? { at: entry.at, step: entry.step, attempts: entry.attempts, ok: entry.ok, ms: entry.ms } : null);
+    return events.every(Boolean) ? events : null;
   }
 
   function uploadIdList(value) {

@@ -187,10 +187,61 @@ function R2SigV4_log_(text) {
   try { console.warn(text); } catch (_logError) { /* logging must never break a storage call */ }
 }
 
-// Returns { status, etag, attempts: ["503", "200"] }. Throws R2_NETWORK when the last attempt got no response.
+// Storage events (task 15, 5 Nov): console output of anonymous web-app calls is not shown in Executions, so the last
+// 20 retried or failed calls are also kept in one Script Property and shown to the super_admin in the connection
+// test. Each event: { at (ISO, start of the call), step ("PUT 1600"), attempts ("503, 200"), ok, ms }. Never a key,
+// URL, signature or credential. Best effort: a failed write is ignored and two failures at the same moment may keep
+// only one of them. The script lock is never taken for this.
+var R2SigV4_EVENTS_PROPERTY_ = "MEDIA_R2_EVENTS";
+var R2SigV4_EVENTS_MAX_ = 20;
+var R2SigV4_EVENT_STEP_ = /^(?:PUT|DELETE|HEAD) (?:1600|800|health)$/;
+var R2SigV4_EVENT_ATTEMPTS_ = /^(?:[1-5][0-9]{2}|network)(?:, (?:[1-5][0-9]{2}|network)){0,2}$/;
+var R2SigV4_EVENT_AT_ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+function R2SigV4_safeEvent_(entry) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+  if (Object.keys(entry).sort().join(",") !== "at,attempts,ms,ok,step") return null;
+  if (typeof entry.at !== "string" || !R2SigV4_EVENT_AT_.test(entry.at) || typeof entry.step !== "string" || !R2SigV4_EVENT_STEP_.test(entry.step) ||
+      typeof entry.attempts !== "string" || !R2SigV4_EVENT_ATTEMPTS_.test(entry.attempts) || typeof entry.ok !== "boolean" ||
+      typeof entry.ms !== "number" || !isFinite(entry.ms) || entry.ms < 0 || entry.ms > 600000 || Math.floor(entry.ms) !== entry.ms) {
+    return null;
+  }
+  return { at: entry.at, step: entry.step, attempts: entry.attempts, ok: entry.ok, ms: entry.ms };
+}
+
+// Stored order: oldest first. Anything unreadable or unexpected is dropped.
+function R2SigV4_readEvents_(props) {
+  try {
+    var list = JSON.parse(props.getProperty(R2SigV4_EVENTS_PROPERTY_) || "[]");
+    if (!Array.isArray(list)) return [];
+    return list.map(R2SigV4_safeEvent_).filter(function (entry) { return entry !== null; }).slice(-R2SigV4_EVENTS_MAX_);
+  } catch (_readError) {
+    return [];
+  }
+}
+
+function R2SigV4_recordEvent_(method, key, attempts, ok, startedAt, endedAt) {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var entry = R2SigV4_safeEvent_({ at: new Date(startedAt).toISOString(), step: R2SigV4_step_(method, key), attempts: attempts.join(", "), ok: ok, ms: Math.max(0, Math.round(endedAt - startedAt)) });
+    if (!entry) return;
+    var list = R2SigV4_readEvents_(props);
+    list.push(entry);
+    props.setProperty(R2SigV4_EVENTS_PROPERTY_, JSON.stringify(list.slice(-R2SigV4_EVENTS_MAX_)));
+  } catch (_recordError) { /* never break or slow a storage call because of the event list */ }
+}
+
+// For the super_admin connection test: newest first.
+function R2SigV4_recentEvents_() {
+  try { return R2SigV4_readEvents_(PropertiesService.getScriptProperties()).reverse(); } catch (_eventsError) { return []; }
+}
+
+// Returns { status, etag, attempts: ["503", "200"], startedAt, endedAt }. Throws R2_NETWORK when the last attempt got
+// no response (after logging and recording it).
 function R2SigV4_send_(method, key, body) {
   var config = R2SigV4_config_();
   var attempts = [];
+  var startedAt = R2SigV4_now_();
   for (var attempt = 0; ; attempt += 1) {
     var request = R2SigV4_buildRequest_(method, key, body, config, new Date(R2SigV4_now_()));
     var started = R2SigV4_now_();
@@ -203,16 +254,17 @@ function R2SigV4_send_(method, key, body) {
       status = 0; // no response: DNS, connection or timeout (the message may contain the URL, so it is dropped)
     }
     attempts.push(status ? String(status) : "network");
-    if (!R2SigV4_retryable_(status)) return { status: status, etag: headers.ETag || headers.etag || "", attempts: attempts };
+    if (!R2SigV4_retryable_(status)) return { status: status, etag: headers.ETag || headers.etag || "", attempts: attempts, startedAt: startedAt, endedAt: R2SigV4_now_() };
     var now = R2SigV4_now_();
     var delay = R2SigV4_RETRY_DELAYS_MS_[attempt];
     var windowStart = R2SigV4_retryWindowStart_ || now;
     if (delay === undefined || now - started >= R2SigV4_RETRY_QUICK_MS_ || now + delay - windowStart > R2SigV4_RETRY_WINDOW_MS_) {
       if (!status) {
         R2SigV4_log_("R2 " + R2SigV4_step_(method, key) + " failed: " + attempts.join(", "));
+        R2SigV4_recordEvent_(method, key, attempts, false, startedAt, now);
         throw new Error("R2_NETWORK");
       }
-      return { status: status, etag: "", attempts: attempts };
+      return { status: status, etag: "", attempts: attempts, startedAt: startedAt, endedAt: now };
     }
     R2SigV4_retryWindowStart_ = windowStart;
     Utilities.sleep(delay);
@@ -223,9 +275,13 @@ function R2SigV4_send_(method, key, body) {
 function R2SigV4_result_(method, key, result, ok) {
   if (!ok) {
     R2SigV4_log_("R2 " + R2SigV4_step_(method, key) + " failed: " + result.attempts.join(", "));
+    R2SigV4_recordEvent_(method, key, result.attempts, false, result.startedAt, result.endedAt);
     throw new Error("R2_HTTP_" + result.status);
   }
-  if (result.attempts.length > 1) R2SigV4_log_("R2 " + R2SigV4_step_(method, key) + " ok after retry: " + result.attempts.join(", "));
+  if (result.attempts.length > 1) {
+    R2SigV4_log_("R2 " + R2SigV4_step_(method, key) + " ok after retry: " + result.attempts.join(", "));
+    R2SigV4_recordEvent_(method, key, result.attempts, true, result.startedAt, result.endedAt);
+  }
   return result;
 }
 

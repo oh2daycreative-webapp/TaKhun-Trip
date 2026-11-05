@@ -597,6 +597,7 @@ function MediaUploadService_probeStep_(name, method, key, body, expected) {
 // adminTestMediaStorage_: super_admin only; ignores the upload switch. Writes, checks and deletes a tiny file under
 // a fresh uploads/healthcheck/<64 hex>.webp key (one per run, so two runs never collide). The clean-up steps always
 // run. Returns step names and statuses only: never the key, R2 settings or signatures. No lock, no sheet write.
+// Also returns the recent storage events (R2SigV4_recentEvents_, newest first; read after this run's own steps).
 function adminTestMediaStorage_(token, payload) {
   return MediaUploadService_execute_(token, ["super_admin"], function () {
     if (payload !== undefined && (!payload || typeof payload !== "object" || Array.isArray(payload) || Object.keys(payload).length)) {
@@ -611,6 +612,6 @@ function adminTestMediaStorage_(token, payload) {
       steps.push(MediaUploadService_probeStep_("DELETE", "DELETE", key, null, [204, 200]));
       steps.push(MediaUploadService_probeStep_("GONE", "HEAD", key, null, [404]));
     }
-    return { ok: steps.every(function (step) { return step.ok; }), steps: steps };
+    return { ok: steps.every(function (step) { return step.ok; }), steps: steps, events: R2SigV4_recentEvents_() };
   });
 }

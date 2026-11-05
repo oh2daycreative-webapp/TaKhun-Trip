@@ -172,8 +172,21 @@ const plain = (v) => JSON.parse(JSON.stringify(v));
   await test("testMediaStorage: {} payload; steps validated (no keys or other fields allowed)", async () => {
     const steps = [{ step: "PUT", status: 200, ok: true }, { step: "EXISTS", status: 206, ok: true }, { step: "DELETE", status: 204, ok: true }, { step: "GONE", status: 404, ok: true }];
     const env = load(() => ok({ ok: true, steps }));
-    assert.deepEqual(plain(await env.api.testMediaStorage(TOKEN)), { ok: true, steps });
+    assert.deepEqual(plain(await env.api.testMediaStorage(TOKEN)), { ok: true, steps, events: null }, "an older backend without events still works");
     assert.deepEqual(env.calls[0], { action: "adminTestMediaStorage", token: TOKEN, payload: {} });
+    // Task 15 (5 Nov): the last storage events (newest first, at most 20), each with exactly these fields and formats.
+    const events = [{ at: "2026-11-05T07:36:46.000Z", step: "PUT 1600", attempts: "403", ok: false, ms: 0 },
+      { at: "2026-11-05T06:59:27.123Z", step: "DELETE 800", attempts: "503, 503, 204", ok: true, ms: 3410 },
+      { at: "2026-11-05T06:30:00.000Z", step: "HEAD health", attempts: "network, network, network", ok: false, ms: 3000 }];
+    const withEvents = load(() => ok({ ok: true, steps, events }));
+    assert.deepEqual(plain(await withEvents.api.testMediaStorage(TOKEN)), { ok: true, steps, events });
+    assert.deepEqual(plain(await load(() => ok({ ok: true, steps, events: [] })).api.testMediaStorage(TOKEN)).events, []);
+    for (const bad of [{ ...events[0], key: "uploads/places/x" }, { ...events[0], step: "<img src=x>" }, { ...events[0], attempts: "403, 200, 200, 200" },
+      { ...events[0], at: "yesterday" }, { ...events[0], ok: "no" }, { ...events[0], ms: -1 }]) {
+      assert.equal(await codeOf(() => load(() => ok({ ok: true, steps, events: [bad] })).api.testMediaStorage(TOKEN)), "MALFORMED_RESPONSE", JSON.stringify(bad));
+    }
+    assert.equal(await codeOf(() => load(() => ok({ ok: true, steps, events: Array(21).fill(events[0]) })).api.testMediaStorage(TOKEN)), "MALFORMED_RESPONSE", "at most 20");
+    assert.equal(await codeOf(() => load(() => ok({ ok: true, steps, events: "PUT 1600" })).api.testMediaStorage(TOKEN)), "MALFORMED_RESPONSE");
     const leak = load(() => ok({ ok: true, steps: [{ step: "PUT", status: 200, ok: true, key: "uploads/healthcheck/x" }] }));
     assert.equal(await codeOf(() => leak.api.testMediaStorage(TOKEN)), "MALFORMED_RESPONSE");
     const config = load(() => ok({ ok: false, steps: [{ step: "PUT", status: "CONFIG", ok: false }] }));

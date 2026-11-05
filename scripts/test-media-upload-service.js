@@ -83,6 +83,7 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
   const log = [], fetches = [], lockEvents = [], objects = new Set(), cacheStore = new Map(), cacheRemovals = [], sleeps = [], warnings = [];
   let lockHeld = false;
   const queue = statuses.slice();
+  const store = Object.assign({}, props); // Script Properties of this run (R2 storage events are written here)
   const sheets = {
     places: fakeSheet("places", [PLACE_HEADERS, ...(places || [[PLACE_ID, "สถานที่ทดสอบ", "published"], ["BTK-001", "บ้าน", "draft"], ["plc_under", "x", "published"]])], log),
     media_uploads: fakeSheet("media_uploads", [UPLOAD_HEADERS, ...uploads], log, uploadSheetOptions),
@@ -101,7 +102,7 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
   let uuid = 0;
   const context = {
     console: { log() {}, warn: (...parts) => warnings.push(parts.join(" ")) }, JSON, Date: class extends Date { constructor(...a) { if (a.length) super(...a); else super(now); } static now() { return Date.parse(now); } },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => (Object.prototype.hasOwnProperty.call(props, k) ? props[k] : null) }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => (Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null), setProperty: (k, v) => { store[k] = String(v); } }) },
     SpreadsheetApp: { openById: () => ({ getSheetByName: (n) => sheets[n] || null }), flush: () => log.push(["flush"]) },
     CacheService: { getScriptCache: () => ({
       get: (k) => (cacheStore.has(k) ? cacheStore.get(k) : null),
@@ -141,7 +142,7 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
   };
   vm.createContext(context);
   for (const [name, source] of SOURCES) vm.runInContext(source, context, { filename: `apps-script/${name}` });
-  return { context, sheets, log, fetches, lockEvents, objects, cacheRemovals, sleeps, warnings };
+  return { context, sheets, log, fetches, lockEvents, objects, cacheRemovals, sleeps, warnings, store };
 }
 
 (async () => {
@@ -822,7 +823,7 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
     const env = load({ admin: ROOT_ADMIN });
     const res = probe(env);
     assert.equal(res.ok, true, JSON.stringify(res));
-    assert.deepEqual(res.data, { ok: true, steps: [{ step: "PUT", status: 200, ok: true }, { step: "EXISTS", status: 206, ok: true }, { step: "DELETE", status: 204, ok: true }, { step: "GONE", status: 404, ok: true }] });
+    assert.deepEqual(res.data, { ok: true, steps: [{ step: "PUT", status: 200, ok: true }, { step: "EXISTS", status: 206, ok: true }, { step: "DELETE", status: 204, ok: true }, { step: "GONE", status: 404, ok: true }], events: [] });
     assert.deepEqual(env.fetches.map((f) => f.method), ["put", "get", "delete", "get"]);
     assert.ok(env.fetches.every((f) => /^uploads\/healthcheck\/[a-f0-9]{64}\.webp$/.test(f.key) && f.key === env.fetches[0].key && !f.lockHeld));
     assert.deepEqual([writes(env).length, env.lockEvents.length, env.objects.size], [0, 0, 0]);
@@ -851,6 +852,19 @@ function load({ props = PROPS, admin = { admin_id: "ADM-editor", role: "editor" 
     const network = probe(load({ admin: ROOT_ADMIN, statuses: [new Error("Address unavailable: https://0123.r2.cloudflarestorage.com/x"), new Error("Address unavailable: https://0123.r2.cloudflarestorage.com/x"), new Error("Address unavailable: https://0123.r2.cloudflarestorage.com/x")] }));
     assert.equal(network.data.steps[0].status, "NETWORK");
     assert.equal(network.data.ok, false);
+  });
+
+  await test("8: the result lists the recent storage events (newest first, after its own steps): none yet, then a refused upload", () => {
+    const env = load({ admin: ROOT_ADMIN });
+    assert.deepEqual(probe(env).data.events, [], "nothing went wrong yet");
+    env.context.R2SigV4_now_ = () => Date.parse("2026-11-05T07:36:46.000Z");
+    const refused = load({ admin: ROOT_ADMIN, statuses: [403] });
+    refused.context.R2SigV4_now_ = () => Date.parse("2026-11-05T07:36:46.000Z");
+    assert.equal(upload(refused).error.code, "STORAGE_ERROR");
+    const listed = probe(refused).data;
+    assert.equal(listed.ok, true, "the probe itself passes");
+    assert.deepEqual(listed.events, [{ at: "2026-11-05T07:36:46.000Z", step: "PUT 1600", attempts: "403", ok: false, ms: 0 }]);
+    assert.deepEqual(Object.keys(listed).sort(), ["events", "ok", "steps"]);
   });
 
   await test("8: the result never shows keys, R2 settings, signatures or storage URLs; payload must be empty", () => {

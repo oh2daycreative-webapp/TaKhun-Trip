@@ -25,6 +25,7 @@ const toBuffer = (bytes) => { assert.ok(Array.isArray(bytes), "Apps Script byte 
 
 function load({ props = {}, fetch, start = Date.parse("2026-11-05T06:00:00.000Z") } = {}) {
   const calls = [], sleeps = [], logs = [], clock = { t: start };
+  const store = Object.assign({}, props); // Script Properties of this run (the R2 events are written here)
   const context = {
     console: { warn: (...parts) => logs.push(parts.join(" ")) },
     Utilities: {
@@ -38,13 +39,14 @@ function load({ props = {}, fetch, start = Date.parse("2026-11-05T06:00:00.000Z"
       },
       sleep: (ms) => { sleeps.push(ms); clock.t += ms; }
     },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: (name) => (Object.prototype.hasOwnProperty.call(props, name) ? props[name] : null) }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: (name) => (Object.prototype.hasOwnProperty.call(store, name) ? store[name] : null),
+      setProperty: (name, value) => { if (store.__failWrites) throw new Error("quota"); store[name] = String(value); } }) },
     UrlFetchApp: { fetch: (url, options) => { calls.push({ url, options }); return fetch ? fetch(url, options) : { getResponseCode: () => 200, getHeaders: () => ({ ETag: "\"e\"" }) }; } }
   };
   vm.createContext(context);
   vm.runInContext(SOURCE, context, { filename: "apps-script/R2SigV4.gs" });
   context.R2SigV4_now_ = () => clock.t; // a controllable clock (the real one is Date.now)
-  return { context, calls, sleeps, logs, clock };
+  return { context, calls, sleeps, logs, clock, store };
 }
 
 // Parses an aws-c-auth request.txt into method, path, query pairs, headers and body.
@@ -298,6 +300,60 @@ test("log lines carry the step and status only: never the key, account, bucket, 
       assert.equal(line.includes(secret), false, secret + " in " + line);
     }
   }
+});
+
+// Task 15, 5 Nov: the log line above is not visible in Executions for anonymous web-app calls, so the last 20 storage
+// events are also kept in one Script Property and shown to the super_admin in the connection test.
+const event = (env, i) => JSON.parse(env.store.MEDIA_R2_EVENTS)[i];
+test("storage events: a retried or failed call is kept in MEDIA_R2_EVENTS (time, step, attempts, ok, ms); a plain call adds nothing", () => {
+  const fine = retryEnv([200]);
+  fine.context.r2PutObject_(KEY_WEBP, BODY);
+  assert.equal(fine.store.MEDIA_R2_EVENTS, undefined, "nothing written when nothing went wrong");
+  const recovered = retryEnv([{ status: 503, ms: 300 }, { status: 200, ms: 200 }]);
+  recovered.context.r2PutObject_(KEY_SMALL, BODY);
+  assert.deepEqual(event(recovered, 0), { at: "2026-11-05T06:00:00.000Z", step: "PUT 800", attempts: "503, 200", ok: true, ms: 1500 });
+  const failed = retryEnv([403]);
+  assert.throws(() => failed.context.r2DeleteObject_(KEY_WEBP), /R2_HTTP_403/);
+  assert.deepEqual(event(failed, 0), { at: "2026-11-05T06:00:00.000Z", step: "DELETE 1600", attempts: "403", ok: false, ms: 0 });
+  const offline = retryEnv([new Error("x"), new Error("x"), new Error("x")]);
+  assert.throws(() => offline.context.r2HeadObject_(KEY_WEBP), /R2_NETWORK/);
+  assert.deepEqual([event(offline, 0).step, event(offline, 0).attempts, event(offline, 0).ok, event(offline, 0).ms], ["HEAD 1600", "network, network, network", false, 3000]);
+  const missing = retryEnv([404]);
+  assert.equal(missing.context.r2HeadObject_(KEY_WEBP).exists, false);
+  assert.equal(missing.store.MEDIA_R2_EVENTS, undefined, "a missing file is an answer, not an event");
+});
+
+test("storage events: only the last 20 are kept, newest first when read; a broken or tampered value is ignored, never shown", () => {
+  const env = retryEnv(Array.from({ length: 25 }, () => 403));
+  for (let i = 0; i < 25; i += 1) { env.clock.t += 1000; assert.throws(() => env.context.r2PutObject_(KEY_WEBP, BODY)); }
+  const stored = JSON.parse(env.store.MEDIA_R2_EVENTS);
+  assert.equal(stored.length, 20);
+  assert.equal(stored[0].at, new Date(Date.parse("2026-11-05T06:00:00.000Z") + 6000).toISOString(), "the 5 oldest were dropped");
+  const recent = JSON.parse(JSON.stringify(env.context.R2SigV4_recentEvents_()));
+  assert.equal(recent.length, 20);
+  assert.equal(recent[0].at, new Date(Date.parse("2026-11-05T06:00:00.000Z") + 25000).toISOString(), "newest first");
+  assert.ok(env.store.MEDIA_R2_EVENTS.length < 9000, "fits one Script Property (9 KB)");
+  for (const bad of ["not json", "{}", JSON.stringify([{ at: "x", step: "PUT 1600", attempts: "403", ok: false, ms: 0 }, { at: "2026-11-05T06:00:00.000Z", step: "<img src=x>", attempts: "403", ok: false, ms: 0 },
+    { at: "2026-11-05T06:00:00.000Z", step: "PUT 1600", attempts: "403", ok: false, ms: 0, key: "uploads/places/x" }, { at: "2026-11-05T06:00:00.000Z", step: "PUT 1600", attempts: "403", ok: false, ms: 0 }])]) {
+    const other = retryEnv([]);
+    other.store.MEDIA_R2_EVENTS = bad;
+    const list = JSON.parse(JSON.stringify(other.context.R2SigV4_recentEvents_()));
+    assert.ok(list.every((e) => Object.keys(e).sort().join() === "at,attempts,ms,ok,step" && /^(PUT|DELETE|HEAD) /.test(e.step)), bad);
+    assert.ok(list.length <= 1, bad);
+  }
+});
+
+test("storage events: a failed Script Property write never breaks or slows the storage call", () => {
+  const env = retryEnv([503, 200]);
+  env.store.__failWrites = true;
+  assert.equal(env.context.r2PutObject_(KEY_WEBP, BODY).status, 200);
+  const denied = retryEnv([403]);
+  denied.store.__failWrites = true;
+  assert.throws(() => denied.context.r2PutObject_(KEY_WEBP, BODY), /R2_HTTP_403/, "the real error, not the logging error");
+  const hash = KEY_WEBP.match(/[a-f0-9]{32}/)[0];
+  const recovered = retryEnv([503, 200]);
+  recovered.context.r2PutObject_(KEY_WEBP, BODY);
+  for (const secret of [CONFIG.secretAccessKey, CONFIG.accessKeyId, CONFIG.accountId, CONFIG.bucket, hash, "http", "uploads/"]) assert.equal(recovered.store.MEDIA_R2_EVENTS.includes(secret), false, secret);
 });
 
 test("no top-level calls to Apps Script services (safe in any file load order)", () => {
