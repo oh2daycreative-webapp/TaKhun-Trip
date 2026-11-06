@@ -243,6 +243,8 @@ if ($LASTEXITCODE -ne 0) { throw "Admin Place map verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin Place media verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-place-media-browser.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Place media native browser verification failed." }
+& node (Join-Path $PSScriptRoot "test-production-config.js")
+if ($LASTEXITCODE -ne 0) { throw "Production config verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-image-resize.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin image resize verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-image-resize-browser.js")
