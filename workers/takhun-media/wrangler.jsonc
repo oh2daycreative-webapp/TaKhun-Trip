@@ -1,0 +1,23 @@
+// takhun-media: read-only image server for uploaded place photos (task 14). Not deployed from this repo by Claude.
+// - production (top level): bucket takhun-media-prod; deployed by the owner at the production release (phase 1 step).
+// - env.staging: the staging copy "takhun-media-staging", bucket takhun-media-staging (D14); the owner deploys it from
+//   the Cloudflare dashboard (reports\media-worker-staging-deploy-th.md), pasting src/index.mjs.
+// workers.dev only: no routes and no custom domains. Lives outside public/, so Cloudflare Pages never builds it.
+{
+  "name": "takhun-media",
+  "main": "src/index.mjs",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "r2_buckets": [
+    { "binding": "MEDIA_BUCKET", "bucket_name": "takhun-media-prod" }
+  ],
+  "env": {
+    "staging": {
+      "name": "takhun-media-staging",
+      "workers_dev": true,
+      "r2_buckets": [
+        { "binding": "MEDIA_BUCKET", "bucket_name": "takhun-media-staging" }
+      ]
+    }
+  }
+}

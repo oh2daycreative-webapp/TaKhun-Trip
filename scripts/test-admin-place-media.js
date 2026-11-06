@@ -106,11 +106,11 @@ async function test(name, fn) {
     });
     assert.deepEqual(plain(calls), [{ place_id: "PLC-A", role: "gallery", page: 1, page_size: 20 }]);
     assert.match(nodes.hero.children[0].textContent, /place-plc-a-cover/);
-    assert.equal(nodes.hero.children[1].src, "assets/media/generated/places/place-plc-a-cover-640.webp");
+    assert.equal(nodes.hero.children[1].src, "../assets/media/generated/places/place-plc-a-cover-640.webp", "F-31: admin pages are one folder below the site root");
     assert.deepEqual(plain(component.getSelected()), ["place-plc-a-gallery-b"]);
     assert.equal(nodes.options.textContent.includes("PLC-OTHER"), false);
     assert.equal(nodes.options.querySelectorAll("button").every((button) => button.getAttribute("aria-label") && !button.innerHTML), true);
-    assert.equal(nodes.options.children.every((button) => button.children[0].src.startsWith("assets/media/generated/places/")), true);
+    assert.equal(nodes.options.children.every((button) => button.children[0].src.startsWith("../assets/media/generated/places/")), true);
     for (const node of [nodes.searchForm, nodes.previous, nodes.next, nodes.page]) assert.equal(node.hidden, false);
     assert.equal(nodes.searchInput.disabled, false);
     assert.equal(nodes.searchButton.disabled, false);

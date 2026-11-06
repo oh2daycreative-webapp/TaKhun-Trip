@@ -23,7 +23,7 @@
   function preview(item, className) {
     const output = item.outputs[item.outputs.length - 1];
     const image = make("img", className);
-    image.src = output.path;
+    image.src = "../" + output.path; // site-root path; admin pages are one folder down (F-31)
     image.width = output.width;
     image.height = output.height;
     image.alt = item.alt_th || item.alt_en || item.media_id;

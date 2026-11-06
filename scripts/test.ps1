@@ -54,6 +54,9 @@ $required = @(
   "public/admin/js/admin-places.js",
   "public/admin/js/admin-place-map.js",
   "public/admin/js/admin-place-media.js",
+  "public/admin/js/admin-image-resize.js",
+  "public/admin/js/admin-place-uploads.js",
+  "public/admin/js/admin-media-storage-test.js",
   "public/admin/js/admin-place-edit.js",
   "public/admin/js/admin-gallery.js",
   "public/admin/js/admin-reviews.js",
@@ -145,6 +148,10 @@ foreach ($html in $htmlFiles) {
 & (Join-Path $PSScriptRoot "test-content-safety.ps1")
 & node (Join-Path $PSScriptRoot "test-media.js")
 if ($LASTEXITCODE -ne 0) { throw "Media pipeline verification failed." }
+& node (Join-Path $PSScriptRoot "test-media-uploads-real-path.js")
+if ($LASTEXITCODE -ne 0) { throw "Public upload layer real-path verification failed." }
+& node (Join-Path $PSScriptRoot "test-media-worker.mjs")
+if ($LASTEXITCODE -ne 0) { throw "Media Worker verification failed." }
 & node (Join-Path $PSScriptRoot "test-content-data.js")
 if ($LASTEXITCODE -ne 0) { throw "Canonical content data verification failed." }
 & node (Join-Path $PSScriptRoot "test-content-integration.js")
@@ -184,6 +191,8 @@ if ($LASTEXITCODE -ne 0) { throw "i18n behavior verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Public API client behavior verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-api.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin API transport verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-place-uploads-api.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin place uploads API verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-auth.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin browser auth verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-shell.js")
@@ -208,6 +217,8 @@ if ($LASTEXITCODE -ne 0) { throw "Admin Settings API verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin Settings UI verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-settings-browser.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Settings native browser verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-media-storage-test-ui.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin media storage connection test UI verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-review-service.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Review service verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-reviews-api.js")
@@ -230,6 +241,18 @@ if ($LASTEXITCODE -ne 0) { throw "Admin Place editor verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Admin Place map verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-place-media.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Place media verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-place-media-browser.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin Place media native browser verification failed." }
+& node (Join-Path $PSScriptRoot "test-production-config.js")
+if ($LASTEXITCODE -ne 0) { throw "Production config verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-image-resize.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin image resize verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-image-resize-browser.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin image resize native browser verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-place-uploads-ui.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin place uploads UI native browser verification failed." }
+& node (Join-Path $PSScriptRoot "test-admin-place-uploads-real-path.js")
+if ($LASTEXITCODE -ne 0) { throw "Admin place uploads real-path browser verification failed." }
 & node (Join-Path $PSScriptRoot "test-admin-place-regressions.js")
 if ($LASTEXITCODE -ne 0) { throw "Admin Place integrated regression verification failed." }
 & node (Join-Path $PSScriptRoot "test-crypto-service.js")
@@ -286,6 +309,16 @@ if ($LASTEXITCODE -ne 0) { throw "SearchService verification failed." }
 if ($LASTEXITCODE -ne 0) { throw "Apps Script static verification failed." }
 & node (Join-Path $PSScriptRoot "test-apps-script-load-order.js")
 if ($LASTEXITCODE -ne 0) { throw "Apps Script load-order verification failed." }
+& node (Join-Path $PSScriptRoot "test-r2-sigv4.js")
+if ($LASTEXITCODE -ne 0) { throw "R2 SigV4 signing verification failed." }
+& node (Join-Path $PSScriptRoot "test-media-image-check.js")
+if ($LASTEXITCODE -ne 0) { throw "Media image byte-check verification failed." }
+& node (Join-Path $PSScriptRoot "test-media-upload-schema.js")
+if ($LASTEXITCODE -ne 0) { throw "media_uploads schema verification failed." }
+& node (Join-Path $PSScriptRoot "test-media-upload-service.js")
+if ($LASTEXITCODE -ne 0) { throw "Media upload service verification failed." }
+& node (Join-Path $PSScriptRoot "test-media-upload-public.js")
+if ($LASTEXITCODE -ne 0) { throw "Media upload public read verification failed." }
 & node (Join-Path $PSScriptRoot "test-routes.js")
 if ($LASTEXITCODE -ne 0) { throw "Routes behavior verification failed." }
 & node (Join-Path $PSScriptRoot "test-trip-planner.js")

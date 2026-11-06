@@ -18,6 +18,8 @@ function routeRequest_(method, event) {
           return createJsonResponse_(getPlaceDetail_(parameters));
         case "getMapPlaces":
           return createJsonResponse_(getMapPlaces_(parameters));
+        case "getPlaceUploads":
+          return createJsonResponse_(getPlaceUploads_(parameters));
         case "getRoutes":
           return createJsonResponse_(getRoutes_(parameters));
         case "getRouteDetail":
@@ -106,6 +108,12 @@ function routeRequest_(method, event) {
         if (action === "adminRestorePlace") return createJsonResponse_(adminRestorePlace_(body.token, body.payload));
         if (action === "adminGetPlaceMediaOptions") return createJsonResponse_(adminGetPlaceMediaOptions_(body.token, body.payload));
         if (action === "adminInspectPlaceCreateDestinations") return createJsonResponse_(adminInspectPlaceCreateDestinations_(body.token, body.payload));
+        if (action === "adminUploadPlaceImage") return createJsonResponse_(adminUploadPlaceImage_(body.token, body.payload));
+        if (action === "adminGetPlaceUploads") return createJsonResponse_(adminGetPlaceUploads_(body.token, body.payload));
+        if (action === "adminDeletePlaceUpload") return createJsonResponse_(adminDeletePlaceUpload_(body.token, body.payload));
+        if (action === "adminRetryPlaceUploadDeletes") return createJsonResponse_(adminRetryPlaceUploadDeletes_(body.token, body.payload));
+        if (action === "adminSavePlaceUploads") return createJsonResponse_(adminSavePlaceUploads_(body.token, body.payload));
+        if (action === "adminTestMediaStorage") return createJsonResponse_(adminTestMediaStorage_(body.token, body.payload));
       }
     }
 

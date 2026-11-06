@@ -289,7 +289,7 @@ const EXPECTED_READ_ACTIONS = Object.freeze([
   "adminGetDashboard", "adminGetSettings", "adminGetPlaces", "adminGetPlaceDetail", "adminGetPlaceMediaOptions",
   "adminGetGalleryMediaOptions", "adminInspectPlaceDependencies", "adminGetProducts", "adminGetProductDetail",
   "adminGetEvents", "adminGetEventDetail", "adminGetRoutes", "adminGetRouteDetail", "adminGetGallery",
-  "adminGetGalleryDetail", "adminGetReviews", "adminGetReviewDetail"
+  "adminGetGalleryDetail", "adminGetReviews", "adminGetReviewDetail", "adminGetPlaceUploads"
 ]);
 function expectedTimeout(action) {
   if (EXPECTED_SESSION_ACTIONS.includes(action)) return SESSION_TIMEOUT_MS;
@@ -380,7 +380,7 @@ function test(name, run) {
 
 test("exports exactly the frozen approved Admin facade surface", async () => {
   const { api } = loadAdminApi();
-  assert.deepEqual(Object.keys(api).sort(), ["login", "logout", "validateSession", "getDashboard", ...Object.keys(PLACE_METHODS), "getProducts", "getProductDetail", "createProduct", "updateProduct", "deleteProduct", "getEvents", "getEventDetail", "createEvent", "updateEvent", "deleteEvent", "getRoutes", "getRouteDetail", "createRoute", "updateRoute", "deleteRoute", "getGallery", "getGalleryDetail", "getGalleryMediaOptions", "createGalleryItem", "updateGalleryItem", "deleteGalleryItem", "getReviews", "getReviewDetail", "approveReview", "hideReview", "replyReview", "clearReviewReply", "deleteReview", "getSettings", "updateSettings"].sort());
+  assert.deepEqual(Object.keys(api).sort(), ["login", "logout", "validateSession", "getDashboard", ...Object.keys(PLACE_METHODS), "getProducts", "getProductDetail", "createProduct", "updateProduct", "deleteProduct", "getEvents", "getEventDetail", "createEvent", "updateEvent", "deleteEvent", "getRoutes", "getRouteDetail", "createRoute", "updateRoute", "deleteRoute", "getGallery", "getGalleryDetail", "getGalleryMediaOptions", "createGalleryItem", "updateGalleryItem", "deleteGalleryItem", "getReviews", "getReviewDetail", "approveReview", "hideReview", "replyReview", "clearReviewReply", "deleteReview", "getSettings", "updateSettings", "getPlaceUploads", "uploadPlaceImage", "deletePlaceUpload", "retryPlaceUploadDeletes", "savePlaceUploads", "testMediaStorage"].sort());
   assert.equal(Object.isFrozen(api), true);
   for (const name of Object.keys(api)) assert.equal(typeof api[name], "function");
   for (const forbidden of ["request", "call", "rawFetch", "dispatch"]) assert.equal(forbidden in api, false);
@@ -953,7 +953,10 @@ test("simultaneous requests isolate controllers timers bodies and failures", asy
 });
 
 test("source excludes storage UI redirects retries GET and secret logging", async () => {
-  assert.doesNotMatch(productionSource, /sessionStorage|localStorage|indexedDB|document\s*\.|location\s*=|console\s*\.|\bLogger\b|\bretr(?:y|ies|ied)\b|method\s*:\s*["']GET["']/i);
+  // Task 11: adminRetryPlaceUploadDeletes (owner-triggered file deletes, not a resend) answers with a count field
+  // named "retried"; only that field name is exempt, in exactly these spellings.
+  const guarded = productionSource.replace(/"retried"|\bdata\.retried\b|\bretried: /g, "");
+  assert.doesNotMatch(guarded, /sessionStorage|localStorage|indexedDB|document\s*\.|location\s*=|console\s*\.|\bLogger\b|\bretr(?:y|ies|ied)\b|method\s*:\s*["']GET["']/i);
   assert.doesNotMatch(productionSource, /Authorization/i);
 });
 
